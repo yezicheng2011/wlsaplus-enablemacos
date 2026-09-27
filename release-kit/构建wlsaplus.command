@@ -103,6 +103,10 @@ fi
 cd "$PROJECT_DIR"
 
 echo "    当前目录：$(pwd)"
+if [ -d .git ]; then
+  echo "    Git 提交：$(git rev-parse --short HEAD 2>/dev/null || echo unknown) $(git log -1 --pretty=%s 2>/dev/null || true)"
+  echo "    请确认至少包含白屏修复 2ea0edc 或更新提交"
+fi
 echo ""
 
 # 取消项目目录已有下载文件的隔离属性
@@ -124,6 +128,14 @@ echo ""
 echo "==> npm 依赖安装完成，开始构建 macOS 包..."
 
 npm run electron:make
+
+if [ ! -f "./dist/wlsaplus/browser/index.html" ]; then
+  echo ""
+  echo "❌ 构建后缺少 dist/wlsaplus/browser/index.html，安装包会白屏。"
+  echo "   请把上面的构建日志发给我。"
+  read -n 1 -s -r -p "按任意键关闭..."
+  exit 1
+fi
 
 # ===== 最终构建产物取消隔离 =====
 echo ""

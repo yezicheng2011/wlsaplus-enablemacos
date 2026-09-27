@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const nodeHttps = require('node:https');
 const nodeNet = require('node:net');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
 const { autoUpdater } = require('electron-updater');
 const { VPN_CONNECTION_MODES, buildVpnConfig } = require('./vpn-config.cjs');
@@ -53,13 +54,30 @@ const appSession = () => session.fromPartition('persist:wlsaplus');
 const iconPath = () => path.join(__dirname, '..', 'build', 'icon.png');
 
 function rendererIndexPath() {
-  return path.join(__dirname, '..', 'dist', 'wlsaplus', 'browser', 'index.html');
+  return path.resolve(__dirname, '..', 'dist', 'wlsaplus', 'browser', 'index.html');
 }
 
 function appUrl(route = '') {
   const dev = process.env.WLSAPLUS_DEV_URL;
-  if (dev) return `${dev}/#/${route}`;
-  return `file://${rendererIndexPath().replace(/\\/g, '/')}#/${route}`;
+  const hash = route ? `#/${route}` : '#/';
+  if (dev) return `${dev.replace(/\/$/, '')}/${hash}`;
+  // Prefer a resolved file URL so asar paths never keep unexpanded "..".
+  return `${pathToFileURL(rendererIndexPath()).href}${hash}`;
+}
+
+async function loadRenderer(win, route = '') {
+  const dev = process.env.WLSAPLUS_DEV_URL;
+  if (dev) {
+    await win.loadURL(appUrl(route));
+    return;
+  }
+  const indexFile = rendererIndexPath();
+  const { existsSync } = require('node:fs');
+  if (!existsSync(indexFile)) {
+    console.error(`WLSAPlus UI missing at ${indexFile}. Run npm run build:web before packaging or starting Electron.`);
+  }
+  // loadFile is the reliable way to open UI from asar on macOS.
+  await win.loadFile(indexFile, { hash: route ? `/${route}` : '/' });
 }
 
 function webPreferences(overrides = {}) {
@@ -896,13 +914,12 @@ function createMainWindow(route = '') {
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3 = aborted
     console.error(`Renderer failed to load (${errorCode}): ${errorDescription} @ ${validatedURL}`);
+    const message = `WLSAPlus UI failed to load (${errorCode}): ${errorDescription}\n${validatedURL}\nIndex: ${rendererIndexPath()}`;
+    void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><meta charset=utf-8><title>WLSAPlus load error</title><pre style="padding:24px;font:14px/1.4 system-ui">${message.replace(/</g, '&lt;')}</pre>`)}`);
   });
-  const indexFile = rendererIndexPath();
-  const { existsSync } = require('node:fs');
-  if (!process.env.WLSAPLUS_DEV_URL && !existsSync(indexFile)) {
-    console.error(`WLSAPlus UI missing at ${indexFile}. Run npm run build:web before packaging or starting Electron.`);
-  }
-  mainWindow.loadURL(appUrl(route));
+  void loadRenderer(mainWindow, route).catch((error) => {
+    console.error('WLSAPlus failed to load renderer:', error);
+  });
 }
 
 function showMainWindow(route = '') {
@@ -910,7 +927,7 @@ function showMainWindow(route = '') {
     createMainWindow(route);
     return;
   }
-  if (route) void mainWindow.loadURL(appUrl(route));
+  if (route) void loadRenderer(mainWindow, route).catch((error) => console.error('WLSAPlus failed to load renderer:', error));
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
