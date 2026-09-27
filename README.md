@@ -1,42 +1,32 @@
-# WLSAPlus
+# WLSAPlus (macOS)
 
-WLSAPlus is a local-first PowerSchool schedule and task application built from one Angular Material 3 codebase for Web/PWA, Android, Windows, and macOS.
+WLSAPlus is a local-first PowerSchool schedule and task application built from an Angular Material 3 codebase, packaged for **macOS** with Electron.
 
 ## Development
 
-```powershell
+```bash
 npm install
 npm start
 ```
 
-Open `http://localhost:4200`. Direct PowerSchool sync is available in the Electron and Android packages; browsers cannot bypass the school's CORS policy.
+Open `http://localhost:4200`. Direct PowerSchool sync is available in the Electron package; browsers cannot bypass the school's CORS policy.
 
 The native app syncs on launch, when you press `Sync now`, and every 15 minutes while it is open. Each sync requests the current PowerSchool schedule pages, so the week and dates roll over automatically. If a sync is unavailable, the previous local snapshot remains usable.
 
-On Windows, desktop cards are frameless, always on top, hidden from the taskbar, and their positions are saved. Card launch at Windows startup is enabled by default and can be changed in Settings.
-
-The Windows VPN supports a low-permission web proxy and an administrator-enabled full-device mode. Full-device mode uses a strict sing-box TUN route for TCP, UDP, IPv4/IPv6, and tunneled DNS; the web proxy remains available as a compatibility fallback.
-
-```powershell
+```bash
 npm test
 npm run build:web
 npm run electron:dev
-npm run android:build
+npm run electron:make
 ```
+
+`electron:make` produces macOS DMG and ZIP packages via Electron Forge (requires a macOS host).
 
 ## Releases
 
-Open **Actions > Build and release > Run workflow**, enter a semantic version such as `1.2.0`, and run it. The workflow applies that version to the frontend, Android, Windows, and macOS packages, creates tag `v1.2.0`, and publishes the APK, Windows installer, and macOS DMG/ZIP to a GitHub Release. Pushing a `v*` tag directly is also supported.
+Open **Actions > Build and release > Run workflow**, enter a semantic version such as `1.2.0`, and run it. The workflow applies that version, creates tag `v1.2.0`, and publishes the macOS DMG/ZIP to a GitHub Release. Pushing a `v*` tag directly is also supported.
 
 Normal branch pushes do not run the release workflow.
-
-Required Android release signing secrets:
-
-- Android: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
-
-Android releases use the regular `cn.org.wlsash.wlsaplus` package and a permanent signing key. The action verifies the signature, 16 KiB ZIP alignment, and that the APK is not debuggable before publishing. It fails if signing secrets are missing. Local Phone Preview builds remain separate debug builds.
-
-Keep an offline backup of the signing keystore and password. Losing the key prevents future updates to installed copies. Version 1.0.7 introduces permanent release signing; older temporary debug-signed APKs cannot be updated in place with the new key. Removing an old app also removes its local data.
 
 Optional macOS signing secrets:
 
@@ -51,14 +41,14 @@ The recorder opens PowerSchool in a temporary Chromium profile and records netwo
 
 ### Setup
 
-```powershell
+```bash
 npm install
 npx playwright install chromium
 ```
 
 ### Record
 
-```powershell
+```bash
 npm run record:powerschool -- --url "https://your-school-powerschool.example.com/" --duration 90
 ```
 

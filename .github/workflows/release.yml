@@ -50,109 +50,6 @@ jobs:
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "Building WLSAPlus $version (publish: $publish)"
 
-  android:
-    needs: prepare
-    runs-on: ubuntu-latest
-    env:
-      WLSAPLUS_VERSION: ${{ needs.prepare.outputs.version }}
-      WLSAPLUS_VERSION_CODE: ${{ github.run_number }}
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Require persistent Android signing
-        shell: bash
-        run: |
-          for field in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!field}" ]; then
-              echo "Missing repository secret: $field. Refusing to publish a temporary debug-signed APK." >&2
-              exit 1
-            fi
-          done
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 21, cache: gradle }
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.27.1', cache-dependency-path: phone-network/go.sum }
-      - uses: android-actions/setup-android@v3
-      - name: Install Android native toolchain
-        run: sdkmanager 'ndk;28.2.13676358' 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Test phone network
-        working-directory: phone-network
-        run: go test -race ./...
-      - name: Install phone relay test dependencies
-        working-directory: phone-relay-worker
-        run: npm ci
-      - name: Test phone relay and native integration
-        working-directory: phone-relay-worker
-        run: |
-          npm test
-          npm run test:native
-      - run: npm ci
-      - run: npm run version:apply
-      - run: npm run capacitor:sync
-      - run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" npm run phone:network:android
-      - name: Restore Android signing key
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/wlsaplus.jks"
-      - name: Build APK
-        run: |
-          cd android
-          chmod +x gradlew
-          export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/wlsaplus.jks"
-          ./gradlew assembleRelease
-      - name: Verify Android release package
-        run: |
-          apk=android/app/build/outputs/apk/release/app-release.apk
-          tools="$ANDROID_HOME/build-tools/36.0.0"
-          "$tools/apksigner" verify --verbose "$apk"
-          "$tools/zipalign" -c -P 16 4 "$apk"
-          badging="$("$tools/aapt" dump badging "$apk")"
-          [[ "$badging" == *"package: name='cn.org.wlsash.wlsaplus'"* ]]
-          [[ "$badging" != *"application-debuggable"* ]]
-      - name: Stage APK
-        run: |
-          mkdir -p release-assets
-          cp android/app/build/outputs/apk/release/app-release.apk "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-Android.apk"
-      - uses: actions/upload-artifact@v4
-        with: { name: android, path: release-assets/* }
-
-  windows:
-    needs: prepare
-    runs-on: windows-latest
-    env:
-      WLSAPLUS_VERSION: ${{ needs.prepare.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.27.1', cache-dependency-path: phone-network/go.sum }
-      - name: Test phone network
-        working-directory: phone-network
-        run: go test ./...
-      - run: npm ci
-      - run: npm run version:apply
-      - run: npm test
-      - run: npm run electron:make:windows
-      - name: Add mirror cache key to update metadata
-        run: npm run updates:cache-key
-        env:
-          WLSAPLUS_UPDATE_CACHE_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
-      - shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path release-assets
-          $setup = Get-Item "out-builder/WLSAPlus-$env:WLSAPLUS_VERSION-Windows-Setup.exe"
-          Copy-Item -LiteralPath $setup.FullName -Destination release-assets
-          Get-ChildItem out-builder -File | Where-Object { $_.Name -eq 'latest.yml' -or $_.Extension -eq '.blockmap' } | Copy-Item -Destination release-assets
-          if (-not (Test-Path release-assets/latest.yml)) { throw 'Windows update metadata was not produced.' }
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: release-assets/*
-
   macos:
     needs: prepare
     runs-on: macos-latest
@@ -195,7 +92,7 @@ jobs:
 
   release:
     if: needs.prepare.outputs.publish == 'true'
-    needs: [prepare, android, windows, macos]
+    needs: [prepare, macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

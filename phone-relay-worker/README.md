@@ -1,3 +1,5 @@
+> Note: This fork packages **macOS Electron only**. The relay worker is kept because the Mac Electron app can still talk to the shared phone-relay service.
+
 # Phone Relay Worker
 
 This is a separate service from the PowerSchool API. The Windows and Android

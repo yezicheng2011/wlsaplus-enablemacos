@@ -1,3 +1,5 @@
+> Note: This fork packages **macOS Electron only**. The phone-network Go module and Cloudflare relay remain for shared phone-relay support; Android AAR / Windows `phone-network.exe` packaging scripts were removed.
+
 # Embedded Phone Connection
 
 Windows tries direct ADB over Wi-Fi first. If it fails, WLSAPlus automatically

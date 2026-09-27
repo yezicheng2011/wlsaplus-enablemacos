@@ -2,19 +2,17 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import extract from 'extract-zip';
 
 const VERSION = '1.13.19';
 const PLUGIN_VERSION = '1.3.2';
 const root = path.resolve(import.meta.dirname, '..');
 const destination = path.join(root, 'build', 'vpn-core');
-const executableName = process.platform === 'win32' ? 'sing-box.exe' : 'sing-box';
+const executableName = 'sing-box';
 const executablePath = path.join(destination, executableName);
-const pluginExecutableName = process.platform === 'win32' ? 'v2ray-plugin.exe' : 'v2ray-plugin';
+const pluginExecutableName = 'v2ray-plugin';
 const pluginExecutablePath = path.join(destination, pluginExecutableName);
 
 const targets = {
-  'win32-x64': { core: 'windows-amd64.zip', plugin: 'windows-amd64' },
   'darwin-x64': { core: 'darwin-amd64.tar.gz', plugin: 'darwin-amd64' },
   'darwin-arm64': { core: 'darwin-arm64.tar.gz', plugin: 'darwin-arm64' },
 };
@@ -23,8 +21,8 @@ async function works() {
   try {
     await fs.access(executablePath);
     await fs.access(pluginExecutablePath);
-    const coreResult = spawnSync(executablePath, ['version'], { encoding: 'utf8', windowsHide: true });
-    const pluginResult = spawnSync(pluginExecutablePath, ['-version'], { encoding: 'utf8', windowsHide: true });
+    const coreResult = spawnSync(executablePath, ['version'], { encoding: 'utf8' });
+    const pluginResult = spawnSync(pluginExecutablePath, ['-version'], { encoding: 'utf8' });
     return coreResult.status === 0
       && `${coreResult.stdout}${coreResult.stderr}`.includes(VERSION)
       && pluginResult.status === 0
@@ -56,7 +54,7 @@ async function findPluginFile(directory) {
 
 const target = targets[`${process.platform}-${process.arch}`];
 if (!target) {
-  throw new Error(`No VPN core is configured for ${process.platform}-${process.arch}.`);
+  throw new Error(`No VPN core is configured for ${process.platform}-${process.arch}. Mac-only builds require darwin-x64 or darwin-arm64.`);
 }
 
 if (!(await works())) {
@@ -72,11 +70,8 @@ if (!(await works())) {
     const response = await fetch(releaseUrl, { redirect: 'follow', headers: { 'User-Agent': 'WLSAPlus-build' } });
     if (!response.ok) throw new Error(`VPN core download failed with ${response.status}.`);
     await fs.writeFile(archive, Buffer.from(await response.arrayBuffer()));
-    if (suffix.endsWith('.zip')) await extract(archive, { dir: temporary });
-    else {
-      const result = spawnSync('tar', ['-xzf', archive, '-C', temporary], { encoding: 'utf8' });
-      if (result.status !== 0) throw new Error(result.stderr || 'Could not extract the VPN core.');
-    }
+    const result = spawnSync('tar', ['-xzf', archive, '-C', temporary], { encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(result.stderr || 'Could not extract the VPN core.');
     const extracted = await findFile(temporary, executableName);
     if (!extracted) throw new Error('The VPN core archive did not contain an executable.');
 
@@ -92,10 +87,8 @@ if (!(await works())) {
     await fs.mkdir(destination, { recursive: true });
     await fs.copyFile(extracted, executablePath);
     await fs.copyFile(extractedPlugin, pluginExecutablePath);
-    if (process.platform !== 'win32') {
-      await fs.chmod(executablePath, 0o755);
-      await fs.chmod(pluginExecutablePath, 0o755);
-    }
+    await fs.chmod(executablePath, 0o755);
+    await fs.chmod(pluginExecutablePath, 0o755);
     const licenseResponse = await fetch(`https://raw.githubusercontent.com/SagerNet/sing-box/v${VERSION}/LICENSE`);
     if (licenseResponse.ok) await fs.writeFile(path.join(destination, 'LICENSE-sing-box.txt'), await licenseResponse.text());
     const pluginLicenseResponse = await fetch(`https://raw.githubusercontent.com/shadowsocks/v2ray-plugin/v${PLUGIN_VERSION}/LICENSE`);
