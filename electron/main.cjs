@@ -93,6 +93,21 @@ function configureExternalHelpLinks(win) {
 
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return response;
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('Request timed out. Check your network and try again.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+
 function setVpnStatus(patch) {
   vpnStatus = { ...vpnStatus, ...patch };
   for (const win of BrowserWindow.getAllWindows()) {
@@ -346,8 +361,11 @@ async function fetchVpnNodes(sourceId = 'relay') {
 async function fetchVpnProfile(sourceId = 'relay', nodeName = '') {
   try {
     const { document, nodes } = await fetchVpnNodes(sourceId);
+    if (!nodes.length) throw new Error(`${getVpnSource(sourceId).name} did not return any VPN nodes.`);
     const selected = nodes.some((node) => node.id === nodeName) ? nodeName : nodes[0].id;
-    const proxy = (document.proxies || []).find((item) => item?.name === selected);
+    const proxy = Array.isArray(document?.proxies)
+      ? document.proxies.find((item) => item?.name === selected)
+      : null;
     if (proxy?.type === 'ss' && proxy.server && proxy.port && proxy.cipher && proxy.password) {
       const plugin = proxy.plugin ? String(proxy.plugin) : undefined;
       if (plugin && plugin !== 'v2ray-plugin') throw new Error(`The selected node requires an unsupported plugin: ${plugin}.`);
@@ -361,8 +379,12 @@ async function fetchVpnProfile(sourceId = 'relay', nodeName = '') {
         name: selected,
       };
     }
-    // Non-SS nodes are still usable by the Mac clash helper via YAML selection.
-    return { name: selected, clashDocument: document };
+    // Non-SS Clash nodes are usable by the Mac clash helper via YAML selection.
+    if (document && Array.isArray(document.proxies) && document.proxies.length) {
+      return { name: selected, clashDocument: document };
+    }
+    // SS-URI-only listings have no Clash document; fall through to legacy SS parse.
+    throw new Error(`${getVpnSource(sourceId).name} returned nodes without a Clash profile; trying SS fallback.`);
   } catch (error) {
     // Fall back to legacy SS-only parsing.
     const body = await fetchSubscriptionBody(sourceId, 'ss');
@@ -370,7 +392,10 @@ async function fetchVpnProfile(sourceId = 'relay', nodeName = '') {
     if (clashProfile) return clashProfile;
     const decoded = body.startsWith('ss://') ? body : decodeBase64Url(body);
     const profile = decoded.split(/\r?\n/).find((line) => line.startsWith('ss://'));
-    if (!profile) throw new Error(`${getVpnSource(sourceId).name} did not return a usable Shadowsocks profile.`);
+    if (!profile) {
+      const detail = error instanceof Error ? error.message : '';
+      throw new Error(detail || `${getVpnSource(sourceId).name} did not return a usable Shadowsocks profile.`);
+    }
     return parseShadowsocksUri(profile);
   }
 }
@@ -415,6 +440,9 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
 
   const { execFile, execSync } = require('node:child_process');
   const fsSync = require('node:fs');
+  // Best-effort stop of a previous elevated helper so reconnect does not stack tunnels.
+  await stopMacClashHelper({ elevated: false }).catch(() => {});
+
 
   const candidateTars = [
     path.join(process.resourcesPath || '', 'bin', 'mac-vpn.tar.gz'),
@@ -702,6 +730,37 @@ async function restoreSavedSystemProxy() {
   if (state) await restoreSystemProxy(state);
 }
 
+async function stopMacClashHelper({ elevated = true } = {}) {
+  if (process.platform !== 'darwin') return { stopped: false, cancelled: false };
+  const targetDir = path.join(app.getPath('userData'), 'vpn-bin');
+  const execPath = path.join(targetDir, 'clash_pkg', 'clash');
+  // Match the absolute helper path so we do not kill unrelated clash processes.
+  const pattern = execPath;
+  try {
+    await execFileAsync('pkill', ['-f', pattern]);
+    await delay(250);
+    return { stopped: true, cancelled: false };
+  } catch {
+    // pkill exits non-zero when nothing matched or the process is root-owned.
+  }
+  if (!elevated) return { stopped: false, cancelled: false };
+  const escaped = pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return await new Promise((resolve) => {
+    execFile(
+      'osascript',
+      ['-e', `do shell script "/usr/bin/pkill -f \"${escaped}\" || true" with administrator privileges`],
+      (error) => {
+        const detail = String(error?.message || error?.stderr || '');
+        if (error && /User canceled|user cancelled|-128|authorization canceled/i.test(detail)) {
+          resolve({ stopped: false, cancelled: true });
+          return;
+        }
+        resolve({ stopped: !error, cancelled: false });
+      },
+    );
+  });
+}
+
 async function stopVpnProcess() {
   const child = vpnProcess;
   vpnProcess = null;
@@ -756,11 +815,27 @@ async function connectVpn(requestedMode = 'full-tunnel', requestedSource = 'rela
 
 async function disconnectVpn() {
   const mode = normalizeVpnMode(vpnStatus.mode);
-  setVpnStatus({ state: 'disconnecting', message: 'Disconnecting...', mode, requiresElevation: false });
+  const sourceId = vpnStatus.sourceId;
+  const nodeName = vpnStatus.nodeName;
+  const connectedAt = vpnStatus.connectedAt;
+  setVpnStatus({ state: 'disconnecting', message: 'Disconnecting...', mode, sourceId, nodeName, requiresElevation: false });
   vpnDisconnecting = true;
   await restoreSavedSystemProxy().catch(() => {});
   await stopVpnProcess();
+  // Mac full-tunnel uses an elevated clash helper, not vpnProcess — stop it too.
+  const macStop = await stopMacClashHelper({ elevated: true }).catch(() => ({ stopped: false, cancelled: false }));
   vpnDisconnecting = false;
+  if (macStop?.cancelled) {
+    return setVpnStatus({
+      state: 'connected',
+      message: nodeName ? `Still connected · ${nodeName}` : 'Still connected (disconnect cancelled)',
+      connectedAt: connectedAt || new Date().toISOString(),
+      mode,
+      sourceId,
+      nodeName,
+      requiresElevation: true,
+    });
+  }
   return setVpnStatus({ state: 'idle', message: 'Ready', connectedAt: null, mode, requiresElevation: false });
 }
 
@@ -854,7 +929,7 @@ function configureAppUpdater() {
 
 async function translateWithGoogle(value, source, target) {
   const params = new URLSearchParams({ client: 'gtx', sl: source, tl: target, dt: 't', q: value });
-  const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params}`);
+  const response = await fetchWithTimeout(`https://translate.googleapis.com/translate_a/single?${params}`, {}, 12_000);
   if (!response.ok) throw new Error('Google Translate is unavailable.');
   const result = await response.json();
   if (!Array.isArray(result) || !Array.isArray(result[0])) throw new Error('The translation response was invalid.');
@@ -863,7 +938,7 @@ async function translateWithGoogle(value, source, target) {
 
 async function translateWithMyMemory(value, source, target) {
   const params = new URLSearchParams({ q: value, langpair: `${source === 'auto' ? 'Autodetect' : source}|${target}` });
-  const response = await fetch(`https://api.mymemory.translated.net/get?${params}`);
+  const response = await fetchWithTimeout(`https://api.mymemory.translated.net/get?${params}`, {}, 12_000);
   if (!response.ok) throw new Error('Translation service is unavailable. Please try again later.');
   const result = await response.json();
   if (result?.responseStatus !== 200 || typeof result?.responseData?.translatedText !== 'string') {
@@ -975,13 +1050,23 @@ ipcMain.handle('powerschool:request', async (_event, options) => {
     headers.origin = origin;
     headers.referer = referrerUrl.toString();
   }
-  const response = await powerSchoolSession().fetch(requestUrl.toString(), {
-    method: options.method === 'POST' ? 'POST' : 'GET',
-    headers,
-    body: options.method === 'POST' ? String(options.body || '') : undefined,
-    redirect: 'follow',
-  });
-  return { status: response.status, url: response.url, text: await response.text() };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const response = await powerSchoolSession().fetch(requestUrl.toString(), {
+      method: options.method === 'POST' ? 'POST' : 'GET',
+      headers,
+      body: options.method === 'POST' ? String(options.body || '') : undefined,
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    return { status: response.status, url: response.url, text: await response.text() };
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error('PowerSchool request timed out. Check your network and try again.');
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 });
 ipcMain.handle('powerschool:clear-session', async (_event, baseUrl) => {
   const origin = validateBaseUrl(baseUrl);
@@ -991,8 +1076,13 @@ ipcMain.handle('powerschool:clear-session', async (_event, baseUrl) => {
 ipcMain.handle('vpn:status', () => vpnStatus);
 ipcMain.handle('vpn:connect', (_event, mode, sourceId, nodeName) => connectVpn(mode, sourceId, nodeName));
 ipcMain.handle('vpn:list-nodes', async (_event, sourceId) => {
-  const { nodes } = await fetchVpnNodes(sourceId || 'relay');
-  return nodes;
+  try {
+    const { nodes } = await fetchVpnNodes(sourceId || 'relay');
+    return nodes;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error || '');
+    throw new Error(detail || 'Could not load VPN nodes. Check your network and try again.');
+  }
 });
 ipcMain.handle('vpn:test-latency', async (_event, nodes) => {
   const list = Array.isArray(nodes) ? nodes.slice(0, 80) : [];
