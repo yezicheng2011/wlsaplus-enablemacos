@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { PlatformService } from './platform.service';
-import type { VpnConnectionMode, VpnNode, VpnStatus } from './models';
+import type { VpnConnectionMode, VpnNode, VpnStatus, WeChatProbeResult } from './models';
 import { VPN_SOURCES, vpnSource } from './vpn-sources';
 
 const IDLE: VpnStatus = { state: 'idle', message: 'Ready', connectedAt: null, mode: 'unavailable' };
@@ -17,6 +17,8 @@ export class VpnService {
   readonly selectedNodeId = signal<string>(this.readNode());
   readonly nodesLoading = signal(false);
   readonly latencyTesting = signal(false);
+  readonly wechatTesting = signal(false);
+  readonly wechatResult = signal<WeChatProbeResult | null>(null);
 
   constructor() {
     if (window.wlsaplus) {
@@ -43,6 +45,25 @@ export class VpnService {
       });
     } finally {
       this.nodesLoading.set(false);
+    }
+  }
+
+  async testWeChat(): Promise<void> {
+    if (!window.wlsaplus?.vpn.testWeChat) return;
+    this.wechatTesting.set(true);
+    try {
+      this.wechatResult.set(await window.wlsaplus.vpn.testWeChat());
+    } catch (error) {
+      this.wechatResult.set({
+        reachable: false,
+        latencyMs: null,
+        viaVpn: this.status().state === 'connected',
+        url: 'https://weixin.qq.com/',
+        status: 0,
+        message: error instanceof Error ? error.message : 'WeChat probe failed.',
+      });
+    } finally {
+      this.wechatTesting.set(false);
     }
   }
 

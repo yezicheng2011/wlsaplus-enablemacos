@@ -6,6 +6,7 @@ import type {
   VpnConnectionMode,
   VpnNode,
   VpnStatus,
+  WeChatProbeResult,
 } from './models';
 
 declare global {
@@ -35,6 +36,7 @@ declare global {
         status(): Promise<VpnStatus>;
         listNodes(sourceId?: string): Promise<VpnNode[]>;
         testLatency(nodes: VpnNode[]): Promise<VpnNode[]>;
+        testWeChat(): Promise<WeChatProbeResult>;
         connect(mode: VpnConnectionMode, sourceId?: string, nodeName?: string): Promise<VpnStatus>;
         disconnect(): Promise<VpnStatus>;
         restartElevated(mode: VpnConnectionMode, sourceId?: string, nodeName?: string): Promise<VpnStatus>;

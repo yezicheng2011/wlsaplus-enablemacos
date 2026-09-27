@@ -54,7 +54,19 @@ import { VpnService } from '../core/vpn.service';
         @else if (status().requiresElevation && status().state !== 'error') { <button mat-flat-button (click)="vpn.restartElevated()">Approve & connect</button> }
         @else { <button mat-flat-button (click)="vpn.connect()" [disabled]="status().state === 'unavailable' || (platform.info.supportsVpn && !vpn.selectedNodeId())">Connect</button> }
       </section>
-      <div class="facts"><span><span class="material-symbols-rounded">shield</span>Encrypted connection</span><span><span class="material-symbols-rounded">public</span>Selectable nodes</span><span><span class="material-symbols-rounded">speed</span>Latency test</span></div>
+      @if (platform.info.supportsVpn) {
+        <section class="wechat-panel surface" [class.ok]="vpn.wechatResult()?.reachable === true" [class.bad]="vpn.wechatResult()?.reachable === false">
+          <div class="wechat-copy">
+            <strong>WeChat check</strong>
+            <span>@if (vpn.wechatTesting()) { Testing https://weixin.qq.com/… } @else if (vpn.wechatResult(); as result) { {{ result.message }} } @else { Probe WeChat reachability with VPN on or off (no WeChat app required). }</span>
+          </div>
+          <button mat-stroked-button type="button" (click)="vpn.testWeChat()" [disabled]="vpn.wechatTesting() || busy()">
+            @if (vpn.wechatTesting()) { Testing… } @else { Test WeChat }
+          </button>
+        </section>
+      }
+
+      <div class="facts"><span><span class="material-symbols-rounded">shield</span>Encrypted connection</span><span><span class="material-symbols-rounded">public</span>Selectable nodes</span><span><span class="material-symbols-rounded">chat</span>WeChat probe</span></div>
       @if (platform.info.kind === 'web') { <p class="platform-note">Install the macOS app to use VPN.</p> }
     </div>
   `,
@@ -67,6 +79,10 @@ import { VpnService } from '../core/vpn.service';
     .node-row { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border: 0; border-bottom: 1px solid var(--app-border); background: transparent; color: var(--app-text); text-align: left; cursor: pointer; } .node-row:last-child { border-bottom: 0; } .node-row.selected { background: var(--app-accent-soft); } .node-name { font-size: 14px; } .node-meta { color: var(--app-muted); font-size: 12px; white-space: nowrap; }
     .vpn-panel { min-height: 220px; padding: 32px; display: grid; grid-template-columns: 64px minmax(0,1fr) auto; align-items: center; gap: 24px; } .status-mark { width: 64px; height: 64px; display: grid; place-items: center; border-radius: 8px; background: var(--app-surface-raised); color: var(--app-muted); } .status-mark span { font-size: 34px; } .connected .status-mark { background: color-mix(in srgb, var(--app-success) 18%, var(--app-surface)); color: var(--app-success); } .pending .status-mark { color: var(--app-accent); }
     .status-copy { min-width: 0; } .status-copy > span { color: var(--app-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; } h2 { margin: 7px 0 6px; font-size: 25px; line-height: 1.2; } time { color: var(--app-muted); font-size: 13px; } button { min-width: 116px; height: 46px; }
+    .wechat-panel { margin-top: 14px; padding: 16px 18px; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 14px; align-items: center; }
+    .wechat-copy { min-width: 0; display: grid; gap: 4px; } .wechat-copy strong { font-size: 15px; } .wechat-copy span { color: var(--app-muted); font-size: 13px; line-height: 1.4; }
+    .wechat-panel.ok { border-color: color-mix(in srgb, var(--app-success) 45%, var(--app-border)); } .wechat-panel.ok .wechat-copy strong { color: var(--app-success); }
+    .wechat-panel.bad { border-color: color-mix(in srgb, #ba1a1a 40%, var(--app-border)); } .wechat-panel.bad .wechat-copy strong { color: #ba1a1a; }
     .facts { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 14px; color: var(--app-muted); font-size: 12px; } .facts > span { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 7px; border-right: 1px solid var(--app-border); } .facts > span:last-child { border: 0; } .facts .material-symbols-rounded { font-size: 18px; } .platform-note { margin: 20px 0 0; color: var(--app-muted); font-size: 13px; text-align: center; }
     @media (max-width: 600px) { .vpn-panel { min-height: 280px; padding: 25px 20px; grid-template-columns: 1fr; justify-items: center; gap: 18px; text-align: center; } .facts { grid-template-columns: 1fr; } .facts > span { border-right: 0; border-bottom: 1px solid var(--app-border); } }
   `,

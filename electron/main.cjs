@@ -536,6 +536,60 @@ async function waitForPort(port, timeoutMs = 10_000) {
 }
 
 
+
+async function testWeChatConnectivity() {
+  const WECHAT_URL = 'https://weixin.qq.com/';
+  const viaVpn = vpnStatus.state === 'connected';
+  const probeSession = session.fromPartition(`wlsaplus-wechat-probe-${viaVpn ? 'vpn' : 'direct'}-${Date.now()}`);
+  // Mac clash TUN routes the whole system when connected, so Electron "direct"
+  // still traverses the tunnel. When disconnected, this is a normal direct probe.
+  await probeSession.setProxy({ mode: 'direct' });
+  const started = Date.now();
+  try {
+    await probeSession.clearHostResolverCache().catch(() => {});
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8_000);
+    try {
+      const response = await probeSession.fetch(WECHAT_URL, {
+        cache: 'no-store',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: { 'User-Agent': `WLSAPlus/${app.getVersion()}`, Accept: 'text/html,*/*;q=0.8' },
+      });
+      const latencyMs = Date.now() - started;
+      const reachable = response.status > 0 && response.status < 500;
+      const pathLabel = viaVpn ? 'with VPN on' : 'with VPN off';
+      return {
+        reachable,
+        latencyMs,
+        viaVpn,
+        url: WECHAT_URL,
+        status: response.status,
+        message: reachable
+          ? `WeChat reachable (${latencyMs} ms, ${pathLabel})`
+          : `WeChat unreachable (HTTP ${response.status}, ${pathLabel})`,
+      };
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
+  } catch (error) {
+    const latencyMs = Date.now() - started;
+    const pathLabel = viaVpn ? 'with VPN on' : 'with VPN off';
+    const detail = error instanceof Error ? error.message : String(error || '');
+    return {
+      reachable: false,
+      latencyMs: Number.isFinite(latencyMs) ? latencyMs : null,
+      viaVpn,
+      url: WECHAT_URL,
+      status: 0,
+      message: `WeChat unreachable (${pathLabel})${detail ? `: ${detail}` : ''}`,
+    };
+  } finally {
+    await probeSession.closeAllConnections().catch(() => {});
+  }
+}
+
 async function probeVpnUrls(probeSession, urls, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -927,6 +981,7 @@ ipcMain.handle('vpn:test-latency', async (_event, nodes) => {
   });
   return measured;
 });
+ipcMain.handle('vpn:test-wechat', async () => testWeChatConnectivity());
 ipcMain.handle('vpn:disconnect', () => disconnectVpn());
 ipcMain.handle('vpn:restart-elevated', (_event, mode, sourceId, nodeName) => restartVpnElevated(normalizeVpnMode(mode), sourceId, nodeName));
 ipcMain.handle('updater:status', () => updateStatus);

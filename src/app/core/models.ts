@@ -187,6 +187,15 @@ export interface PlatformInfo {
 export type VpnConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'delegated' | 'error' | 'unavailable';
 export type VpnConnectionMode = 'full-tunnel';
 
+export interface WeChatProbeResult {
+  reachable: boolean;
+  latencyMs: number | null;
+  viaVpn: boolean;
+  url: string;
+  status: number;
+  message: string;
+}
+
 export interface VpnNode {
   id: string;
   name: string;

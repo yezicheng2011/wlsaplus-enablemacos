@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('wlsaplus', {
     status: () => ipcRenderer.invoke('vpn:status'),
     listNodes: (sourceId) => ipcRenderer.invoke('vpn:list-nodes', sourceId),
     testLatency: (nodes) => ipcRenderer.invoke('vpn:test-latency', nodes),
+    testWeChat: () => ipcRenderer.invoke('vpn:test-wechat'),
     connect: (mode, sourceId, nodeName) => ipcRenderer.invoke('vpn:connect', mode, sourceId, nodeName),
     disconnect: () => ipcRenderer.invoke('vpn:disconnect'),
     restartElevated: (mode, sourceId, nodeName) => ipcRenderer.invoke('vpn:restart-elevated', mode, sourceId, nodeName),
