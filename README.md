@@ -86,3 +86,9 @@ npm run record:powerschool -- --url "https://your-school-powerschool.example.com
 
 - 默认目标平台：**仅 macOS Electron**
 - 上游若仍含 Android / Windows，本 fork 已裁剪；请以本 README 与 `forge.config.cjs` 为准
+
+### 构建产物提示
+
+- 可安装包在 **`out/make`**（DMG / ZIP）；`dist/` 只是 Angular 前端，不是安装包目录。
+- 打包 asar 仅保留主进程运行时依赖（`electron-updater`、`js-yaml` 等）与 `dist/` UI；见 `forge.config.cjs` 的 `RUNTIME_NODE_MODULES`（`prune: false`）。
+- 国内镜像构建请用 `release-kit/构建wlsaplus.command`（不要去掉 npmmirror / gitee 镜像）。

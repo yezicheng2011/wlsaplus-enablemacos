@@ -130,6 +130,15 @@ if [ -d .git ]; then
     read -n 1 -s -r -p "按任意键关闭..."
     exit 1
   fi
+  if git merge-base --is-ancestor fdd798b HEAD 2>/dev/null; then
+    echo "    ✅ 已包含 loadFile 渲染加载修复 fdd798b"
+  else
+    echo ""
+    echo "❌ 当前代码不含 loadFile 白屏修复提交 fdd798b。"
+    echo "   请 git pull 最新 main 后再构建。"
+    read -n 1 -s -r -p "按任意键关闭..."
+    exit 1
+  fi
 fi
 
 # 内容级校验：打包主进程必须用 loadFile（避免 file:// 在 asar/空格路径下白屏）
