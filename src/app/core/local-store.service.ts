@@ -15,6 +15,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   color: 'default',
   tuningEnabled: false,
   tunedTime: null,
+  classRemindersEnabled: true,
 };
 
 const EMPTY_PROGRESS: ProgressSnapshot = {
@@ -198,6 +199,7 @@ export class LocalStore {
       color: APP_COLORS.has(value['color'] as AppColor) ? value['color'] as AppColor : DEFAULT_SETTINGS.color,
       tuningEnabled: typeof value['tuningEnabled'] === 'boolean' ? value['tuningEnabled'] : DEFAULT_SETTINGS.tuningEnabled,
       tunedTime: typeof value['tunedTime'] === 'string' ? value['tunedTime'] : null,
+      classRemindersEnabled: typeof value['classRemindersEnabled'] === 'boolean' ? value['classRemindersEnabled'] : DEFAULT_SETTINGS.classRemindersEnabled,
     };
   }
 

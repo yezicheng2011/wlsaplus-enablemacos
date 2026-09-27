@@ -8,6 +8,7 @@ import { PlatformService } from '../core/platform.service';
 import { PowerSchoolService } from '../core/powerschool.service';
 import { UpdateService } from '../core/update.service';
 import { NoticeService } from '../core/notice.service';
+import { ClassReminderService } from '../core/class-reminder.service';
 
 @Component({
   selector: 'app-shell',
@@ -98,6 +99,8 @@ export class ShellComponent implements OnInit {
   private readonly powerSchool = inject(PowerSchoolService);
   readonly updater = inject(UpdateService);
   readonly notice = inject(NoticeService);
+  // Starts macOS class reminders when schedule data is available.
+  private readonly classReminders = inject(ClassReminderService);
   readonly nav = [
     { path: '/', label: 'Home', icon: 'home' },
     { path: '/schedule', label: 'Schedule', icon: 'calendar_month' },

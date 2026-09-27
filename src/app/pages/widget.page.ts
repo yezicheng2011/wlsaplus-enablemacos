@@ -98,7 +98,7 @@ export class WidgetPage {
       if (confirmed) this.store.removeTodo(todo.id);
     });
   }
-  closeAll(): void { void window.wlsaplus?.desktopCards.closeAll(); }
+  closeAll(): void { /* Desktop cards are Windows-only; kept as a no-op on macOS. */ }
   todoProgress(todo: TodoItem): number { return todoDeadlineProgress(todo, this.clock.now().getTime()); }
   close(): void { window.close(); }
 }

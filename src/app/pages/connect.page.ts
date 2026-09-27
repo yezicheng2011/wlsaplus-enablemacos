@@ -8,7 +8,6 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { CredentialVault } from '../core/credential-vault.service';
 import { PlatformService } from '../core/platform.service';
 import { PowerSchoolService } from '../core/powerschool.service';
-import { PhoneReceiverService } from '../core/phone-receiver.service';
 
 @Component({
   selector: 'app-connect-page',
@@ -20,7 +19,7 @@ import { PhoneReceiverService } from '../core/phone-receiver.service';
         <h1>Connect PowerSchool</h1>
         <p class="muted">Your account and schedule stay on this device.</p>
         @if (!platform.info.supportsPowerSchool) {
-          <div class="notice"><span class="material-symbols-rounded">computer</span><div><strong>Use the desktop or Android app to connect</strong><br>The web browser cannot access your school's PowerSchool directly. Cached data remains available here.</div></div>
+          <div class="notice"><span class="material-symbols-rounded">computer</span><div><strong>Use the desktop app to connect</strong><br>The web browser cannot access your school's PowerSchool directly. Cached data remains available here.</div></div>
         }
         <form [formGroup]="form" (ngSubmit)="submit()">
           <mat-form-field appearance="outline"><mat-label>PowerSchool address</mat-label><input matInput formControlName="schoolUrl" autocomplete="url" [readonly]="platform.info.kind === 'web'"><span class="material-symbols-rounded field-icon" matSuffix>language</span></mat-form-field>
@@ -33,7 +32,6 @@ import { PhoneReceiverService } from '../core/phone-receiver.service';
           @if (hasSaved()) { <button mat-button type="button" (click)="openCached()">Open cached schedule</button> }
           @if (!platform.info.supportsPowerSchool && !hasSaved()) { <button mat-button type="button" (click)="openCached()">Continue offline</button> }
         </form>
-        @if (platform.info.kind === 'android') { <button mat-stroked-button type="button" (click)="receiver.open()"><span class="material-symbols-rounded">phonelink</span>Connect to computer</button> }
       </section>
     </main>
   `,
@@ -55,7 +53,6 @@ export class ConnectPage implements OnInit {
   private readonly vault = inject(CredentialVault);
   private readonly router = inject(Router);
   readonly platform = inject(PlatformService);
-  readonly receiver = inject(PhoneReceiverService);
   readonly loading = signal(false);
   readonly error = signal('');
   readonly showPassword = signal(false);

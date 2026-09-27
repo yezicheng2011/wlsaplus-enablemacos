@@ -4,8 +4,8 @@ const { validateExternalHelpUrl } = require('./external-links.cjs');
 
 test('allows the bundled WLSAPlus help articles', () => {
   assert.equal(
-    validateExternalHelpUrl('https://wlsaplus.02studio.xyz/blog/set-up-phone-control-on-windows/'),
-    'https://wlsaplus.02studio.xyz/blog/set-up-phone-control-on-windows/',
+    validateExternalHelpUrl('https://wlsaplus.02studio.xyz/blog/use-wechat-on-restricted-networks/'),
+    'https://wlsaplus.02studio.xyz/blog/use-wechat-on-restricted-networks/',
   );
 });
 

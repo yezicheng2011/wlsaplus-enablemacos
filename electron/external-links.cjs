@@ -1,5 +1,4 @@
 const EXTERNAL_HELP_URLS = new Set([
-  'https://wlsaplus.02studio.xyz/blog/set-up-phone-control-on-windows/',
   'https://wlsaplus.02studio.xyz/blog/use-wechat-on-restricted-networks/',
 ]);
 

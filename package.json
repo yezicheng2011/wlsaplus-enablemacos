@@ -30,8 +30,6 @@
     "@angular/material": "^22.1.4",
     "@angular/platform-browser": "^22.1.4",
     "@angular/router": "^22.1.4",
-    "@aparajita/capacitor-secure-storage": "^8.0.0",
-    "@capacitor/core": "^8.5.0",
     "@fontsource/roboto": "^5.3.0",
     "@tesseract.js-data/chi_sim": "^1.0.0",
     "@tesseract.js-data/eng": "^1.0.0",

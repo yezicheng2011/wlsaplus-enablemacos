@@ -1,52 +1,92 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { PlatformService } from './platform.service';
-import { WlsaTools } from './native-tools';
-import type { VpnConnectionMode, VpnStatus } from './models';
+import type { VpnConnectionMode, VpnNode, VpnStatus } from './models';
 import { VPN_SOURCES, vpnSource } from './vpn-sources';
 
 const IDLE: VpnStatus = { state: 'idle', message: 'Ready', connectedAt: null, mode: 'unavailable' };
+const NODE_KEY = 'wlsaplus:vpn-node';
 
 @Injectable({ providedIn: 'root' })
 export class VpnService {
   private readonly platform = inject(PlatformService);
-  readonly status = signal<VpnStatus>(this.platform.info.supportsVpn ? IDLE : { ...IDLE, state: 'unavailable', message: 'Available in the desktop and Android apps.' });
-  readonly mode = signal<VpnConnectionMode>(this.readMode());
+  readonly status = signal<VpnStatus>(this.platform.info.supportsVpn ? IDLE : { ...IDLE, state: 'unavailable', message: 'Available in the desktop app.' });
+  readonly mode = signal<VpnConnectionMode>('full-tunnel');
   readonly sources = VPN_SOURCES;
   readonly sourceId = signal<string>(this.readSource());
+  readonly nodes = signal<VpnNode[]>([]);
+  readonly selectedNodeId = signal<string>(this.readNode());
+  readonly nodesLoading = signal(false);
+  readonly latencyTesting = signal(false);
 
   constructor() {
     if (window.wlsaplus) {
       void window.wlsaplus.vpn.status().then((status) => this.applyStatus(status));
       window.wlsaplus.vpn.onStatus((status) => this.applyStatus(status));
-    } else if (this.platform.info.kind === 'android') {
-      this.status.set({ ...IDLE, mode: 'external-client', message: 'Ready to open a compatible VPN client.' });
+      if (this.platform.info.supportsVpn) void this.refreshNodes();
+    }
+  }
+
+  async refreshNodes(): Promise<void> {
+    if (!window.wlsaplus?.vpn.listNodes) return;
+    this.nodesLoading.set(true);
+    try {
+      const listed = await window.wlsaplus.vpn.listNodes(this.sourceId());
+      this.nodes.set(listed);
+      if (!listed.some((node) => node.id === this.selectedNodeId()) && listed[0]) {
+        this.setNode(listed[0].id);
+      }
+    } catch (error) {
+      this.status.set({
+        ...this.status(),
+        state: this.status().state === 'connected' ? 'connected' : 'idle',
+        message: error instanceof Error ? error.message : 'Could not load VPN nodes.',
+      });
+    } finally {
+      this.nodesLoading.set(false);
+    }
+  }
+
+  async testLatency(): Promise<void> {
+    if (!window.wlsaplus?.vpn.testLatency || !this.nodes().length) return;
+    this.latencyTesting.set(true);
+    try {
+      const measured = await window.wlsaplus.vpn.testLatency(this.nodes());
+      this.nodes.set(measured);
+    } finally {
+      this.latencyTesting.set(false);
     }
   }
 
   async connect(): Promise<void> {
-    if (window.wlsaplus) {
-      this.status.set({ ...this.status(), state: 'connecting', message: `Connecting to ${vpnSource(this.sourceId()).name}...`, mode: this.mode(), sourceId: this.sourceId(), requiresElevation: false });
+    if (!window.wlsaplus) return;
+    const nodeName = this.selectedNodeId();
+    this.status.set({
+      ...this.status(),
+      state: 'connecting',
+      message: nodeName ? `Preparing “${nodeName}”…` : `Connecting to ${vpnSource(this.sourceId()).name}...`,
+      mode: this.mode(),
+      sourceId: this.sourceId(),
+      nodeName: nodeName || undefined,
+      requiresElevation: false,
+    });
+    try {
+      this.applyStatus(await window.wlsaplus.vpn.connect(this.mode(), this.sourceId(), nodeName));
+    } catch {
+      // Prefer main-process status: pre-auth / waiting-approval must not become a scary error banner.
       try {
-        this.applyStatus(await window.wlsaplus.vpn.connect(this.mode(), this.sourceId()));
-      } catch (error) {
+        const current = await window.wlsaplus.vpn.status();
+        if (current.state === 'connecting' || current.state === 'connected' || current.state === 'idle') {
+          this.applyStatus(current);
+          return;
+        }
+        this.applyStatus(current);
+      } catch {
         this.status.set({
           ...this.status(),
-          state: 'error',
-          message: error instanceof Error ? error.message : 'Could not request administrator access.',
-          requiresElevation: this.mode() === 'full-tunnel',
+          state: 'idle',
+          message: 'Waiting for macOS administrator approval…',
+          requiresElevation: true,
         });
-      }
-      return;
-    }
-    if (this.platform.info.kind === 'android') {
-      this.status.set({ ...this.status(), state: 'connecting', message: 'Opening VPN client...' });
-      try {
-        const source = vpnSource(this.sourceId());
-        const url = `${source.endpoint}?format=clash`;
-        await WlsaTools.importVpn({ url, name: source.name });
-        this.status.set({ state: 'delegated', message: `${source.name} opened in your VPN client.`, connectedAt: null, mode: 'external-client', sourceId: source.id });
-      } catch (error) {
-        this.status.set({ state: 'error', message: error instanceof Error ? error.message : 'No compatible VPN client is installed.', connectedAt: null, mode: 'external-client' });
       }
     }
   }
@@ -61,28 +101,53 @@ export class VpnService {
     const source = vpnSource(sourceId);
     this.sourceId.set(source.id);
     localStorage.setItem('wlsaplus:vpn-source', source.id);
+    void this.refreshNodes();
+  }
+
+  setNode(nodeId: string): void {
+    this.selectedNodeId.set(nodeId);
+    localStorage.setItem(NODE_KEY, nodeId);
   }
 
   async restartElevated(): Promise<void> {
     if (!window.wlsaplus) return;
-    this.status.set({ ...this.status(), state: 'connecting', message: 'Requesting administrator access...', mode: this.mode(), requiresElevation: false });
+    const nodeName = this.selectedNodeId();
+    this.status.set({
+      ...this.status(),
+      state: 'connecting',
+      message: 'Waiting for macOS administrator approval…',
+      mode: this.mode(),
+      nodeName: nodeName || undefined,
+      requiresElevation: true,
+    });
     try {
-      this.applyStatus(await window.wlsaplus.vpn.restartElevated(this.mode(), this.sourceId()));
-    } catch (error) {
-      this.status.set({ ...this.status(), state: 'error', message: error instanceof Error ? error.message : 'Could not restart with administrator access.', requiresElevation: true });
+      this.applyStatus(await window.wlsaplus.vpn.restartElevated(this.mode(), this.sourceId(), nodeName));
+    } catch {
+      try {
+        const current = await window.wlsaplus.vpn.status();
+        this.applyStatus(current);
+      } catch {
+        this.status.set({
+          ...this.status(),
+          state: 'idle',
+          message: 'Administrator approval was cancelled. Tap Connect to try again.',
+          requiresElevation: true,
+        });
+      }
     }
   }
 
   private applyStatus(status: VpnStatus): void {
     this.status.set(status);
+    if (status.nodeName) this.selectedNodeId.set(status.nodeName);
     if (status.state !== 'idle' && status.mode === 'full-tunnel') this.mode.set(status.mode);
   }
 
-  private readMode(): VpnConnectionMode {
-    return 'full-tunnel';
+  private readSource(): string {
+    return vpnSource(localStorage.getItem('wlsaplus:vpn-source') || 'relay').id;
   }
 
-  private readSource(): string {
-    return vpnSource('relay').id;
+  private readNode(): string {
+    return localStorage.getItem(NODE_KEY) || '';
   }
 }

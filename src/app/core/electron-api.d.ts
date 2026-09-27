@@ -1,15 +1,10 @@
 import type {
-  DesktopCardInfo,
-  DesktopCardType,
-  DesktopCardSettings,
   PlatformHttpResponse,
-  PhoneControlAction,
-  PhoneStatus,
-  PhoneNetworkStatus,
   PowerSchoolCredentials,
   TranslationResult,
   UpdateStatus,
   VpnConnectionMode,
+  VpnNode,
   VpnStatus,
 } from './models';
 
@@ -36,19 +31,13 @@ declare global {
         }): Promise<PlatformHttpResponse>;
         clearSession(baseUrl: string): Promise<void>;
       };
-      desktopCards: {
-        list(): Promise<DesktopCardInfo[]>;
-        add(type: DesktopCardType): Promise<DesktopCardInfo>;
-        remove(id: number): Promise<void>;
-        closeAll(): Promise<number>;
-        getSettings(): Promise<DesktopCardSettings>;
-        setSettings(value: DesktopCardSettings): Promise<void>;
-      };
       vpn: {
         status(): Promise<VpnStatus>;
-        connect(mode: VpnConnectionMode, sourceId?: string): Promise<VpnStatus>;
+        listNodes(sourceId?: string): Promise<VpnNode[]>;
+        testLatency(nodes: VpnNode[]): Promise<VpnNode[]>;
+        connect(mode: VpnConnectionMode, sourceId?: string, nodeName?: string): Promise<VpnStatus>;
         disconnect(): Promise<VpnStatus>;
-        restartElevated(mode: VpnConnectionMode, sourceId?: string): Promise<VpnStatus>;
+        restartElevated(mode: VpnConnectionMode, sourceId?: string, nodeName?: string): Promise<VpnStatus>;
         onStatus(callback: (status: VpnStatus) => void): () => void;
       };
       updater: {
@@ -62,16 +51,8 @@ declare global {
         translate(text: string, source: string, target: string): Promise<TranslationResult>;
         captureRegion(): Promise<string | null>;
       };
-      phone: {
-        networkStatus(): Promise<PhoneNetworkStatus>;
-        onNetworkStatus(callback: (status: PhoneNetworkStatus) => void): () => void;
-        status(): Promise<PhoneStatus>;
-        connect(options: { turnScreenOff: boolean }): Promise<PhoneStatus>;
-        start(options: { turnScreenOff: boolean }): Promise<PhoneStatus>;
-        stop(): Promise<PhoneStatus>;
-        disconnect(): Promise<PhoneStatus>;
-        control(action: PhoneControlAction): Promise<PhoneStatus>;
-        onStatus(callback: (status: PhoneStatus) => void): () => void;
+      notifications: {
+        showClassReminder(options: { title: string; body: string; sessionId: string }): Promise<boolean>;
       };
     };
   }

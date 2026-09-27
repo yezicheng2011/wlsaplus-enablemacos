@@ -1,4 +1,4 @@
-const { app, BrowserWindow, desktopCapturer, ipcMain, safeStorage, screen, session, shell } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, safeStorage, session, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -9,53 +9,17 @@ const { promisify } = require('node:util');
 const { autoUpdater } = require('electron-updater');
 const { VPN_CONNECTION_MODES, buildVpnConfig } = require('./vpn-config.cjs');
 const { updateFeed } = require('./update-config.cjs');
-const { closeAllCards } = require('./card-manager.cjs');
-const { PhoneManager } = require('./phone-manager.cjs');
-const { PhoneNetwork } = require('./phone-network.cjs');
 const { validateExternalHelpUrl } = require('./external-links.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
 const yaml = require('js-yaml');
 
-function handleSquirrelEvent() {
-  if (process.platform !== 'win32') return false;
-  const event = process.argv[1];
-  if (!event?.startsWith('--squirrel-')) return false;
-  const updateExe = path.resolve(path.dirname(process.execPath), '..', 'Update.exe');
-  const exeName = path.basename(process.execPath);
-  const runUpdate = (args) => {
-    try {
-      const child = spawn(updateExe, args, { detached: true, windowsHide: true, stdio: 'ignore' });
-      child.on('error', () => {});
-      child.unref();
-    } catch { /* Installation can still be repaired by rerunning Setup. */ }
-  };
-  if (event === '--squirrel-install' || event === '--squirrel-updated') {
-    runUpdate(['--createShortcut', exeName]);
-    setTimeout(() => app.quit(), 1_000);
-    return true;
-  } else if (event === '--squirrel-uninstall') {
-    runUpdate(['--removeShortcut', exeName]);
-    setTimeout(() => app.quit(), 1_000);
-    return true;
-  } else if (event === '--squirrel-obsolete') {
-    app.quit();
-    return true;
-  }
-  return false;
-}
-
-const isSquirrelEvent = handleSquirrelEvent();
-const hasSingleInstanceLock = isSquirrelEvent || app.requestSingleInstanceLock();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 if (!hasSingleInstanceLock) app.quit();
 
 const execFileAsync = promisify(execFile);
 
-const CARD_TYPES = new Set(['current-class', 'next-class', 'today', 'todo']);
-const cards = new Map();
-const cardConfigs = new Map();
 let mainWindow;
-let nextCardId = 1;
 let isQuitting = false;
 const isAutostart = process.argv.includes('--autostart');
 const prepareUpdateMode = process.argv.includes('--prepare-update');
@@ -73,41 +37,20 @@ const vpnDnsCache = new Map();
 const updatesSupported = process.platform === 'win32' && app.isPackaged;
 let updateStatus = {
   state: updatesSupported ? 'idle' : 'unsupported',
-  message: updatesSupported ? 'Ready to check for updates.' : 'Automatic updates are available in the installed Windows app.',
+  message: updatesSupported ? 'Ready to check for updates.' : 'Automatic updates are not enabled in this macOS build.',
   currentVersion: app.getVersion(),
   version: null,
   percent: null,
 };
 
-const phoneNetwork = new PhoneNetwork({
-  directory: path.join(app.getPath('userData'), process.env.WLSAPLUS_PHONE_ANDROID_PACKAGE === 'cn.org.wlsash.wlsaplus.phonepreview' ? 'phone-network-preview' : 'phone-network'),
-  runtimeDirectory: phoneRuntimeDirectory(), safeStorage,
-  onStatus: status => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('phone:network-status', status);
-    }
-  },
-});
-const phoneManager = new PhoneManager({
-  network: phoneNetwork,
-  runtimeDirectory: phoneRuntimeDirectory(),
-  onStatus: (status) => {
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('phone:status', status);
-    }
-  },
-});
-
 const preload = path.join(__dirname, 'preload.cjs');
 const credentialFile = () => path.join(app.getPath('userData'), 'credentials.bin');
-const cardFile = () => path.join(app.getPath('userData'), 'desktop-cards.json');
-const cardSettingsFile = () => path.join(app.getPath('userData'), 'desktop-card-settings.json');
 const vpnDirectory = () => path.join(app.getPath('userData'), 'vpn');
 const vpnConfigFile = () => path.join(vpnDirectory(), 'config.json');
 const vpnProxyStateFile = () => path.join(vpnDirectory(), 'proxy-state.json');
 const powerSchoolSession = () => session.fromPartition('persist:powerschool');
 const appSession = () => session.fromPartition('persist:wlsaplus');
-const iconPath = () => path.join(__dirname, '..', 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const iconPath = () => path.join(__dirname, '..', 'build', 'icon.png');
 
 function appUrl(route = '') {
   const dev = process.env.WLSAPLUS_DEV_URL;
@@ -137,7 +80,7 @@ function setVpnStatus(patch) {
 }
 
 function vpnCorePath() {
-  const executable = process.platform === 'win32' ? 'sing-box.exe' : 'sing-box';
+  const executable = 'sing-box';
   return app.isPackaged ? path.join(process.resourcesPath, 'vpn-core', executable) : path.join(__dirname, '..', 'build', 'vpn-core', executable);
 }
 
@@ -168,9 +111,104 @@ function parseShadowsocksUri(value) {
   return { server: url.hostname, serverPort: Number(url.port), method, password, plugin: pluginName || undefined, pluginOptions: pluginOptions.join(';') || undefined };
 }
 
+function parseClashDocument(body) {
+  try { return yaml.load(body); } catch { return null; }
+}
+
+function listClashProxyNodes(document) {
+  if (!document || !Array.isArray(document.proxies)) return [];
+  const nodes = [];
+  const seen = new Set();
+  for (const proxy of document.proxies) {
+    const name = typeof proxy?.name === 'string' ? proxy.name.trim() : '';
+    if (!name || seen.has(name)) continue;
+    if (!proxy.server || !proxy.port) continue;
+    seen.add(name);
+    nodes.push({
+      id: name,
+      name,
+      type: typeof proxy.type === 'string' ? proxy.type : 'unknown',
+      server: String(proxy.server),
+      port: Number(proxy.port),
+    });
+  }
+  return nodes;
+}
+
+function listShadowsocksUriNodes(body) {
+  let text = body;
+  if (!body.startsWith('ss://')) {
+    try { text = decodeBase64Url(body); } catch { text = body; }
+  }
+  const nodes = [];
+  const seen = new Set();
+  for (const line of String(text).split(/\r?\n/)) {
+    if (!line.startsWith('ss://')) continue;
+    try {
+      const profile = parseShadowsocksUri(line);
+      const hash = line.includes('#') ? line.slice(line.indexOf('#') + 1) : '';
+      let name = `${profile.server}:${profile.serverPort}`;
+      try { if (hash.trim()) name = decodeURIComponent(hash.trim()); } catch { /* keep fallback name */ }
+      if (seen.has(name)) continue;
+      seen.add(name);
+      nodes.push({
+        id: name,
+        name,
+        type: 'ss',
+        server: profile.server,
+        port: profile.serverPort,
+      });
+    } catch { /* skip malformed lines */ }
+  }
+  return nodes;
+}
+
+function measureTcpLatency(server, port, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const socket = nodeNet.createConnection({ host: server, port: Number(port) });
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(value);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(Date.now() - started));
+    socket.once('timeout', () => finish(null));
+    socket.once('error', () => finish(null));
+  });
+}
+
+function applySelectedClashNode(document, nodeName) {
+  const nodes = listClashProxyNodes(document);
+  if (!nodes.length) throw new Error('The VPN subscription did not include any nodes.');
+  const selected = nodes.some((node) => node.id === nodeName) ? nodeName : nodes[0].id;
+  const next = { ...document };
+  // Keep Mac TUN defaults if the subscription omitted them.
+  next.tun = {
+    enable: true,
+    stack: 'gvisor',
+    'auto-route': true,
+    'auto-detect-interface': true,
+    'dns-hijack': ['8.8.8.8:53', 'tcp://8.8.8.8:53'],
+    ...(document.tun && typeof document.tun === 'object' ? document.tun : {}),
+    enable: true,
+  };
+  if (Array.isArray(document['proxy-groups'])) {
+    next['proxy-groups'] = document['proxy-groups'].map((group) => {
+      if (!group || group.type !== 'select' || !Array.isArray(group.proxies) || !group.proxies.includes(selected)) {
+        return group;
+      }
+      return { ...group, proxies: [selected, ...group.proxies.filter((name) => name !== selected)] };
+    });
+  }
+  return { document: next, selected, nodes };
+}
+
 function parseClashShadowsocksProfile(body) {
-  let document;
-  try { document = yaml.load(body); } catch { return null; }
+  const document = parseClashDocument(body);
   const candidate = Array.isArray(document?.proxies)
     ? document.proxies.find((proxy) => proxy?.type === 'ss' && proxy.server && proxy.port && proxy.cipher && proxy.password)
     : null;
@@ -184,6 +222,7 @@ function parseClashShadowsocksProfile(body) {
     password: String(candidate.password),
     plugin,
     pluginOptions: candidate['plugin-opts'] ? String(candidate['plugin-opts']) : undefined,
+    name: typeof candidate.name === 'string' ? candidate.name : undefined,
   };
 }
 
@@ -247,24 +286,71 @@ function secureGetByAddress(address, servername, requestPath, accept = 'text/pla
   });
 }
 
-async function fetchVpnProfile(sourceId = 'relay') {
-  const subscription = subscriptionUrl(sourceId, 'ss');
+async function fetchSubscriptionBody(sourceId = 'relay', format = 'clash') {
+  const subscription = subscriptionUrl(sourceId, format);
   const addresses = await resolvePublicIpv4(subscription.hostname);
   let lastError;
   for (const address of addresses) {
     try {
       const response = await secureGetByAddress(address, subscription.hostname, `${subscription.pathname}${subscription.search}`);
       if (response.status !== 200) throw new Error(`${getVpnSource(sourceId).name} subscription returned ${response.status}.`);
-      const body = response.text.trim();
-      const clashProfile = parseClashShadowsocksProfile(body);
-      if (clashProfile) return clashProfile;
-      const decoded = body.startsWith('ss://') ? body : decodeBase64Url(body);
-      const profile = decoded.split(/\r?\n/).find((line) => line.startsWith('ss://'));
-      if (!profile) throw new Error(`${getVpnSource(sourceId).name} did not return a usable Shadowsocks profile.`);
-      return parseShadowsocksUri(profile);
+      return response.text.trim();
     } catch (error) { lastError = error; }
   }
   throw new Error(lastError?.message || 'Could not download the WLSAPlus relay subscription.');
+}
+
+async function fetchVpnNodes(sourceId = 'relay') {
+  let document = null;
+  let body = '';
+  let nodes = [];
+  try {
+    body = await fetchSubscriptionBody(sourceId, 'clash');
+    document = parseClashDocument(body);
+    nodes = listClashProxyNodes(document);
+  } catch { /* try ss fallback below */ }
+  if (!nodes.length) {
+    const ssBody = await fetchSubscriptionBody(sourceId, 'ss');
+    nodes = listShadowsocksUriNodes(ssBody);
+    if (!document) {
+      document = parseClashDocument(ssBody);
+      if (document) nodes = listClashProxyNodes(document).length ? listClashProxyNodes(document) : nodes;
+    }
+  }
+  if (!nodes.length) throw new Error(`${getVpnSource(sourceId).name} did not return any VPN nodes.`);
+  return { nodes, body, document };
+}
+
+async function fetchVpnProfile(sourceId = 'relay', nodeName = '') {
+  try {
+    const { document, nodes } = await fetchVpnNodes(sourceId);
+    const selected = nodes.some((node) => node.id === nodeName) ? nodeName : nodes[0].id;
+    const proxy = (document.proxies || []).find((item) => item?.name === selected);
+    if (proxy?.type === 'ss' && proxy.server && proxy.port && proxy.cipher && proxy.password) {
+      const plugin = proxy.plugin ? String(proxy.plugin) : undefined;
+      if (plugin && plugin !== 'v2ray-plugin') throw new Error(`The selected node requires an unsupported plugin: ${plugin}.`);
+      return {
+        server: String(proxy.server),
+        serverPort: Number(proxy.port),
+        method: String(proxy.cipher),
+        password: String(proxy.password),
+        plugin,
+        pluginOptions: proxy['plugin-opts'] ? String(proxy['plugin-opts']) : undefined,
+        name: selected,
+      };
+    }
+    // Non-SS nodes are still usable by the Mac clash helper via YAML selection.
+    return { name: selected, clashDocument: document };
+  } catch (error) {
+    // Fall back to legacy SS-only parsing.
+    const body = await fetchSubscriptionBody(sourceId, 'ss');
+    const clashProfile = parseClashShadowsocksProfile(body);
+    if (clashProfile) return clashProfile;
+    const decoded = body.startsWith('ss://') ? body : decodeBase64Url(body);
+    const profile = decoded.split(/\r?\n/).find((line) => line.startsWith('ss://'));
+    if (!profile) throw new Error(`${getVpnSource(sourceId).name} did not return a usable Shadowsocks profile.`);
+    return parseShadowsocksUri(profile);
+  }
 }
 
 async function resolveVpnServer(profile) {
@@ -279,9 +365,6 @@ async function writeVpnConfig(profile, mode) {
   await fs.writeFile(vpnConfigFile(), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
-function phoneRuntimeDirectory() {
-  return app.isPackaged ? path.join(process.resourcesPath, 'phone-core') : path.join(__dirname, '..', 'build', 'phone-core');
-}
 
 function setUpdateStatus(patch) {
   updateStatus = { ...updateStatus, ...patch };
@@ -300,95 +383,141 @@ async function validateVpnConfig(core) {
   }
 }
 
-async function isWindowsAdministrator() {
-  if (process.platform !== 'win32') return false;
-  const script = "([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)";
+
+
+
+async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
+  if (process.platform !== 'darwin') {
+    throw new Error('Administrator VPN restart is only available on macOS.');
+  }
+
+  const { execFile, execSync } = require('node:child_process');
+  const fsSync = require('node:fs');
+
+  const candidateTars = [
+    path.join(process.resourcesPath || '', 'bin', 'mac-vpn.tar.gz'),
+    path.join(__dirname, 'bin', 'mac-vpn.tar.gz'),
+    path.join(__dirname, '..', 'electron', 'bin', 'mac-vpn.tar.gz'),
+  ];
+  const tarPath = candidateTars.find((candidate) => {
+    try { return fsSync.existsSync(candidate); } catch { return false; }
+  });
+  if (!tarPath) {
+    setVpnStatus({
+      state: 'error',
+      message: 'macOS VPN package is missing (bin/mac-vpn.tar.gz). Rebuild the desktop app.',
+      connectedAt: null,
+      mode,
+      requiresElevation: false,
+    });
+    throw new Error('macOS VPN package is missing.');
+  }
+
+  const targetDir = path.join(app.getPath('userData'), 'vpn-bin');
+  const clashPkgDir = path.join(targetDir, 'clash_pkg');
+  const execPath = path.join(clashPkgDir, 'clash');
+  const scriptPath = path.join(targetDir, 'run.sh');
+
   try {
-    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
-    return stdout.trim().toLowerCase() === 'true';
-  } catch { return false; }
-}
+    execSync(`mkdir -p ${JSON.stringify(targetDir)}`);
+    execSync(`tar -xzf ${JSON.stringify(tarPath)} -C ${JSON.stringify(targetDir)}`);
+    if (!fsSync.existsSync(execPath)) throw new Error('VPN helper binary was not found after extraction.');
+    execSync(`chmod +x ${JSON.stringify(execPath)}`);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    setVpnStatus({
+      state: 'error',
+      message: `Could not prepare the macOS VPN helper. ${detail}`,
+      connectedAt: null,
+      mode,
+      requiresElevation: false,
+    });
+    throw err;
+  }
 
-function powershellLiteral(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
-}
-
-function quoteWindowsArgument(value) {
-  const text = String(value);
-  if (!/[\s"]/u.test(text)) return text;
-  return `"${text.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1')}"`;
-}
-
-async function restartVpnElevated(mode, sourceId = 'relay') {
-  if (process.platform === 'darwin') {
-    const { exec, execSync } = require('child_process');   
-    const path = require('path');
-    const fs = require('fs');
-    const { app } = require('electron');
-  
-    const tarPath = path.join(process.resourcesPath, 'bin/mac-vpn.tar.gz');
-    const targetDir = path.join(app.getPath('userData'), 'vpn-bin');
-    const clashPkgDir = path.join(targetDir, 'clash_pkg');
-    const execPath = path.join(clashPkgDir, 'clash');
-    const scriptPath = path.join(targetDir, 'run.sh');
-
-    // 1. 在普通权限下同步完成解压与赋予执行权限（不引发 AppleScript 阻塞）
-    try {
-      execSync(`mkdir -p "${targetDir}"`);
-      execSync(`tar -xzf "${tarPath}" -C "${targetDir}"`);
-      execSync(`chmod +x "${execPath}"`);
-    } catch (err) {
-      console.error('解压或文件准备失败:', err);
-      setVpnStatus({ state: 'error', message: 'Failed to extract VPN binaries.', connectedAt: null, mode });
-      throw err;
-    }
-
-    // 2. 写入独立的 Shell 启动脚本，内部用 > /dev/null 2>&1 & 脱离终端输出
-    const scriptContent = `#!/bin/bash
+  const scriptContent = `#!/bin/bash
 "${execPath}" -d "${clashPkgDir}" > /dev/null 2>&1 &
 `;
-    try {
-      if (fs.existsSync(scriptPath)) {
-        fs.rmSync(scriptPath, { force: true });
-      }
-    } catch (e) {
-      console.warn('清理旧 run.sh 失败:', e);
-    }
-    fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
-
-    // 3. AppleScript 只提权执行 run.sh 脚本，执行完即刻返回，不会卡住
-    const sudoScript = `osascript -e 'do shell script quoted form of posix path of "${scriptPath}" with administrator privileges'`;
-    
-    return new Promise((resolve, reject) => {
-      exec(sudoScript, (error, stdout) => {
-        if (error) {
-          console.error('用户拒绝提供管理员权限或启动失败:', error);
-          setVpnStatus({ state: 'error', message: 'User denied administrator privileges.', connectedAt: null, mode });
-          reject(error);
-        } else {
-          setVpnStatus({ state: 'connected', message: '', connectedAt: Date.now(), mode, requiresElevation: true });
-          resolve(stdout);
-        }
-      });
-    });
-  }
-  if (process.platform !== 'win32' || mode !== 'full-tunnel') throw new Error('Administrator restart is available for Windows full-device mode only.');
-  if (await isWindowsAdministrator()) return connectVpn(mode, sourceId);
-
-  const launchArguments = app.isPackaged
-    ? ['--vpn-autoconnect=full-tunnel', `--vpn-source=${getVpnSource(sourceId).id}`]
-    : [app.getAppPath(), '--vpn-autoconnect=full-tunnel', `--vpn-source=${getVpnSource(sourceId).id}`];
-  const argumentString = launchArguments.map(quoteWindowsArgument).join(' ');
-  const script = `Start-Process -FilePath ${powershellLiteral(process.execPath)} -ArgumentList ${powershellLiteral(argumentString)} -Verb RunAs`;
-  app.releaseSingleInstanceLock();
+  // Refresh proxies from the live subscription and pin the user-selected node.
   try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
-  } catch (error) {
-    app.requestSingleInstanceLock();
-    throw new Error(error?.code === 1223 ? 'Administrator approval was cancelled.' : 'Could not restart WLSAPlus as administrator.');
+    setVpnStatus({
+      state: 'connecting',
+      message: 'Downloading VPN nodes…',
+      connectedAt: null,
+      mode,
+      sourceId: getVpnSource(sourceId).id,
+      requiresElevation: false,
+    });
+    const { document } = await fetchVpnNodes(sourceId);
+    const applied = applySelectedClashNode(document, nodeName);
+    const configPath = path.join(clashPkgDir, 'config.yaml');
+    fsSync.writeFileSync(configPath, yaml.dump(applied.document, { lineWidth: -1, noRefs: true }), 'utf8');
+    nodeName = applied.selected;
+  } catch (err) {
+    // Keep bundled config.yaml if subscription refresh fails — still try to pin node name locally.
+    try {
+      const configPath = path.join(clashPkgDir, 'config.yaml');
+      if (fsSync.existsSync(configPath)) {
+        const document = parseClashDocument(fsSync.readFileSync(configPath, 'utf8'));
+        const applied = applySelectedClashNode(document, nodeName);
+        fsSync.writeFileSync(configPath, yaml.dump(applied.document, { lineWidth: -1, noRefs: true }), 'utf8');
+        nodeName = applied.selected;
+      }
+    } catch {
+      /* continue with the packaged default config */
+    }
   }
-  setTimeout(() => app.quit(), 100);
-  return setVpnStatus({ state: 'connecting', message: 'Restarting with administrator access...', connectedAt: null, mode, requiresElevation: false });
+
+  try {
+    if (fsSync.existsSync(scriptPath)) fsSync.rmSync(scriptPath, { force: true });
+  } catch { /* ignore cleanup */ }
+  fsSync.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+
+  setVpnStatus({
+    state: 'connecting',
+    message: nodeName ? `Waiting for approval to connect “${nodeName}”…` : 'Waiting for macOS administrator approval…',
+    connectedAt: null,
+    mode,
+    sourceId: getVpnSource(sourceId).id,
+    requiresElevation: true,
+  });
+
+  const escapedScript = scriptPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return new Promise((resolve, reject) => {
+    execFile('osascript', ['-e', `do shell script "${escapedScript}" with administrator privileges`], (error, stdout) => {
+      if (error) {
+        const detail = String(error.message || error.stderr || '');
+        if (/User canceled|user cancelled|-128|authorization canceled/i.test(detail) || error.code === 1 || error.code === 128) {
+          resolve(setVpnStatus({
+            state: 'idle',
+            message: 'Administrator approval was cancelled. Tap Connect to try again.',
+            connectedAt: null,
+            mode,
+            requiresElevation: true,
+          }));
+          return;
+        }
+        setVpnStatus({
+          state: 'error',
+          message: 'Could not start the macOS VPN after authorization.',
+          connectedAt: null,
+          mode,
+          requiresElevation: true,
+        });
+        reject(error);
+        return;
+      }
+      resolve(setVpnStatus({
+        state: 'connected',
+        message: nodeName ? `Connected · ${nodeName}` : 'Connected with macOS VPN helper',
+        connectedAt: new Date().toISOString(),
+        mode,
+        sourceId: getVpnSource(sourceId).id,
+        nodeName: nodeName || undefined,
+        requiresElevation: false,
+      }));
+    });
+  });
 }
 
 async function waitForPort(port, timeoutMs = 10_000) {
@@ -406,15 +535,6 @@ async function waitForPort(port, timeoutMs = 10_000) {
   throw new Error('The VPN core did not start in time.');
 }
 
-async function waitForFullTunnelInterface() {
-  if (process.platform !== 'win32') return;
-  const script = "$deadline = [DateTime]::UtcNow.AddSeconds(12); do { $adapter = Get-NetAdapter -IncludeHidden -Name 'WLSAPlus' -ErrorAction SilentlyContinue; $dns = @((Get-DnsClientServerAddress -InterfaceAlias 'WLSAPlus' -AddressFamily IPv4 -ErrorAction SilentlyContinue).ServerAddresses); if ($adapter.Status -eq 'Up' -and $dns.Count -gt 0) { exit 0 }; Start-Sleep -Milliseconds 300 } while ([DateTime]::UtcNow -lt $deadline); exit 1";
-  try {
-    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 15_000 });
-  } catch {
-    throw new Error('WLSAPlus relay could not finish creating the Windows full-device tunnel.');
-  }
-}
 
 async function probeVpnUrls(probeSession, urls, timeoutMs) {
   const controller = new AbortController();
@@ -459,22 +579,8 @@ async function verifyVpnConnection(mode) {
   }
 }
 
-async function readWindowsProxyValue(name) {
-  try {
-    const { stdout } = await execFileAsync('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', '/v', name], { windowsHide: true });
-    const match = stdout.match(new RegExp(`^\\s*${name}\\s+(REG_\\w+)\\s+(.*)$`, 'mi'));
-    return match ? { exists: true, type: match[1], value: match[2].trim() } : { exists: false };
-  } catch { return { exists: false }; }
-}
 
-async function writeWindowsProxyValue(name, type, value) {
-  await execFileAsync('reg.exe', ['add', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', '/v', name, '/t', type, '/d', String(value), '/f'], { windowsHide: true });
-}
 
-async function notifyWindowsProxyChanged() {
-  const script = "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class WlsaProxy { [DllImport(\"wininet.dll\")] public static extern bool InternetSetOption(IntPtr h, int o, IntPtr b, int l); }'; [WlsaProxy]::InternetSetOption([IntPtr]::Zero,39,[IntPtr]::Zero,0) | Out-Null; [WlsaProxy]::InternetSetOption([IntPtr]::Zero,37,[IntPtr]::Zero,0) | Out-Null";
-  await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
-}
 
 async function readMacProxy(service, kind) {
   const { stdout } = await execFileAsync('networksetup', [`-get${kind}proxy`, service]);
@@ -483,30 +589,16 @@ async function readMacProxy(service, kind) {
 }
 
 async function captureSystemProxyState() {
-  if (process.platform === 'win32') {
-    return { platform: 'win32', values: {
-      ProxyEnable: await readWindowsProxyValue('ProxyEnable'), ProxyServer: await readWindowsProxyValue('ProxyServer'), ProxyOverride: await readWindowsProxyValue('ProxyOverride'),
-    } };
-  }
-  if (process.platform === 'darwin') {
-    const { stdout } = await execFileAsync('networksetup', ['-listallnetworkservices']);
-    const services = stdout.split(/\r?\n/).slice(1).map((value) => value.trim()).filter((value) => value && !value.startsWith('*'));
-    return { platform: 'darwin', services: await Promise.all(services.map(async (service) => ({ service, web: await readMacProxy(service, 'web'), secure: await readMacProxy(service, 'secureweb') }))) };
-  }
-  throw new Error('VPN is unavailable on this platform.');
+  if (process.platform !== 'darwin') throw new Error('VPN system proxy is only available on macOS.');
+  const { stdout } = await execFileAsync('networksetup', ['-listallnetworkservices']);
+  const services = stdout.split(/\r?\n/).slice(1).map((value) => value.trim()).filter((value) => value && !value.startsWith('*'));
+  return { platform: 'darwin', services: await Promise.all(services.map(async (service) => ({ service, web: await readMacProxy(service, 'web'), secure: await readMacProxy(service, 'secureweb') }))) };
 }
 
 async function enableSystemProxy() {
   const state = await captureSystemProxyState();
   await fs.mkdir(vpnDirectory(), { recursive: true });
   await fs.writeFile(vpnProxyStateFile(), JSON.stringify(state), { mode: 0o600 });
-  if (process.platform === 'win32') {
-    await writeWindowsProxyValue('ProxyServer', 'REG_SZ', `http=127.0.0.1:${VPN_PORT};https=127.0.0.1:${VPN_PORT}`);
-    await writeWindowsProxyValue('ProxyOverride', 'REG_SZ', '<local>');
-    await writeWindowsProxyValue('ProxyEnable', 'REG_DWORD', '1');
-    await notifyWindowsProxyChanged();
-    return;
-  }
   for (const item of state.services) {
     await execFileAsync('networksetup', ['-setwebproxy', item.service, '127.0.0.1', String(VPN_PORT)]);
     await execFileAsync('networksetup', ['-setsecurewebproxy', item.service, '127.0.0.1', String(VPN_PORT)]);
@@ -516,19 +608,14 @@ async function enableSystemProxy() {
 }
 
 async function restoreSystemProxy(state) {
-  if (!state) return;
-  if (state.platform === 'win32' && process.platform === 'win32') {
-    for (const [name, value] of Object.entries(state.values || {})) {
-      if (value.exists) await writeWindowsProxyValue(name, value.type, value.value);
-      else await execFileAsync('reg.exe', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings', '/v', name, '/f'], { windowsHide: true }).catch(() => {});
-    }
-    await notifyWindowsProxyChanged();
-  } else if (state.platform === 'darwin' && process.platform === 'darwin') {
-    for (const item of state.services || []) {
-      for (const [kind, value] of [['web', item.web], ['secureweb', item.secure]]) {
-        if (value.server && value.port) await execFileAsync('networksetup', [`-set${kind}proxy`, item.service, value.server, String(value.port)]);
-        await execFileAsync('networksetup', [`-set${kind}proxystate`, item.service, value.enabled ? 'on' : 'off']);
-      }
+  if (!state || state.platform !== 'darwin' || process.platform !== 'darwin') {
+    await fs.rm(vpnProxyStateFile(), { force: true });
+    return;
+  }
+  for (const item of state.services || []) {
+    for (const [kind, value] of [['web', item.web], ['secureweb', item.secure]]) {
+      if (value?.server && value?.port) await execFileAsync('networksetup', [`-set${kind}proxy`, item.service, value.server, String(value.port)]);
+      await execFileAsync('networksetup', [`-set${kind}proxystate`, item.service, value?.enabled ? 'on' : 'off']);
     }
   }
   await fs.rm(vpnProxyStateFile(), { force: true });
@@ -554,59 +641,40 @@ function normalizeVpnMode(value) {
   return VPN_CONNECTION_MODES.has(value) ? value : 'full-tunnel';
 }
 
-async function connectVpn(requestedMode = 'full-tunnel', requestedSource = 'relay') {
+async function connectVpn(requestedMode = 'full-tunnel', requestedSource = 'relay', nodeName = '') {
   const mode = normalizeVpnMode(requestedMode);
   const sourceId = getVpnSource(requestedSource).id;
-  if (vpnProcess && vpnStatus.state === 'connected' && vpnStatus.mode === mode && vpnStatus.sourceId === sourceId) return vpnStatus;
-  if (vpnProcess) await disconnectVpn();
-  if (process.platform === 'darwin') {
-    startMacVpn();
-    return setVpnStatus({ state: 'connected', message: '', connectedAt: Date.now(), mode, requiresElevation: true });
-  }
-
-  if (mode === 'full-tunnel' && !(await isWindowsAdministrator())) {
-    return restartVpnElevated(mode, sourceId);
-  }
-  const sourceName = getVpnSource(sourceId).name;
-  setVpnStatus({ state: 'connecting', message: `Connecting ${sourceName} ${mode === 'full-tunnel' ? 'full-device tunnel' : 'web proxy'}...`, connectedAt: null, mode, sourceId, requiresElevation: false });
-  try {
-    const core = vpnCorePath();
-    await fs.access(core);
-    const profile = await resolveVpnServer(await fetchVpnProfile(sourceId));
-    if (profile.plugin === 'v2ray-plugin') await fs.access(path.join(path.dirname(core), process.platform === 'win32' ? 'v2ray-plugin.exe' : 'v2ray-plugin'));
-    await writeVpnConfig(profile, mode);
-    await validateVpnConfig(core);
-    vpnDisconnecting = false;
-    vpnProcessError = '';
-    const environment = { ...process.env };
-    const pathKey = Object.keys(environment).find((key) => key.toLowerCase() === 'path') || 'PATH';
-    environment[pathKey] = `${path.dirname(core)}${path.delimiter}${environment[pathKey] || ''}`;
-    const child = spawn(core, ['run', '-c', vpnConfigFile()], { env: environment, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] });
-    vpnProcess = child;
-    child.stderr.on('data', (chunk) => { vpnProcessError = `${vpnProcessError}${chunk}`.slice(-8_192); });
-    child.once('error', (error) => { vpnProcessError = error.message; });
-    child.once('exit', (code) => {
-      if (vpnProcess !== child) return;
-      vpnProcess = null;
-      if (!vpnDisconnecting) {
-        const detail = vpnProcessError.trim().split(/\r?\n/).at(-1);
-        void restoreSavedSystemProxy().finally(() => setVpnStatus({ state: 'error', message: detail || `WLSAPlus relay stopped unexpectedly (${code ?? 'unknown'}).`, connectedAt: null, mode, requiresElevation: false }));
-      }
+  if (process.platform !== 'darwin') {
+    return setVpnStatus({
+      state: 'error',
+      message: 'VPN is only available in the macOS desktop app.',
+      connectedAt: null,
+      mode,
+      sourceId,
+      requiresElevation: false,
     });
-    await waitForPort(VPN_PORT);
-    if (mode === 'full-tunnel') await waitForFullTunnelInterface();
-    await verifyVpnConnection(mode);
-    if (mode === 'system-proxy') await enableSystemProxy();
-    return setVpnStatus({ state: 'connected', message: mode === 'full-tunnel' ? `Full device protected by ${sourceName}` : `Web traffic protected by ${sourceName}`, connectedAt: new Date().toISOString(), mode, sourceId, requiresElevation: false });
+  }
+  if (vpnStatus.state === 'connected' && vpnStatus.mode === mode && vpnStatus.sourceId === sourceId && (!nodeName || vpnStatus.nodeName === nodeName)) {
+    return vpnStatus;
+  }
+  if (vpnProcess) await disconnectVpn();
+
+  setVpnStatus({
+    state: 'connecting',
+    message: 'Preparing macOS VPN…',
+    connectedAt: null,
+    mode,
+    sourceId,
+    nodeName: nodeName || undefined,
+    requiresElevation: false,
+  });
+  try {
+    return await restartVpnElevated(mode, sourceId, nodeName);
   } catch (error) {
-    const processExited = !vpnProcess || vpnProcess.exitCode !== null;
-    vpnDisconnecting = true;
-    await stopVpnProcess();
-    await restoreSavedSystemProxy().catch(() => {});
-    const missingCore = error && (error.code === 'ENOENT' || error.code === 'EACCES');
-    const processDetail = processExited ? vpnProcessError.trim().split(/\r?\n/).at(-1) : '';
-    const message = missingCore ? 'VPN core is missing. Run npm run vpn:core.' : (processDetail || (error instanceof Error ? error.message : `Could not connect to ${getVpnSource(sourceId).name}.`));
-    return setVpnStatus({ state: 'error', message, connectedAt: null, mode, sourceId, requiresElevation: false });
+    if (vpnStatus.state === 'connecting' || vpnStatus.state === 'idle') return vpnStatus;
+    if (vpnStatus.state === 'error') return vpnStatus;
+    const message = error instanceof Error ? error.message : `Could not connect to ${getVpnSource(sourceId).name}.`;
+    return setVpnStatus({ state: 'error', message, connectedAt: null, mode, sourceId, requiresElevation: true });
   }
 }
 
@@ -678,7 +746,6 @@ async function cleanupBeforeUpdate() {
   if (updateInstallRequested) return;
   updateInstallRequested = true;
   isQuitting = true;
-  phoneManager.dispose();
   if (vpnProcess || vpnStatus.state === 'connected') await disconnectVpn().catch(() => {});
   quitAfterCleanup = true;
 }
@@ -708,32 +775,6 @@ function configureAppUpdater() {
   });
 }
 
-async function captureScreenRegion(event) {
-  if (process.platform !== 'win32') throw new Error('Screen translation is available on Windows only.');
-  const parent = BrowserWindow.fromWebContents(event.sender);
-  if (!parent || parent.isDestroyed()) throw new Error('The application window is unavailable.');
-  const display = screen.getDisplayMatching(parent.getBounds());
-  parent.hide();
-  let sources;
-  try {
-    await delay(180);
-    sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) } });
-  } finally {
-    if (!parent.isDestroyed()) { parent.show(); parent.focus(); }
-  }
-  const source = sources.find((item) => String(item.display_id) === String(display.id)) || sources[0];
-  if (!source || source.thumbnail.isEmpty()) throw new Error('Could not capture the screen.');
-  const token = crypto.randomUUID();
-  const overlay = new BrowserWindow({ ...display.bounds, frame: false, resizable: false, movable: false, alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#000000', webPreferences: { preload: path.join(__dirname, 'capture-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (value) => { if (settled) return; settled = true; ipcMain.removeListener('capture:result', resultHandler); if (!overlay.isDestroyed()) overlay.close(); resolve(value); };
-    const resultHandler = (ipcEvent, result) => { if (ipcEvent.sender === overlay.webContents && result?.token === token) finish(typeof result.image === 'string' ? result.image : null); };
-    ipcMain.on('capture:result', resultHandler);
-    overlay.on('closed', () => finish(null));
-    overlay.loadFile(path.join(__dirname, 'capture.html')).then(() => overlay.webContents.send('capture:init', { token, image: source.thumbnail.toDataURL() })).catch((error) => { ipcMain.removeListener('capture:result', resultHandler); reject(error); });
-  });
-}
 
 async function translateWithGoogle(value, source, target) {
   const params = new URLSearchParams({ client: 'gtx', sl: source, tl: target, dt: 't', q: value });
@@ -812,22 +853,6 @@ async function readJson(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
 }
 
-async function persistCards() {
-  await fs.mkdir(app.getPath('userData'), { recursive: true });
-  await fs.writeFile(cardFile(), JSON.stringify([...cardConfigs.values()], null, 2));
-}
-
-async function getCardSettings() {
-  return { launchAtStartup: Boolean((await readJson(cardSettingsFile(), { launchAtStartup: true })).launchAtStartup) };
-}
-
-async function setLaunchAtStartup(value) {
-  const launchAtStartup = Boolean(value);
-  await fs.mkdir(app.getPath('userData'), { recursive: true });
-  await fs.writeFile(cardSettingsFile(), JSON.stringify({ launchAtStartup }, null, 2));
-  if (process.platform === 'win32' && app.isPackaged) app.setLoginItemSettings({ openAtLogin: launchAtStartup, args: ['--autostart'] });
-  return { launchAtStartup };
-}
 
 function validateBaseUrl(value) {
   const url = new URL(String(value));
@@ -875,53 +900,53 @@ ipcMain.handle('powerschool:clear-session', async (_event, baseUrl) => {
   await powerSchoolSession().clearStorageData({ origin, storages: ['cookies'] });
 });
 
-function createCardWindow(id, type, bounds) {
-  const size = type === 'today' || type === 'todo' ? { width: 340, height: 360 } : { width: 340, height: 230 };
-  const win = new BrowserWindow({ ...size, ...(bounds || {}), minWidth: 300, minHeight: 220, maxWidth: 720, maxHeight: 760, resizable: true, frame: false, show: false, focusable: true, alwaysOnTop: false, skipTaskbar: true, transparent: false, backgroundColor: '#ffffff', title: `WLSAPlus ${type}`, icon: iconPath(), webPreferences: webPreferences({ backgroundThrottling: false }) });
-  win.once('ready-to-show', () => win.showInactive());
-  win.wlsaType = type;
-  cards.set(id, win);
-  cardConfigs.set(id, { id, type, bounds: win.getBounds() });
-  win.on('move', () => { if (!isQuitting) { cardConfigs.set(id, { id, type, bounds: win.getBounds() }); void persistCards(); } });
-  win.on('resize', () => { if (!isQuitting) { cardConfigs.set(id, { id, type, bounds: win.getBounds() }); void persistCards(); } });
-  win.on('closed', () => { cards.delete(id); if (!isQuitting) { cardConfigs.delete(id); void persistCards(); } });
-  win.loadURL(appUrl(`widget/${type}`));
-  return { id, type };
-}
-
-ipcMain.handle('cards:list', () => [...cards].map(([id, win]) => ({ id, type: win.wlsaType })));
-ipcMain.handle('cards:get-settings', () => getCardSettings());
-ipcMain.handle('cards:set-settings', (_event, value) => setLaunchAtStartup(value?.launchAtStartup));
-ipcMain.handle('cards:add', (_event, type) => {
-  if (process.platform !== 'win32' || !CARD_TYPES.has(type)) throw new Error('Desktop cards are only available on Windows.');
-  const id = nextCardId++;
-  const offset = (id - 1) % 4;
-  return createCardWindow(id, type, { x: 32 + offset * 350, y: 80 + Math.floor((id - 1) / 4) * 260 });
-});
-ipcMain.handle('cards:remove', (_event, id) => { cards.get(Number(id))?.close(); });
-ipcMain.handle('cards:close-all', () => closeAllCards(cards));
 ipcMain.handle('vpn:status', () => vpnStatus);
-ipcMain.handle('vpn:connect', (_event, mode, sourceId) => connectVpn(mode, sourceId));
+ipcMain.handle('vpn:connect', (_event, mode, sourceId, nodeName) => connectVpn(mode, sourceId, nodeName));
+ipcMain.handle('vpn:list-nodes', async (_event, sourceId) => {
+  const { nodes } = await fetchVpnNodes(sourceId || 'relay');
+  return nodes;
+});
+ipcMain.handle('vpn:test-latency', async (_event, nodes) => {
+  const list = Array.isArray(nodes) ? nodes.slice(0, 80) : [];
+  const measured = [];
+  for (const node of list) {
+    const server = typeof node?.server === 'string' ? node.server : '';
+    const port = Number(node?.port);
+    let latencyMs = null;
+    if (server && Number.isFinite(port) && port > 0) {
+      latencyMs = await measureTcpLatency(server, port);
+    }
+    measured.push({ ...node, latencyMs });
+  }
+  // Faster nodes first; unknown latency goes last.
+  measured.sort((a, b) => {
+    if (a.latencyMs == null && b.latencyMs == null) return 0;
+    if (a.latencyMs == null) return 1;
+    if (b.latencyMs == null) return -1;
+    return a.latencyMs - b.latencyMs;
+  });
+  return measured;
+});
 ipcMain.handle('vpn:disconnect', () => disconnectVpn());
-ipcMain.handle('vpn:restart-elevated', (_event, mode, sourceId) => restartVpnElevated(normalizeVpnMode(mode), sourceId));
+ipcMain.handle('vpn:restart-elevated', (_event, mode, sourceId, nodeName) => restartVpnElevated(normalizeVpnMode(mode), sourceId, nodeName));
 ipcMain.handle('updater:status', () => updateStatus);
 ipcMain.handle('updater:check', () => checkForAppUpdate());
 ipcMain.handle('updater:download', () => downloadAppUpdate());
 ipcMain.handle('updater:install', () => installAppUpdate());
 ipcMain.handle('translator:translate', (_event, text, source, target) => translateText(text, source, target));
-ipcMain.handle('translator:capture-region', (event) => captureScreenRegion(event));
-ipcMain.handle('phone:status', () => phoneManager.getStatus());
-ipcMain.handle('phone:network-status', async () => {
-  if (process.platform !== 'win32') return { state: 'stopped', active: 0 };
-  await phoneNetwork.load(); return phoneNetwork.getStatus();
-});
-ipcMain.handle('phone:connect', (_event, options) => phoneManager.connect({ turnScreenOff: options?.turnScreenOff !== false }));
-ipcMain.handle('phone:start', (_event, options) => phoneManager.start({ turnScreenOff: options?.turnScreenOff !== false }));
-ipcMain.handle('phone:stop', () => phoneManager.stop());
-ipcMain.handle('phone:disconnect', () => phoneManager.disconnect());
-ipcMain.handle('phone:control', (_event, action) => phoneManager.control(action));
+ipcMain.handle('translator:capture-region', () => Promise.reject(new Error('Screen translation is not available on macOS.')));
 
-if (hasSingleInstanceLock && !isSquirrelEvent) {
+ipcMain.handle('notifications:show-class-reminder', (_event, options) => {
+  if (process.platform !== 'darwin') return false;
+  if (!Notification.isSupported()) return false;
+  const title = String(options?.title || 'Class starting soon').slice(0, 120);
+  const body = String(options?.body || '').slice(0, 240);
+  const notification = new Notification({ title, body, silent: false });
+  notification.show();
+  return true;
+});
+
+if (hasSingleInstanceLock) {
   app.on('second-instance', (_event, commandLine) => {
     if (commandLine.includes('--prepare-update')) {
       void cleanupBeforeUpdate().finally(() => app.quit());
@@ -932,8 +957,7 @@ if (hasSingleInstanceLock && !isSquirrelEvent) {
 }
 
 app.whenReady().then(async () => {
-  if (isSquirrelEvent || !hasSingleInstanceLock) return;
-  if (process.platform === 'win32') app.setAppUserModelId('cn.org.wlsash.wlsaplus');
+  if (!hasSingleInstanceLock) return;
   if (prepareUpdateMode) {
     await cleanupBeforeUpdate();
     app.quit();
@@ -942,22 +966,7 @@ app.whenReady().then(async () => {
   configureAppUpdater();
   await restoreSavedSystemProxy().catch(() => {});
   await appSession().clearStorageData({ storages: ['serviceworkers', 'cachestorage'] }).catch(() => {});
-  if (process.platform === 'win32' && app.isPackaged) {
-    const settings = await getCardSettings();
-    app.setLoginItemSettings({ openAtLogin: settings.launchAtStartup, args: ['--autostart'] });
-  }
-  const savedCards = await readJson(cardFile(), []);
-  if (process.platform === 'win32' && Array.isArray(savedCards)) {
-    for (const config of savedCards) {
-      if (!CARD_TYPES.has(config.type)) continue;
-      const id = Number(config.id);
-      if (!Number.isInteger(id) || id < 1) continue;
-      nextCardId = Math.max(nextCardId, id + 1);
-      cardConfigs.set(id, config);
-      createCardWindow(id, config.type, config.bounds);
-    }
-  }
-  if (!isAutostart || cards.size === 0 || vpnAutoConnectMode) showMainWindow(vpnAutoConnectMode ? 'tools/vpn' : '');
+  if (!isAutostart || vpnAutoConnectMode) showMainWindow(vpnAutoConnectMode ? 'tools/vpn' : '');
   if (vpnAutoConnectMode) void connectVpn(vpnAutoConnectMode, vpnAutoConnectSource);
   if (updatesSupported && !vpnAutoConnectMode) {
     const updateTimer = setTimeout(() => void checkForAppUpdate(), 8_000);
@@ -967,7 +976,6 @@ app.whenReady().then(async () => {
 });
 app.on('before-quit', (event) => {
   isQuitting = true;
-  phoneManager.dispose();
   if ((vpnProcess || vpnStatus.state === 'connected') && !quitAfterCleanup) {
     event.preventDefault();
     void disconnectVpn().finally(() => { quitAfterCleanup = true; app.quit(); });

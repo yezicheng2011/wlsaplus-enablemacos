@@ -28,8 +28,6 @@ module.exports = {
       /^\/src($|\/)/,
       /^\/public($|\/)/,
       /^\/scripts($|\/)/,
-      /^\/phone-network($|\/)/,
-      /^\/phone-relay-worker($|\/)/,
       /^\/powerschool-worker($|\/)/,
       /^\/vpn-subscription-worker($|\/)/,
       /^\/electron\/.*\.test\.cjs$/,

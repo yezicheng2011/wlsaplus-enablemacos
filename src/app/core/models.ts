@@ -169,6 +169,8 @@ export interface AppSettings {
   color: AppColor;
   tuningEnabled: boolean;
   tunedTime: string | null;
+  /** macOS desktop: notify a few minutes before each class starts. */
+  classRemindersEnabled: boolean;
 }
 
 export interface PlatformInfo {
@@ -181,34 +183,18 @@ export interface PlatformInfo {
   supportsPhoneControl: boolean;
 }
 
-export type PhoneConnectionState = 'unsupported' | 'idle' | 'waiting-usb' | 'waiting-authorization' | 'configuring' | 'connecting' | 'reconnecting' | 'ready' | 'mirroring' | 'stopping' | 'error';
-export type PhoneControlAction = 'back' | 'home' | 'recents' | 'power' | 'volume-up' | 'volume-down';
-
-export interface PhoneNetworkStatus {
-  state: string;
-  active: number;
-  protocol?: number;
-  connected?: boolean;
-  repairRequired?: boolean;
-  pairedPhone?: string | null;
-  error?: string;
-  connectionError?: string;
-  relay?: string;
-}
-
-export interface PhoneStatus {
-  state: PhoneConnectionState;
-  message: string;
-  deviceName: string | null;
-  serial: string | null;
-  ip: string | null;
-  androidVersion: string | null;
-  audioAvailable: boolean | null;
-  screenOff: boolean;
-}
 
 export type VpnConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'delegated' | 'error' | 'unavailable';
 export type VpnConnectionMode = 'full-tunnel';
+
+export interface VpnNode {
+  id: string;
+  name: string;
+  type: string;
+  server?: string;
+  port?: number;
+  latencyMs?: number | null;
+}
 
 export interface VpnStatus {
   state: VpnConnectionState;
@@ -216,6 +202,7 @@ export interface VpnStatus {
   connectedAt: string | null;
   mode: VpnConnectionMode | 'external-client' | 'unavailable';
   sourceId?: string;
+  nodeName?: string;
   requiresElevation?: boolean;
 }
 

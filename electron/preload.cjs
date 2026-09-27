@@ -14,19 +14,13 @@ contextBridge.exposeInMainWorld('wlsaplus', {
     request: (options) => ipcRenderer.invoke('powerschool:request', options),
     clearSession: (baseUrl) => ipcRenderer.invoke('powerschool:clear-session', baseUrl),
   },
-  desktopCards: {
-    list: () => ipcRenderer.invoke('cards:list'),
-    add: (type) => ipcRenderer.invoke('cards:add', type),
-    remove: (id) => ipcRenderer.invoke('cards:remove', id),
-    closeAll: () => ipcRenderer.invoke('cards:close-all'),
-    getSettings: () => ipcRenderer.invoke('cards:get-settings'),
-    setSettings: (value) => ipcRenderer.invoke('cards:set-settings', value),
-  },
   vpn: {
     status: () => ipcRenderer.invoke('vpn:status'),
-    connect: (mode, sourceId) => ipcRenderer.invoke('vpn:connect', mode, sourceId),
+    listNodes: (sourceId) => ipcRenderer.invoke('vpn:list-nodes', sourceId),
+    testLatency: (nodes) => ipcRenderer.invoke('vpn:test-latency', nodes),
+    connect: (mode, sourceId, nodeName) => ipcRenderer.invoke('vpn:connect', mode, sourceId, nodeName),
     disconnect: () => ipcRenderer.invoke('vpn:disconnect'),
-    restartElevated: (mode, sourceId) => ipcRenderer.invoke('vpn:restart-elevated', mode, sourceId),
+    restartElevated: (mode, sourceId, nodeName) => ipcRenderer.invoke('vpn:restart-elevated', mode, sourceId, nodeName),
     onStatus: (callback) => {
       const handler = (_event, status) => callback(status);
       ipcRenderer.on('vpn:status', handler);
@@ -46,27 +40,9 @@ contextBridge.exposeInMainWorld('wlsaplus', {
   },
   translator: {
     translate: (text, source, target) => ipcRenderer.invoke('translator:translate', text, source, target),
-    captureRegion: () => process.platform === 'win32'
-      ? ipcRenderer.invoke('translator:capture-region')
-      : Promise.reject(new Error('Screen translation is available on Windows only.')),
+    captureRegion: () => Promise.reject(new Error('Screen translation is not available on macOS.')),
   },
-  phone: {
-    networkStatus: () => ipcRenderer.invoke('phone:network-status'),
-    onNetworkStatus: callback => {
-      const handler = (_event, status) => callback(status);
-      ipcRenderer.on('phone:network-status', handler);
-      return () => ipcRenderer.removeListener('phone:network-status', handler);
-    },
-    status: () => ipcRenderer.invoke('phone:status'),
-    connect: (options) => ipcRenderer.invoke('phone:connect', options),
-    start: (options) => ipcRenderer.invoke('phone:start', options),
-    stop: () => ipcRenderer.invoke('phone:stop'),
-    disconnect: () => ipcRenderer.invoke('phone:disconnect'),
-    control: (action) => ipcRenderer.invoke('phone:control', action),
-    onStatus: (callback) => {
-      const handler = (_event, status) => callback(status);
-      ipcRenderer.on('phone:status', handler);
-      return () => ipcRenderer.removeListener('phone:status', handler);
-    },
+  notifications: {
+    showClassReminder: (options) => ipcRenderer.invoke('notifications:show-class-reminder', options),
   },
 });

@@ -1,5 +1,4 @@
 import { Injectable } from '@angular/core';
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import type { PlatformHttpResponse, PlatformInfo } from './models';
 
 export const WEB_POWERSCHOOL_ORIGIN = 'https://ps.wlsash.org.cn';
@@ -21,27 +20,6 @@ export class PlatformService {
 
   async request(options: NativeRequest): Promise<PlatformHttpResponse> {
     if (window.wlsaplus) return window.wlsaplus.powerschool.request(options);
-
-    if (Capacitor.isNativePlatform()) {
-      const url = new URL(options.path, options.baseUrl).toString();
-      const headers = { ...(options.headers ?? {}) };
-      if (options.referrerPath) {
-        const origin = new URL(options.baseUrl).origin;
-        const referrer = new URL(options.referrerPath, `${origin}/`);
-        if (referrer.origin !== origin) throw new Error('Cross-origin PowerSchool referrer blocked.');
-        headers['origin'] = origin;
-        headers['referer'] = referrer.toString();
-      }
-      const response = await CapacitorHttp.request({
-        url,
-        method: options.method,
-        headers,
-        data: options.body,
-        responseType: 'text',
-        webFetchExtra: { credentials: 'include' },
-      });
-      return { status: response.status, url: response.url, text: String(response.data ?? '') };
-    }
 
     const url = this.webGatewayUrl(options);
     const headers = { ...(options.headers ?? {}) };
@@ -67,7 +45,6 @@ export class PlatformService {
       await window.wlsaplus.powerschool.clearSession(baseUrl);
       return;
     }
-    if (Capacitor.isNativePlatform()) return;
 
     this.assertWebPowerSchoolOrigin(baseUrl);
     const response = await fetch(`${WEB_POWERSCHOOL_GATEWAY}/api/powerschool/logout`, {
@@ -80,12 +57,25 @@ export class PlatformService {
   private detect(): PlatformInfo {
     if (window.wlsaplus) {
       const os = window.wlsaplus.platform.os;
-      return { kind: 'electron', os, supportsPowerSchool: true, supportsDesktopCards: os === 'windows', supportsVpn: os === 'windows' || os === 'macos', supportsScreenTranslation: os === 'windows', supportsPhoneControl: os === 'windows' };
+      return {
+        kind: 'electron',
+        os,
+        supportsPowerSchool: true,
+        supportsDesktopCards: false,
+        supportsVpn: os === 'macos' || os === 'windows',
+        supportsScreenTranslation: false,
+        supportsPhoneControl: false,
+      };
     }
-    if (Capacitor.isNativePlatform()) {
-      return { kind: 'android', os: 'android', supportsPowerSchool: true, supportsDesktopCards: false, supportsVpn: true, supportsScreenTranslation: false, supportsPhoneControl: false };
-    }
-    return { kind: 'web', os: 'web', supportsPowerSchool: true, supportsDesktopCards: false, supportsVpn: false, supportsScreenTranslation: false, supportsPhoneControl: false };
+    return {
+      kind: 'web',
+      os: 'web',
+      supportsPowerSchool: true,
+      supportsDesktopCards: false,
+      supportsVpn: false,
+      supportsScreenTranslation: false,
+      supportsPhoneControl: false,
+    };
   }
 
   private webGatewayUrl(options: NativeRequest): string {

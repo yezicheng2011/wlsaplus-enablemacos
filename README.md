@@ -22,6 +22,8 @@ npm run electron:make
 
 `electron:make` produces macOS DMG and ZIP packages via Electron Forge (requires a macOS host).
 
+macOS extras: class-start notifications (Settings → Class reminders, 5 minutes before), VPN node picker with optional TCP latency test, and PowerSchool schedule + Progress/grades sync.
+
 ## Releases
 
 Open **Actions > Build and release > Run workflow**, enter a semantic version such as `1.2.0`, and run it. The workflow applies that version, creates tag `v1.2.0`, and publishes the macOS DMG/ZIP to a GitHub Release. Pushing a `v*` tag directly is also supported.
