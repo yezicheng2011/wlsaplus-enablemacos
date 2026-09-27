@@ -52,10 +52,14 @@ const powerSchoolSession = () => session.fromPartition('persist:powerschool');
 const appSession = () => session.fromPartition('persist:wlsaplus');
 const iconPath = () => path.join(__dirname, '..', 'build', 'icon.png');
 
+function rendererIndexPath() {
+  return path.join(__dirname, '..', 'dist', 'wlsaplus', 'browser', 'index.html');
+}
+
 function appUrl(route = '') {
   const dev = process.env.WLSAPLUS_DEV_URL;
   if (dev) return `${dev}/#/${route}`;
-  return `file://${path.join(__dirname, '..', 'dist', 'wlsaplus', 'browser', 'index.html').replace(/\\/g, '/')}#/${route}`;
+  return `file://${rendererIndexPath().replace(/\\/g, '/')}#/${route}`;
 }
 
 function webPreferences(overrides = {}) {
@@ -889,6 +893,15 @@ async function translateText(text, source, target) {
 function createMainWindow(route = '') {
   mainWindow = new BrowserWindow({ width: 1220, height: 820, minWidth: 380, minHeight: 600, backgroundColor: '#f7f8fa', title: 'WLSAPlus', icon: iconPath(), webPreferences: webPreferences() });
   configureExternalHelpLinks(mainWindow);
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // -3 = aborted
+    console.error(`Renderer failed to load (${errorCode}): ${errorDescription} @ ${validatedURL}`);
+  });
+  const indexFile = rendererIndexPath();
+  const { existsSync } = require('node:fs');
+  if (!process.env.WLSAPLUS_DEV_URL && !existsSync(indexFile)) {
+    console.error(`WLSAPlus UI missing at ${indexFile}. Run npm run build:web before packaging or starting Electron.`);
+  }
   mainWindow.loadURL(appUrl(route));
 }
 

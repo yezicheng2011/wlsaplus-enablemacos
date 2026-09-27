@@ -7,6 +7,58 @@ const osxNotarize = process.env.APPLE_ID && process.env.APPLE_APP_PASSWORD && pr
   ? { appleId: process.env.APPLE_ID, appleIdPassword: process.env.APPLE_APP_PASSWORD, teamId: process.env.APPLE_TEAM_ID }
   : undefined;
 
+// Main-process runtime packages (and their transitive deps). Angular/web deps live in dist/,
+// so the rest of node_modules must stay out of the asar — but blanketing all of
+// node_modules made packaged apps crash on require('electron-updater') / require('js-yaml').
+const RUNTIME_NODE_MODULES = new Set([
+  'argparse',
+  'builder-util-runtime',
+  'debug',
+  'electron-updater',
+  'fs-extra',
+  'graceful-fs',
+  'has-flag',
+  'js-yaml',
+  'jsonfile',
+  'lazy-val',
+  'lodash.escaperegexp',
+  'lodash.isequal',
+  'ms',
+  'semver',
+  'supports-color',
+  'tiny-typed-emitter',
+  'universalify',
+]);
+
+const IGNORE_PATHS = [
+  /^\/captures($|\/)/,
+  /^\/src($|\/)/,
+  /^\/public($|\/)/,
+  /^\/scripts($|\/)/,
+  /^\/powerschool-worker($|\/)/,
+  /^\/vpn-subscription-worker($|\/)/,
+  /^\/release-kit($|\/)/,
+  /^\/electron\/.*\.test\.cjs$/,
+  /^\/electron\/bin($|\/)/,
+  /^\/output($|\/)/,
+  /^\/out($|\/)/,
+  /^\/\.git($|\/)/,
+  /^\/\.github($|\/)/,
+  /^\/\.angular($|\/)/,
+  /^\/\.playwright-cli($|\/)/,
+  /^\/\.tmp-angular($|\/)/,
+  /^\/dist\/wlsaplus\/browser\/ocr($|\/)/,
+  /^\/(angular|ngsw|tsconfig).*\.(json|ts)$/,
+  /^\/README\.md$/,
+];
+
+function isKeptNodeModule(file) {
+  if (file === '/node_modules') return true;
+  const match = file.match(/^\/node_modules\/((?:@[^/]+\/)?[^/]+)(\/|$)/);
+  if (!match) return false;
+  return RUNTIME_NODE_MODULES.has(match[1]);
+}
+
 module.exports = {
   packagerConfig: {
     asar: true,
@@ -22,27 +74,10 @@ module.exports = {
       path.join(__dirname, 'build', 'vpn-core'),
       path.join(__dirname, 'electron', 'bin'),
     ],
-    ignore: [
-      /^\/node_modules($|\/)/,
-      /^\/captures($|\/)/,
-      /^\/src($|\/)/,
-      /^\/public($|\/)/,
-      /^\/scripts($|\/)/,
-      /^\/powerschool-worker($|\/)/,
-      /^\/vpn-subscription-worker($|\/)/,
-      /^\/electron\/.*\.test\.cjs$/,
-      /^\/electron\/bin($|\/)/,
-      /^\/output($|\/)/,
-      /^\/out($|\/)/,
-      /^\/\.git($|\/)/,
-      /^\/\.github($|\/)/,
-      /^\/\.angular($|\/)/,
-      /^\/\.playwright-cli($|\/)/,
-      /^\/\.tmp-angular($|\/)/,
-      /^\/dist\/wlsaplus\/browser\/ocr($|\/)/,
-      /^\/(angular|ngsw|tsconfig).*\.(json|ts)$/,
-      /^\/README\.md$/,
-    ],
+    ignore: (file) => {
+      if (file.startsWith('/node_modules')) return !isKeptNodeModule(file);
+      return IGNORE_PATHS.some((pattern) => pattern.test(file));
+    },
   },
   rebuildConfig: {},
   makers: [
