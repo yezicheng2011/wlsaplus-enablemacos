@@ -8,6 +8,13 @@
 - **未发布** GitHub Release `1.0.9`（保持 draft）
 - 未 force-push；保留国内镜像（npmmirror / gitee / gh-proxy）
 
+## 已推送 commits（main）
+
+- `32e7cfb` Fix Forge packaging: prune:false so RUNTIME allow-list applies
+- `3b9aeaa` Fix Mac VPN disconnect and null Clash profile crash
+- `e340d57` Harden renderer APIs: timeouts, macOS-only VPN, safer reminders
+- `227f2ee` Document out/make packaging and gate release-kit on loadFile fix
+
 ## 提交与修复
 
 ### A) 启动 / 白屏与打包
