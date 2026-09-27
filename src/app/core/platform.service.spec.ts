@@ -81,7 +81,7 @@ describe('PlatformService web PowerSchool transport', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://apiwlsaplus.02studio.xyz/api/powerschool/logout',
-      { method: 'POST', credentials: 'include' },
+      expect.objectContaining({ method: 'POST', credentials: 'include', signal: expect.any(AbortSignal) }),
     );
   });
 });

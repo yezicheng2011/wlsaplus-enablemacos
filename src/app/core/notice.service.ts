@@ -31,10 +31,18 @@ export class NoticeService {
     ];
     for (const url of sources) {
       try {
-        const response = await fetch(url, {
-          cache: 'no-store',
-          headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-        });
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 8_000);
+        let response: Response;
+        try {
+          response = await fetch(url, {
+            cache: 'no-store',
+            signal: controller.signal,
+            headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+          });
+        } finally {
+          window.clearTimeout(timer);
+        }
         if (!response.ok) continue;
         const value = await response.json() as Partial<AppNotice>;
         if (typeof value.id !== 'string' || !value.id || typeof value.title !== 'string' || !value.title

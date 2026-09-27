@@ -56,7 +56,9 @@ export class ClassReminderService {
 
       const room = session.room ? ` · Room ${session.room}` : '';
       const teacher = session.teacher ? ` · ${session.teacher}` : '';
-      void window.wlsaplus.notifications.showClassReminder({
+      const notifications = window.wlsaplus?.notifications;
+      if (!notifications) return;
+      void notifications.showClassReminder({
         title: 'Class starting soon',
         body: `${session.courseName} starts in ${CLASS_REMINDER_LEAD_MINUTES} minutes${room}${teacher}`,
         sessionId: key,

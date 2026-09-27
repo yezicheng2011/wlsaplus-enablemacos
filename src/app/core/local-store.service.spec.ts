@@ -19,7 +19,7 @@ describe('LocalStore', () => {
       courses: [],
     };
     const todos: TodoItem[] = [{ id: 'todo-1', title: 'Submit essay', details: 'Upload the final PDF.', createdAt: '2026-08-29T08:00:00.000Z', endAt: null, color: 'blue', icon: 'assignment', timeType: 'time' }];
-    const settings: AppSettings = { theme: 'dark', color: 'green', tuningEnabled: true, tunedTime: '2026-08-24T08:05:00.000Z' };
+    const settings: AppSettings = { theme: 'dark', color: 'green', tuningEnabled: true, tunedTime: '2026-08-24T08:05:00.000Z', classRemindersEnabled: true };
 
     window.dispatchEvent(new StorageEvent('storage', { key: 'wlsaplus:schedule', newValue: JSON.stringify(schedule), storageArea: localStorage }));
     window.dispatchEvent(new StorageEvent('storage', { key: 'wlsaplus:todos', newValue: JSON.stringify(todos), storageArea: localStorage }));
@@ -35,7 +35,7 @@ describe('LocalStore', () => {
   it('migrates existing appearance settings to the default app color', () => {
     localStorage.setItem('wlsaplus:settings', JSON.stringify({ theme: 'light', tuningEnabled: false, tunedTime: null }));
 
-    expect(new LocalStore().settings()).toEqual({ theme: 'light', color: 'default', tuningEnabled: false, tunedTime: null });
+    expect(new LocalStore().settings()).toEqual({ theme: 'light', color: 'default', tuningEnabled: false, tunedTime: null, classRemindersEnabled: true });
   });
 
   it('saves and applies the selected app color', () => {

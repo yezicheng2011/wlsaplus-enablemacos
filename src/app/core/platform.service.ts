@@ -30,13 +30,13 @@ export class PlatformService {
       }
       headers[WEB_POWERSCHOOL_REFERRER_HEADER] = `${referrer.pathname}${referrer.search}`;
     }
-    const response = await fetch(url, {
+    const response = await this.fetchWithTimeout(url, {
       method: options.method,
       headers,
       body: options.body,
       credentials: 'include',
       redirect: 'follow',
-    });
+    }, 20_000);
     return { status: response.status, url: response.url, text: await response.text() };
   }
 
@@ -47,11 +47,26 @@ export class PlatformService {
     }
 
     this.assertWebPowerSchoolOrigin(baseUrl);
-    const response = await fetch(`${WEB_POWERSCHOOL_GATEWAY}/api/powerschool/logout`, {
+    const response = await this.fetchWithTimeout(`${WEB_POWERSCHOOL_GATEWAY}/api/powerschool/logout`, {
       method: 'POST',
       credentials: 'include',
-    });
+    }, 15_000);
     if (!response.ok) throw new Error(await this.gatewayError(response));
+  }
+
+  private async fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        throw new Error('PowerSchool request timed out. Check your network and try again.');
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+    }
   }
 
   private detect(): PlatformInfo {
@@ -62,7 +77,7 @@ export class PlatformService {
         os,
         supportsPowerSchool: true,
         supportsDesktopCards: false,
-        supportsVpn: os === 'macos' || os === 'windows',
+        supportsVpn: os === 'macos',
         supportsScreenTranslation: false,
         supportsPhoneControl: false,
       };

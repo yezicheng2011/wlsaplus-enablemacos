@@ -73,6 +73,11 @@ export class VpnService {
     try {
       const measured = await window.wlsaplus.vpn.testLatency(this.nodes());
       this.nodes.set(measured);
+    } catch (error) {
+      this.status.set({
+        ...this.status(),
+        message: error instanceof Error ? error.message : 'Could not measure VPN node latency.',
+      });
     } finally {
       this.latencyTesting.set(false);
     }

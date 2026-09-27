@@ -31,7 +31,19 @@ export class TranslationService {
         langpair: `${source === 'auto' ? 'Autodetect' : source}|${target}`,
       });
       const url = `https://api.mymemory.translated.net/get?${params}`;
-      const response = await fetch(url);
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 12_000);
+      let response: Response;
+      try {
+        response = await fetch(url, { signal: controller.signal });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new Error('Translation timed out. Check your network and try again.');
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timer);
+      }
       if (!response.ok) throw new Error('Translation service is unavailable. Please try again later.');
       const data = await response.json();
       const parsed = this.parseMyMemory(data, source);
