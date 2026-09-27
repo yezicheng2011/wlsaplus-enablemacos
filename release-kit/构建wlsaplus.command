@@ -141,17 +141,32 @@ find "$PROJECT_DIR" \
   -exec xattr -dr com.apple.quarantine {} \; 2>/dev/null || true
 
 # ===== 打开输出目录 =====
+# Electron Forge：可安装的 DMG/ZIP 在 out/make（.app 在 out/ 下）
+# dist/ 只是 Angular 前端产物，不是安装包目录（1.0.8 的 out-builder 已废弃）
 echo ""
-echo "==> 打开输出目录..."
+echo "==> 打开安装包目录（优先 out/make）..."
 
-if [ -d "./out/make" ]; then
+OPENED=""
+if [ -d "./out/make" ] && find "./out/make" -maxdepth 3 \( -name "*.dmg" -o -name "*.zip" \) 2>/dev/null | grep -q .; then
   open ./out/make
+  OPENED="./out/make"
+elif [ -d "./out/make" ]; then
+  open ./out/make
+  OPENED="./out/make"
 elif [ -d "./out" ]; then
   open ./out
-elif [ -d "./dist" ]; then
-  open ./dist
+  OPENED="./out"
 else
-  echo "    未找到 out/make 等目录，请手动查看"
+  echo "    未找到 out/make（Forge 安装包目录）。"
+  echo "    说明：dist/ 只是网页前端构建结果，里面没有 .dmg/.app 安装包。"
+  if [ -d "./dist" ]; then
+    echo "    检测到 dist/ 存在，但不自动打开，避免和安装包搞混。"
+  fi
+fi
+
+if [ -n "$OPENED" ]; then
+  echo "    已打开：$OPENED"
+  echo "    请在其中找 .dmg 或 .zip（不要到 dist/ 里找安装包）"
 fi
 
 echo ""

@@ -8,7 +8,11 @@
    - Node：`https://npmmirror.com/mirrors/node`
    - npm：`https://registry.npmmirror.com`
    - Electron：`https://npmmirror.com/mirrors/electron/`
-4. 在弹出的文件夹里选择一个 `.dmg` / `.zip`，双击安装即可。
+4. 构建成功后会打开 **`out/make`**（不是旧版的 `out-builder`，也不是 `dist`）。
+   - **`out/make`**：里面是可安装的 `.dmg` / `.zip`（选这个）
+   - **`out/`**：打包出的 `.app`
+   - **`dist/`**：只是网页前端，**没有**安装包
+5. 在弹出的文件夹里选择一个 `.dmg` / `.zip`，双击安装即可。
 
 > 发布包内通常已包含一份 `git clone` 下来的 `wlsaplus-enablemacos` 工程目录；请保持与 `构建wlsaplus.command` 同级，或放在 `~/Downloads/wlsaplusformac/wlsaplus-enablemacos/`。
 
