@@ -63,6 +63,10 @@ function isKeptNodeModule(file) {
 module.exports = {
   packagerConfig: {
     asar: true,
+    // prune:true walks package.json production deps and bypasses our ignore() for
+    // module roots — that pulled Angular/tesseract into asar. With prune:false the
+    // RUNTIME_NODE_MODULES allow-list fully controls what ships for the main process.
+    prune: false,
     electronZipDir: process.env.ELECTRON_ZIP_DIR || undefined,
     executableName: 'WLSAPlus',
     icon: path.join(__dirname, 'build', 'icon'),
@@ -76,8 +80,10 @@ module.exports = {
       path.join(__dirname, 'electron', 'bin'),
     ],
     ignore: (file) => {
-      if (file.startsWith('/node_modules')) return !isKeptNodeModule(file);
-      return IGNORE_PATHS.some((pattern) => pattern.test(file));
+      // Packager usually prefixes '/', but normalize either form.
+      const normalized = !file ? file : (file.startsWith('/') ? file : `/${file}`);
+      if (normalized.startsWith('/node_modules')) return !isKeptNodeModule(normalized);
+      return IGNORE_PATHS.some((pattern) => pattern.test(normalized));
     },
   },
   rebuildConfig: {},
