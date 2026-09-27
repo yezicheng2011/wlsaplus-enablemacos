@@ -24,6 +24,7 @@ const RUNTIME_NODE_MODULES = new Set([
   'lodash.escaperegexp',
   'lodash.isequal',
   'ms',
+  'sax',
   'semver',
   'supports-color',
   'tiny-typed-emitter',

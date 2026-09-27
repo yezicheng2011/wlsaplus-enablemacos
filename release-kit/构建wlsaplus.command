@@ -83,19 +83,29 @@ export CSC_IDENTITY_AUTO_DISCOVERY=false
 
 # ===== [6/7] 进入项目目录 =====
 echo "==> [6/7] 进入项目目录..."
-# 与 1.0.8 发布包相同约定：解压到「下载」后的路径
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [ -d "$SCRIPT_DIR/wlsaplus-enablemacos" ]; then
+PROJECT_DIR=""
+# 1) 脚本在仓库内：.../wlsaplus-enablemacos/release-kit/本脚本 → 使用上一级仓库
+if [ -f "$SCRIPT_DIR/../package.json" ] && [ -f "$SCRIPT_DIR/../electron/main.cjs" ]; then
+  PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+  echo "    使用仓库内路径（推荐）：$PROJECT_DIR"
+# 2) 脚本与解压出的项目文件夹同级
+elif [ -d "$SCRIPT_DIR/wlsaplus-enablemacos" ] && [ -f "$SCRIPT_DIR/wlsaplus-enablemacos/package.json" ]; then
   PROJECT_DIR="$SCRIPT_DIR/wlsaplus-enablemacos"
-else
+  echo "    使用与脚本同级的项目文件夹：$PROJECT_DIR"
+# 3) 旧版约定：下载目录（容易是过期克隆，仅作回退）
+elif [ -d "$HOME/Downloads/wlsaplusformac/wlsaplus-enablemacos" ]; then
   PROJECT_DIR="$HOME/Downloads/wlsaplusformac/wlsaplus-enablemacos"
+  echo "    ⚠️ 回退到下载目录：$PROJECT_DIR"
+  echo "    若白屏未修复，请改用 git clone 的仓库，或把本脚本放进仓库 release-kit/ 后再运行"
 fi
 
-if [ ! -d "$PROJECT_DIR" ]; then
+if [ -z "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR" ]; then
   echo ""
-  echo "❌ 错误：项目目录不存在"
-  echo "   期望路径：$PROJECT_DIR"
-  echo "   或把本脚本与 wlsaplus-enablemacos 文件夹放在同一目录后再运行"
+  echo "❌ 错误：找不到项目目录"
+  echo "   请任选其一："
+  echo "   A) git clone 后双击仓库内 release-kit/构建wlsaplus.command"
+  echo "   B) 把本脚本与 wlsaplus-enablemacos 文件夹放在同一目录"
   read -n 1 -s -r -p "按任意键关闭..."
   exit 1
 fi
@@ -104,8 +114,31 @@ cd "$PROJECT_DIR"
 
 echo "    当前目录：$(pwd)"
 if [ -d .git ]; then
-  echo "    Git 提交：$(git rev-parse --short HEAD 2>/dev/null || echo unknown) $(git log -1 --pretty=%s 2>/dev/null || true)"
-  echo "    请确认至少包含白屏修复 2ea0edc 或更新提交"
+  echo "    正在 git fetch / pull origin main，确保不是旧克隆…"
+  git fetch origin main 2>/dev/null || true
+  git pull --ff-only origin main 2>/dev/null || git pull --ff-only 2>/dev/null || echo "    （pull 失败可忽略：若已是最新或无网络）"
+  HEAD_SHORT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  HEAD_SUBJ="$(git log -1 --pretty=%s 2>/dev/null || true)"
+  echo "    Git HEAD：$HEAD_SHORT $HEAD_SUBJ"
+  if git merge-base --is-ancestor 2ea0edc HEAD 2>/dev/null; then
+    echo "    ✅ 已包含 node_modules 白屏修复 2ea0edc"
+  else
+    echo ""
+    echo "❌ 当前代码不含白屏修复提交 2ea0edc（及后续修复）。"
+    echo "   请在本目录执行：git fetch origin && git checkout main && git pull"
+    echo "   或重新 clone：https://github.com/yezicheng2011/wlsaplus-enablemacos"
+    read -n 1 -s -r -p "按任意键关闭..."
+    exit 1
+  fi
+fi
+
+# 内容级校验：打包主进程必须用 loadFile（避免 file:// 在 asar/空格路径下白屏）
+if ! grep -q "loadFile" "$PROJECT_DIR/electron/main.cjs" 2>/dev/null; then
+  echo ""
+  echo "❌ electron/main.cjs 缺少 loadFile（渲染页加载修复）。"
+  echo "   当前目录很可能是旧克隆。请 git pull 最新 main 后再构建。"
+  read -n 1 -s -r -p "按任意键关闭..."
+  exit 1
 fi
 echo ""
 

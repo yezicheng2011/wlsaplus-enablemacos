@@ -917,6 +917,10 @@ function createMainWindow(route = '') {
     const message = `WLSAPlus UI failed to load (${errorCode}): ${errorDescription}\n${validatedURL}\nIndex: ${rendererIndexPath()}`;
     void mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><meta charset=utf-8><title>WLSAPlus load error</title><pre style="padding:24px;font:14px/1.4 system-ui">${message.replace(/</g, '&lt;')}</pre>`)}`);
   });
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log(`Renderer loaded: ${mainWindow.webContents.getURL()}`);
+  });
+  console.log(`Loading UI from ${rendererIndexPath()} (packaged=${app.isPackaged})`);
   void loadRenderer(mainWindow, route).catch((error) => {
     console.error('WLSAPlus failed to load renderer:', error);
   });
