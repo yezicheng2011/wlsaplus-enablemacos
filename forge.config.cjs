@@ -1,8 +1,13 @@
 const path = require('node:path');
 
-const osxSign = process.env.APPLE_IDENTITY
-  ? { identity: process.env.APPLE_IDENTITY, hardenedRuntime: true, entitlements: path.join(__dirname, 'electron', 'entitlements.plist') }
-  : undefined;
+const entitlementsPath = path.join(__dirname, 'electron', 'entitlements.plist');
+const selfSign =
+  process.env.WLSAPLUS_SELF_SIGN === '1' || process.env.APPLE_IDENTITY === '-';
+const osxSign = selfSign
+  ? { identity: '-', hardenedRuntime: false, entitlements: entitlementsPath }
+  : process.env.APPLE_IDENTITY
+    ? { identity: process.env.APPLE_IDENTITY, hardenedRuntime: true, entitlements: entitlementsPath }
+    : undefined;
 const osxNotarize = process.env.APPLE_ID && process.env.APPLE_APP_PASSWORD && process.env.APPLE_TEAM_ID
   ? { appleId: process.env.APPLE_ID, appleIdPassword: process.env.APPLE_APP_PASSWORD, teamId: process.env.APPLE_TEAM_ID }
   : undefined;

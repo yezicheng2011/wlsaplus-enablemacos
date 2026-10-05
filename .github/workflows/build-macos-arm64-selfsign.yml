@@ -1,0 +1,98 @@
+name: Build macOS arm64 self-signed DMG
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      WLSAPLUS_SELF_SIGN: '1'
+      APPLE_IDENTITY: '-'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build arm64 packages (self-sign via forge, fallback post-codesign)
+        run: |
+          set -euo pipefail
+          npm run vpn:core
+          npm run build:web
+
+          if npx electron-forge make --platform darwin --arch arm64; then
+            echo "electron-forge make succeeded with forge osxSign"
+          else
+            echo "forge osxSign path failed; rebuilding unsigned then ad-hoc codesign"
+            unset WLSAPLUS_SELF_SIGN APPLE_IDENTITY
+            export WLSAPLUS_SELF_SIGN=0
+            export APPLE_IDENTITY=
+            rm -rf out
+            npx electron-forge make --platform darwin --arch arm64
+            app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
+            test -n "$app_path"
+            codesign --force --deep --sign - "$app_path"
+            # Remake DMG so the signed .app is inside the disk image
+            dmg_old="$(find out/make -type f -name '*.dmg' -print)"
+            if [[ -n "$dmg_old" ]]; then
+              rm -f $dmg_old
+            fi
+            # Recreate DMG with hdiutil from the signed app
+            stage="$(mktemp -d)"
+            cp -R "$app_path" "$stage/WLSAPlus.app"
+            version="$(node -p "require('./package.json').version")"
+            mkdir -p out/make/darwin/arm64
+            hdiutil create -volname WLSAPlus -srcfolder "$stage" -ov -format UDZO \
+              "out/make/darwin/arm64/WLSAPlus-${version}-arm64-selfsigned.dmg"
+          fi
+
+      - name: Verify ad-hoc signature and arch
+        run: |
+          set -euo pipefail
+          app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
+          test -n "$app_path"
+          echo "App: $app_path"
+          codesign -dv --verbose=2 "$app_path"
+          # Confirm ad-hoc (Signature=adhoc) or at least signed
+          codesign -dv "$app_path" 2>&1 | tee /tmp/codesign-dv.txt
+          grep -qiE 'Signature=adhoc|signed by|Authority=' /tmp/codesign-dv.txt || \
+            grep -qi 'Signature=' /tmp/codesign-dv.txt
+          file "$app_path/Contents/MacOS/WLSAPlus"
+          archs="$(lipo -archs "$app_path/Contents/MacOS/WLSAPlus")"
+          echo "Architectures: $archs"
+          echo "$archs" | grep -qw arm64
+
+      - name: Stage artifacts
+        id: stage
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          mkdir -p release-assets
+          dmg_path="$(find out/make -type f -name '*.dmg' | head -n 1)"
+          zip_path="$(find out/make -type f -name '*.zip' | head -n 1)"
+          if [[ -z "$dmg_path" ]]; then
+            echo "No .dmg found under out/make" >&2
+            find out -type f | head -n 80 >&2 || true
+            exit 1
+          fi
+          cp "$dmg_path" "release-assets/WLSAPlus-${version}-macOS-arm64-selfsigned.dmg"
+          if [[ -n "$zip_path" ]]; then
+            cp "$zip_path" "release-assets/WLSAPlus-${version}-macOS-arm64-selfsigned.zip"
+          fi
+          ls -lh release-assets/
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WLSAPlus-${{ steps.stage.outputs.version }}-macOS-arm64-selfsigned
+          path: release-assets/*
+          if-no-files-found: error
