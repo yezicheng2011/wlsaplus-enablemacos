@@ -23,37 +23,53 @@ jobs:
 
       - run: npm ci
 
-      - name: Build arm64 packages (self-sign via forge, fallback post-codesign)
+      - name: Build arm64 packages
         run: |
           set -euo pipefail
           npm run vpn:core
           npm run build:web
-
-          if npx electron-forge make --platform darwin --arch arm64; then
-            echo "electron-forge make succeeded with forge osxSign"
-          else
-            echo "forge osxSign path failed; rebuilding unsigned then ad-hoc codesign"
+          # Prefer forge osxSign (identity '-'); continue even if only linker-signed
+          if ! npx electron-forge make --platform darwin --arch arm64; then
+            echo "forge make with osxSign failed; retrying without forge sign"
             unset WLSAPLUS_SELF_SIGN APPLE_IDENTITY
             export WLSAPLUS_SELF_SIGN=0
             export APPLE_IDENTITY=
             rm -rf out
             npx electron-forge make --platform darwin --arch arm64
-            app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
-            test -n "$app_path"
-            codesign --force --deep --sign - "$app_path"
-            # Remake DMG so the signed .app is inside the disk image
-            dmg_old="$(find out/make -type f -name '*.dmg' -print)"
-            if [[ -n "$dmg_old" ]]; then
-              rm -f $dmg_old
-            fi
-            # Recreate DMG with hdiutil from the signed app
-            stage="$(mktemp -d)"
-            cp -R "$app_path" "$stage/WLSAPlus.app"
-            version="$(node -p "require('./package.json').version")"
-            mkdir -p out/make/darwin/arm64
-            hdiutil create -volname WLSAPlus -srcfolder "$stage" -ov -format UDZO \
-              "out/make/darwin/arm64/WLSAPlus-${version}-arm64-selfsigned.dmg"
           fi
+
+      - name: Ad-hoc codesign .app and remake DMG
+        run: |
+          set -euo pipefail
+          app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
+          test -n "$app_path"
+          echo "Signing $app_path with identity '-'"
+          codesign --force --deep --sign - \
+            --entitlements electron/entitlements.plist \
+            "$app_path"
+          codesign -dv --verbose=2 "$app_path"
+
+          version="$(node -p "require('./package.json').version")"
+          # Remake DMG so the deep-signed .app is inside
+          find out/make -type f -name '*.dmg' -delete || true
+          stage="$(mktemp -d)"
+          cp -R "$app_path" "$stage/WLSAPlus.app"
+          mkdir -p out/make/darwin/arm64
+          hdiutil create -volname WLSAPlus -srcfolder "$stage" -ov -format UDZO \
+            "out/make/darwin/arm64/WLSAPlus-${version}-arm64.dmg"
+          # Refresh zip from signed app if present
+          zip_dir="$(find out/make -type d -path '*/zip/darwin/arm64' | head -n 1 || true)"
+          if [[ -z "$zip_dir" ]]; then
+            zip_dir="out/make/zip/darwin/arm64"
+            mkdir -p "$zip_dir"
+          fi
+          find "$zip_dir" -type f -name '*.zip' -delete || true
+          (
+            cd "$(dirname "$app_path")"
+            ditto -c -k --sequesterRsrc --keepParent "$(basename "$app_path")" \
+              "$GITHUB_WORKSPACE/$zip_dir/WLSAPlus-darwin-arm64-${version}.zip"
+          )
+          ls -lh out/make/**/*.dmg out/make/**/*.zip 2>/dev/null || find out/make -type f -ls
 
       - name: Verify ad-hoc signature and arch
         run: |
@@ -61,11 +77,13 @@ jobs:
           app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
           test -n "$app_path"
           echo "App: $app_path"
-          codesign -dv --verbose=2 "$app_path"
-          # Confirm ad-hoc (Signature=adhoc) or at least signed
-          codesign -dv "$app_path" 2>&1 | tee /tmp/codesign-dv.txt
-          grep -qiE 'Signature=adhoc|signed by|Authority=' /tmp/codesign-dv.txt || \
-            grep -qi 'Signature=' /tmp/codesign-dv.txt
+          codesign -dv --verbose=2 "$app_path" 2>&1 | tee /tmp/codesign-dv.txt
+          grep -qi 'Signature=adhoc' /tmp/codesign-dv.txt
+          # Prefer a deep re-sign (not only linker-signed Electron stock)
+          if grep -qi 'linker-signed' /tmp/codesign-dv.txt && ! grep -qi 'Sealed Resources=yes' /tmp/codesign-dv.txt; then
+            echo "WARNING: still linker-signed without sealed resources" >&2
+            exit 1
+          fi
           file "$app_path/Contents/MacOS/WLSAPlus"
           archs="$(lipo -archs "$app_path/Contents/MacOS/WLSAPlus")"
           echo "Architectures: $archs"
