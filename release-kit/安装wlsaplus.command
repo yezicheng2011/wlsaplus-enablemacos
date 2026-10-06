@@ -48,9 +48,10 @@ echo "==> [1/6] 检查系统..."
 OS_VER="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
 ARCH="$(uname -m)"
 echo "    macOS：$OS_VER    芯片架构：$ARCH"
-if [ "$ARCH" != "arm64" ]; then
-  echo "    ⚠️ 本安装包只支持 Apple 芯片（M1/M2/M3/M4…），当前不是 arm64，可能无法运行。"
-fi
+case "$ARCH" in
+  arm64|x86_64) echo "    WLSAPlus 是 universal 应用，Intel 与 Apple 芯片 Mac 都支持" ;;
+  *) echo "    ⚠️ 无法识别的芯片架构：$ARCH，WLSAPlus 只支持 Intel（x86_64）与 Apple 芯片（arm64）。" ;;
+esac
 
 # ===== [2/6] 先给本文件夹解除隔离 =====
 echo "==> [2/6] 取消本文件夹（脚本、说明书、安装包）的隔离..."

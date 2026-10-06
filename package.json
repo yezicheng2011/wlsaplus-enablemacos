@@ -19,7 +19,7 @@
     "vpn:core": "node scripts/download-vpn-core.mjs",
     "electron:dev": "npm run vpn:core && concurrently -k \"ng serve\" \"wait-on http://localhost:4200 && cross-env WLSAPLUS_DEV_URL=http://localhost:4200 electron .\"",
     "electron:start": "npm run vpn:core && npm run build:web && electron .",
-    "electron:make": "npm run vpn:core && npm run build:web && electron-forge make"
+    "electron:make": "npm run vpn:core && npm run build:web && electron-forge make --platform darwin --arch universal"
   },
   "dependencies": {
     "@angular/cdk": "^22.1.4",

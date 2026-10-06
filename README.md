@@ -6,7 +6,7 @@
 
 <p align="center">
   面向 WLSA 学生的本地优先课表与学业工具 · A local-first schedule &amp; study app for WLSA students<br>
-  <b>macOS · Apple Silicon (M1/M2/M3/M4…)</b> · Electron + Angular Material · GPL-3.0
+  <b>macOS 13+ · Universal（Intel x86_64 + Apple 芯片 arm64）</b> · Electron + Angular Material · GPL-3.0
 </p>
 
 <p align="center">
@@ -44,7 +44,8 @@ PowerSchool sync works in the desktop app only (the browser build is blocked by 
 
 ## 安装 · Install
 
-**系统要求 / Requirements:** Apple 芯片 Mac（Intel 不支持）· Apple-silicon Mac (Intel not supported).
+**系统要求 / Requirements:** macOS 13 或更新；**universal（通用）构建**，同一个 WLSAPlus.app 同时支持 **Intel（x86_64）与 Apple 芯片（arm64）** Mac。
+macOS 13+; a single **universal** WLSAPlus.app runs natively on **both Intel (x86_64) and Apple-silicon (arm64)** Macs.
 
 1. 到 [Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest) 下载最新版本。
    Download the latest version from [Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest).
@@ -77,18 +78,18 @@ The **`wlsaplus1.0.9.zip`** build kit in Releases contains:
 | `note.pdf` / `note.md` | 中文说明书 · Chinese guide |
 | `wlsaplusformacos/` | 本仓库源码（git 克隆）· This repo (git clone) |
 
-`working.command` 在全新的 Apple 芯片 Mac 上会自动：
-On a fresh Apple-silicon Mac, `working.command` will:
+`working.command` 在全新的 Mac（Intel 或 Apple 芯片，macOS 13+）上会自动：
+On a fresh Mac (Intel or Apple silicon, macOS 13+), `working.command` will:
 
 1. 检查/安装 Xcode 命令行工具（Apple 官方）· Check / install Xcode Command Line Tools (from Apple)
 2. 从 **Gitee**（`gitee.com/mirrors/nvm`，固定版本）安装 nvm，从 **npmmirror** 安装 Node.js 22 · nvm (pinned tag) via **Gitee**, Node.js 22 via **npmmirror**
 3. 仅当 nvm 失败时才安装 Homebrew（**清华 TUNA**，失败换 **中科大 USTC**）· Homebrew only as a fallback if nvm fails (**TUNA**, then **USTC**)
 4. npm / Electron 均走 **npmmirror** · npm and Electron downloads via **npmmirror**
-5. 构建 arm64 应用 → ad-hoc 签名 → `xattr -cr` → 生成 `wlsaplus<版本>.dmg` 并打开
-   Build the arm64 app → ad-hoc sign → `xattr -cr` → create `wlsaplus<version>.dmg` and open it
+5. 构建 universal（Intel + Apple 芯片）应用（`electron-forge package --arch universal`，校验 `lipo -archs` 同时含 `x86_64` 与 `arm64`）→ ad-hoc 签名 → `xattr -cr` → 生成 `wlsaplus<版本>.dmg` 并打开
+   Build the universal (Intel + Apple silicon) app (`--arch universal`, verified with `lipo -archs` to contain both `x86_64` and `arm64`) → ad-hoc sign → `xattr -cr` → create `wlsaplus<version>.dmg` and open it
 
-macOS 版的 VPN 内核是 **mihomo（Clash Meta）**，已在源码 `electron/bin/mac-vpn.tar.gz` 中，构建时不下载任何 VPN 内核，也无需访问境外网站。
-The macOS VPN core is **mihomo (Clash Meta)**, already in the source at `electron/bin/mac-vpn.tar.gz`; the build downloads no VPN cores and needs no overseas sites.
+macOS 版的 VPN 内核是 **mihomo（Clash Meta）universal 通用二进制**（同时含 arm64 与 x86_64），已在源码 `electron/bin/mac-vpn.tar.gz` 中，构建时不下载任何 VPN 内核，也无需访问境外网站。
+The macOS VPN core is a **universal mihomo (Clash Meta) binary** (arm64 + x86_64), already in the source at `electron/bin/mac-vpn.tar.gz`; the build downloads no VPN cores and needs no overseas sites.
 
 ## 开发 · Development
 
@@ -99,7 +100,7 @@ npm start                # 浏览器 UI 开发 · UI dev server at http://localh
 npm test                 # 单元测试 · unit tests (Angular + Electron main)
 npm run build:web        # 生产前端 · production web build
 npm run electron:dev     # 开发服务器 + Electron · dev server + Electron
-npm run electron:make    # macOS DMG / ZIP（需在 macOS 上）· build DMG / ZIP (on macOS)
+npm run electron:make    # macOS universal DMG / ZIP（需在 macOS 上）· build universal DMG / ZIP (on macOS)
 ```
 
 - 可安装包在 `out/make`；`dist/` 只是前端产物。· Installers land in `out/make`; `dist/` is only the web build.
@@ -112,8 +113,8 @@ npm run electron:make    # macOS DMG / ZIP（需在 macOS 上）· build DMG / Z
 
 ### CI
 
-- **Build macOS arm64 self-signed DMG**（手动触发）：构建并深度 ad-hoc 签名的 arm64 DMG，产物在 Actions artifact。
-  *Build macOS arm64 self-signed DMG* (manual): builds a deep ad-hoc-signed arm64 DMG as an Actions artifact.
+- **Build macOS universal self-signed DMG**（手动触发）：构建并深度 ad-hoc 签名的 universal（Intel + Apple 芯片）DMG，产物在 Actions artifact。
+  *Build macOS universal self-signed DMG* (manual): builds a deep ad-hoc-signed universal (Intel + Apple silicon) DMG as an Actions artifact.
 - **Build and release**：推送 `v*` 标签或手动触发，构建并发布到 Release；可选签名/公证密钥：
   *Build and release*: on `v*` tags or manually; optional signing / notarization secrets:
 

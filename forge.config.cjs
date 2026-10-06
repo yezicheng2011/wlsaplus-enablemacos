@@ -94,6 +94,10 @@ module.exports = {
     appCategoryType: 'public.app-category.education',
     osxSign,
     osxNotarize,
+    // `--arch universal` (working.command / CI) packages x64 + arm64 and merges them with
+    // @electron/universal; no extra osxUniversal options are needed: app.asar is identical for both
+    // arches (no native modules ship), and the universal mihomo core sits inside mac-vpn.tar.gz,
+    // so it is copied as-is rather than lipo-merged. osxSign (Developer ID only) runs on the merged app.
     // electron/bin -> Resources/bin (mac-vpn.tar.gz = mihomo, the only macOS VPN core,
     // plus LICENSE-mihomo.txt). sing-box/v2ray-plugin are not shipped.
     extraResource: [

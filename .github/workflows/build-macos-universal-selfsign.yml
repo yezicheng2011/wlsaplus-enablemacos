@@ -1,4 +1,4 @@
-name: Build macOS arm64 self-signed DMG
+name: Build macOS universal self-signed DMG
 
 on:
   workflow_dispatch:
@@ -23,25 +23,25 @@ jobs:
 
       - run: npm ci
 
-      - name: Build arm64 packages
+      - name: Build universal (x64 + arm64) packages
         run: |
           set -euo pipefail
           npm run vpn:core
           npm run build:web
           # Prefer forge osxSign (identity '-'); continue even if only linker-signed
-          if ! npx electron-forge make --platform darwin --arch arm64; then
+          if ! npx electron-forge make --platform darwin --arch universal; then
             echo "forge make with osxSign failed; retrying without forge sign"
             unset WLSAPLUS_SELF_SIGN APPLE_IDENTITY
             export WLSAPLUS_SELF_SIGN=0
             export APPLE_IDENTITY=
             rm -rf out
-            npx electron-forge make --platform darwin --arch arm64
+            npx electron-forge make --platform darwin --arch universal
           fi
 
       - name: Ad-hoc codesign .app and remake DMG
         run: |
           set -euo pipefail
-          app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
+          app_path="$(find out -type d -path '*darwin-universal*' -name 'WLSAPlus.app' -prune | head -n 1)"
           test -n "$app_path"
           echo "Signing $app_path with identity '-'"
           codesign --force --deep --sign - \
@@ -54,27 +54,27 @@ jobs:
           find out/make -type f -name '*.dmg' -delete || true
           stage="$(mktemp -d)"
           cp -R "$app_path" "$stage/WLSAPlus.app"
-          mkdir -p out/make/darwin/arm64
+          mkdir -p out/make/darwin/universal
           hdiutil create -volname WLSAPlus -srcfolder "$stage" -ov -format UDZO \
-            "out/make/darwin/arm64/WLSAPlus-${version}-arm64.dmg"
+            "out/make/darwin/universal/WLSAPlus-${version}-universal.dmg"
           # Refresh zip from signed app if present
-          zip_dir="$(find out/make -type d -path '*/zip/darwin/arm64' | head -n 1 || true)"
+          zip_dir="$(find out/make -type d -path '*/zip/darwin/universal' | head -n 1 || true)"
           if [[ -z "$zip_dir" ]]; then
-            zip_dir="out/make/zip/darwin/arm64"
+            zip_dir="out/make/zip/darwin/universal"
             mkdir -p "$zip_dir"
           fi
           find "$zip_dir" -type f -name '*.zip' -delete || true
           (
             cd "$(dirname "$app_path")"
             ditto -c -k --sequesterRsrc --keepParent "$(basename "$app_path")" \
-              "$GITHUB_WORKSPACE/$zip_dir/WLSAPlus-darwin-arm64-${version}.zip"
+              "$GITHUB_WORKSPACE/$zip_dir/WLSAPlus-darwin-universal-${version}.zip"
           )
           ls -lh out/make/**/*.dmg out/make/**/*.zip 2>/dev/null || find out/make -type f -ls
 
       - name: Verify ad-hoc signature and arch
         run: |
           set -euo pipefail
-          app_path="$(find out -type d -name 'WLSAPlus.app' | head -n 1)"
+          app_path="$(find out -type d -path '*darwin-universal*' -name 'WLSAPlus.app' -prune | head -n 1)"
           test -n "$app_path"
           echo "App: $app_path"
           codesign -dv --verbose=2 "$app_path" 2>&1 | tee /tmp/codesign-dv.txt
@@ -87,7 +87,8 @@ jobs:
           file "$app_path/Contents/MacOS/WLSAPlus"
           archs="$(lipo -archs "$app_path/Contents/MacOS/WLSAPlus")"
           echo "Architectures: $archs"
-          echo "$archs" | grep -qw arm64
+          echo "$archs" | grep -qw x86_64 || { echo "missing x86_64 slice (not universal)" >&2; exit 1; }
+          echo "$archs" | grep -qw arm64 || { echo "missing arm64 slice (not universal)" >&2; exit 1; }
 
       - name: Stage artifacts
         id: stage
@@ -102,15 +103,15 @@ jobs:
             find out -type f | head -n 80 >&2 || true
             exit 1
           fi
-          cp "$dmg_path" "release-assets/WLSAPlus-${version}-macOS-arm64-selfsigned.dmg"
+          cp "$dmg_path" "release-assets/WLSAPlus-${version}-macOS-universal-selfsigned.dmg"
           if [[ -n "$zip_path" ]]; then
-            cp "$zip_path" "release-assets/WLSAPlus-${version}-macOS-arm64-selfsigned.zip"
+            cp "$zip_path" "release-assets/WLSAPlus-${version}-macOS-universal-selfsigned.zip"
           fi
           ls -lh release-assets/
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WLSAPlus-${{ steps.stage.outputs.version }}-macOS-arm64-selfsigned
+          name: WLSAPlus-${{ steps.stage.outputs.version }}-macOS-universal-selfsigned
           path: release-assets/*
           if-no-files-found: error

@@ -76,14 +76,24 @@ jobs:
           security unlock-keychain -p actions "$RUNNER_TEMP/build.keychain"
           security import "$RUNNER_TEMP/certificate.p12" -k "$RUNNER_TEMP/build.keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k actions "$RUNNER_TEMP/build.keychain"
+      # electron:make = electron-forge make --platform darwin --arch universal (Intel x64 + Apple arm64)
       - run: npm run electron:make
+      - name: Verify universal arch
+        run: |
+          set -euo pipefail
+          app_path="$(find out -type d -path '*darwin-universal*' -name 'WLSAPlus.app' -prune | head -n 1)"
+          test -n "$app_path"
+          archs="$(lipo -archs "$app_path/Contents/MacOS/WLSAPlus")"
+          echo "Architectures: $archs"
+          echo "$archs" | grep -qw x86_64 || { echo "missing x86_64 slice (not universal)" >&2; exit 1; }
+          echo "$archs" | grep -qw arm64 || { echo "missing arm64 slice (not universal)" >&2; exit 1; }
       - name: Stage macOS packages
         run: |
           mkdir -p release-assets
           dmg_path="$(find out/make -type f -name '*.dmg' | head -n 1)"
           zip_path="$(find out/make -type f -name '*.zip' | head -n 1)"
-          test -n "$dmg_path" && cp "$dmg_path" "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-macOS.dmg"
-          test -n "$zip_path" && cp "$zip_path" "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-macOS.zip"
+          test -n "$dmg_path" && cp "$dmg_path" "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-macOS-universal.dmg"
+          test -n "$zip_path" && cp "$zip_path" "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-macOS-universal.zip"
           test -n "$dmg_path$zip_path"
       - uses: actions/upload-artifact@v4
         with:
@@ -100,7 +110,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
-          name: WLSAPlus ${{ needs.prepare.outputs.version }}
+          name: WLSAPlus ${{ needs.prepare.outputs.version }} (macOS Universal · Intel & Apple)
           target_commitish: ${{ github.sha }}
           generate_release_notes: true
           fail_on_unmatched_files: true

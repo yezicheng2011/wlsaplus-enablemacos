@@ -6,7 +6,7 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `wlsaplus1.0.9.dmg` | 安装包（Apple 芯片 M1/M2/M3/M4…） |
+| `wlsaplus1.0.9.dmg` | 安装包（universal：Intel 与 Apple 芯片 M1/M2/M3/M4… 通用） |
 | `安装wlsaplus.command` | 一键安装 + 解除隔离脚本 |
 | 本说明书 | 安装与使用说明 |
 
@@ -14,7 +14,7 @@
 
 ## 系统要求
 
-- Mac 使用 **Apple 芯片**（M 系列）。Intel Mac 不支持。
+- macOS 13 或更新；**Intel（x86_64）与 Apple 芯片（arm64）Mac 都支持**（universal 通用应用）。
 - 全新的 Mac 也可以直接装：**不需要**装 Homebrew、Node、Xcode，也**不需要联网**，脚本只用 macOS 自带的工具。
 - 应用之后要联网的部分（同步 PowerSchool、VPN 订阅）走学校和你自己的服务器，不依赖境外下载站。
 
