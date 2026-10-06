@@ -1,34 +1,76 @@
 # WLSAPlus macOS 版本说明书（1.0.9）
 
-## 下载方法
-1. 从 GitHub 上下载源文件（Release 里的 `wlsaplusformac.zip`）或从官网上下载。
-2. 解压后执行 `构建wlsaplus.command`，双击即可。若提示不安全：点完成 → 系统设置 → 隐私与安全 → 拉到最下面点「仍要打开」。中间可能要输入密码，屏幕上可能什么也不显示，输入后回车即可。
-3. 构建脚本会**全程使用国内镜像**（无需科学上网），包括：
-   - nvm：`https://gitee.com/RubyMetric/nvm-cn`
-   - Node：`https://npmmirror.com/mirrors/node`
-   - npm：`https://registry.npmmirror.com`
-   - Electron：`https://npmmirror.com/mirrors/electron/`
-4. 构建成功后会打开 **`out/make`**（不是旧版的 `out-builder`，也不是 `dist`）。
-   - **`out/make`**：里面是可安装的 `.dmg` / `.zip`（选这个）
-   - **`out/`**：打包出的 `.app`
-   - **`dist/`**：只是网页前端，**没有**安装包
-5. 在弹出的文件夹里选择一个 `.dmg` / `.zip`，双击安装即可。
+## 包里有什么
 
-> 发布包内通常已包含一份 `git clone` 下来的 `wlsaplus-enablemacos` 工程目录；请保持与 `构建wlsaplus.command` 同级，或放在 `~/Downloads/wlsaplusformac/wlsaplus-enablemacos/`。
+下载 **`wlsaplusmac.zip`**，解压后有：
+
+| 文件 | 说明 |
+| --- | --- |
+| `wlsaplus1.0.9.dmg` | 安装包（Apple 芯片 M1/M2/M3/M4…） |
+| `安装wlsaplus.command` | 一键安装 + 解除隔离脚本 |
+| 本说明书 | 安装与使用说明 |
+
+`wlsaplus1.0.9.dmg` 可以和脚本放在一起，也可以放在同级的 `download` 文件夹里，脚本都能找到。
+
+## 系统要求
+
+- Mac 使用 **Apple 芯片**（M 系列）。Intel Mac 不支持。
+- 全新的 Mac 也可以直接装：**不需要**装 Homebrew、Node、Xcode，也**不需要联网**，脚本只用 macOS 自带的工具。
+- 应用之后要联网的部分（同步 PowerSchool、VPN 订阅）走学校和你自己的服务器，不依赖境外下载站。
+
+## 安装步骤
+
+1. 双击 `wlsaplusmac.zip` 解压。
+2. 双击 **`安装wlsaplus.command`**。
+   - 若提示「无法打开，因为无法验证开发者」：点「完成」→ 打开「系统设置」→「隐私与安全性」→ 拉到最下面点「仍要打开」→ 再点「打开」。
+   - 若提示「没有执行权限」：打开「终端」，输入 `chmod +x ` （后面有个空格），把脚本拖进终端窗口，按回车，再双击脚本。
+3. 脚本会自动：
+   1. 检查系统和芯片；
+   2. 取消解压文件夹的隔离属性；
+   3. 找到 `wlsaplus1.0.9.dmg` 并挂载；
+   4. 把 `WLSAPlus.app` 装进「应用程序」（有旧版会先替换）；
+   5. 解除应用的隔离属性；
+   6. 自动打开 WLSAPlus。
+4. 中途如果要输入密码，输入时屏幕**不会显示任何字符**，输完直接按回车即可。
+
+## 如果还是提示「已损坏」或打不开
+
+本应用是自签名的（不是苹果开发者证书），个别系统仍会拦。任选一种：
+
+- 在「应用程序」里对 WLSAPlus **右键 → 打开 → 打开**；
+- 或在「终端」执行：
+
+```bash
+sudo xattr -cr /Applications/WLSAPlus.app
+```
+
+## WLSAPlus 论坛（1.0.9 新增）
+
+左侧栏（窗口较窄时为底部栏）新增 **Forum / WLSAPlus 论坛** 标签，论坛直接嵌在应用里打开：
+
+- **自动登录**：已在应用里同步 PowerSchool 的同学，打开论坛会用当前的 PowerSchool 会话自动登录（密码不会发给论坛）；帖子依旧完全匿名。未同步时以游客身份浏览。
+- **主题跟随**：论坛的浅色 / 深色跟随 WLSAPlus 的主题设置（设置里选「跟随系统」时随系统切换），切换后论坛即时变化，无需刷新。
+- **底部导航**：嵌入模式下论坛的「主页 / AI 助手 / 墙投稿 / 墙查询 / 发布 / 登录」在论坛页面底部；窗口拉宽时内容居中显示。
+- 自动登录偶尔失败时，页面底部会短暂提示错误代码（如 `invalid_session`），可截图反馈；不影响以游客身份浏览。
+- 退出或切换 PowerSchool 账号时，论坛登录状态会一并清除。
 
 ## 使用 VPN
+
 1. 打开 Tools → VPN。
 2. 可先「Refresh」节点列表，需要时点「Test latency」测延迟，再选中节点。
 3. 点 Connect。若弹出管理员授权，输入密码并允许。授权前若短暂提示等待，属正常，不要反复乱点。
 4. 可用「Test WeChat」检测连 VPN / 不连 VPN 时微信相关地址是否可达（仅网络探测，不等于微信能否登录）。
 
 ## 关闭 VPN（请按顺序）
+
 1. 回到 VPN 页，若有 Disconnect，先点 Disconnect。
 2. 打开「活动监视器」→「网络」，找到 `clash`（或 mihomo 相关进程），选中后点左上角停止（叉），确认退出。
 3. 确认 VPN 页状态回到 Ready / Connect。
 
 ## 开课提醒
+
 设置里可开关「Class reminders」。开启后，开课前约 5 分钟会发 macOS 通知（需已同步课表）。
 
 ## 课表与成绩
+
 Connect / 同步 PowerSchool 后，可在课表与 Progress（成绩、作业、考勤）中查看。数据保存在本地。
