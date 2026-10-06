@@ -5,8 +5,18 @@
 # 自动取消下载/构建文件的 macOS 隔离属性
 # 双击即可运行
 # ============================================
+# ⚠️ 已弃用（LEGACY）：本脚本使用 npm install + electron:make（Forge maker-dmg，依赖 appdmg 原生模块），
+#    已不再维护。请改用 Release 构建包 wlsaplus1.0.9.zip 里的 working.command
+#    （npm ci + electron-forge package + codesign ad-hoc 签名 + hdiutil 生成 DMG）。
+# ============================================
 
 echo -ne "\033]0;构建 wlsaplus\007"
+echo "⚠️ 这是已弃用的旧构建脚本（legacy）。正确的构建脚本是 wlsaplus1.0.9.zip 里的 working.command。"
+read -r -p "仍要继续使用旧脚本吗？[y/N] " LEGACY_ANSWER
+case "$LEGACY_ANSWER" in
+  [yY]*) ;;
+  *) echo "已取消。请使用 working.command。"; read -n 1 -s -r -p "按任意键关闭..."; exit 0 ;;
+esac
 echo "============================================"
 echo "   wlsaplus 一键构建脚本 (1.0.9+)"
 echo "   （全程使用国内镜像，无需科学上网）"

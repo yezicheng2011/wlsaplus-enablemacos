@@ -1,14 +1,25 @@
 const path = require('node:path');
 
 const entitlementsPath = path.join(__dirname, 'electron', 'entitlements.plist');
-const selfSign =
-  process.env.WLSAPLUS_SELF_SIGN === '1' || process.env.APPLE_IDENTITY === '-';
-const osxSign = selfSign
-  ? { identity: '-', hardenedRuntime: false, entitlements: entitlementsPath }
-  : process.env.APPLE_IDENTITY
-    ? { identity: process.env.APPLE_IDENTITY, hardenedRuntime: true, entitlements: entitlementsPath }
-    : undefined;
-const osxNotarize = process.env.APPLE_ID && process.env.APPLE_APP_PASSWORD && process.env.APPLE_TEAM_ID
+
+// Ad-hoc builds (the working.command build kit, the self-sign CI workflow) are NOT signed by Forge:
+// osxSign stays undefined and the scripts run
+//   codesign --force --deep --sign - --entitlements electron/entitlements.plist WLSAPlus.app
+// afterwards. The old ad-hoc osxSign block never took effect: @electron/osx-sign 1.3.3 ignores
+// top-level hardenedRuntime/entitlements, and identity '-' without identityValidation:false throws
+// "No identity found", which @electron/packager swallows (continueOnError defaults to true).
+// Only a real Developer ID (release.yml with APPLE_IDENTITY secret) is signed by Forge, with
+// per-file options in the shape osx-sign 1.3.x actually reads.
+const developerIdentity =
+  process.env.APPLE_IDENTITY && process.env.APPLE_IDENTITY !== '-' ? process.env.APPLE_IDENTITY : '';
+const osxSign = developerIdentity
+  ? {
+      identity: developerIdentity,
+      optionsForFile: () => ({ hardenedRuntime: true, entitlements: entitlementsPath }),
+    }
+  : undefined;
+// Notarization needs a real signature, so it is only enabled together with a Developer ID.
+const osxNotarize = osxSign && process.env.APPLE_ID && process.env.APPLE_APP_PASSWORD && process.env.APPLE_TEAM_ID
   ? { appleId: process.env.APPLE_ID, appleIdPassword: process.env.APPLE_APP_PASSWORD, teamId: process.env.APPLE_TEAM_ID }
   : undefined;
 
@@ -56,7 +67,8 @@ const IGNORE_PATHS = [
   /^\/\.angular($|\/)/,
   /^\/\.playwright-cli($|\/)/,
   /^\/\.tmp-angular($|\/)/,
-  /^\/dist\/wlsaplus\/browser\/ocr($|\/)/,
+  // dist/wlsaplus/browser/ocr (tesseract worker/core/lang data) MUST ship: translator.page.ts
+  // loads OCR assets from new URL('ocr/', document.baseURI).
   /^\/(angular|ngsw|tsconfig).*\.(json|ts)$/,
   /^\/README\.md$/,
 ];

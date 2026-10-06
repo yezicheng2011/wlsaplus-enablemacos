@@ -105,6 +105,8 @@ npm run electron:make    # macOS DMG / ZIP（需在 macOS 上）· build DMG / Z
 - 可安装包在 `out/make`；`dist/` 只是前端产物。· Installers land in `out/make`; `dist/` is only the web build.
 - asar 只打包主进程运行时依赖与 `dist/` UI（见 `forge.config.cjs` 的 `RUNTIME_NODE_MODULES`）。
   The asar ships only main-process runtime deps plus the `dist/` UI (see `RUNTIME_NODE_MODULES` in `forge.config.cjs`).
+- `package.json` 的 `overrides` 把 `@electron/node-gyp` 固定为 npm 上的 `10.2.0-electron.1`：否则 `@electron/rebuild` 会从 GitHub 拉取 node-gyp（国内常失败），请勿删除。
+  The `overrides` entry in `package.json` pins `@electron/node-gyp` to the npm-published `10.2.0-electron.1`, so `@electron/rebuild` does not fetch node-gyp from GitHub (often unreachable in China). Do not remove it.
 - 论坛配置集中在 `src/app/core/forum.config.ts`（与 `electron/forum-config.cjs` 同步，有测试校验）。
   Forum settings live in `src/app/core/forum.config.ts`, mirrored in `electron/forum-config.cjs` (kept in sync by tests).
 
