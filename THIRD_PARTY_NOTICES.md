@@ -8,11 +8,9 @@ The distributed macOS app may also include the following components. Their licen
 
 | Component | Role | License | License file |
 | --- | --- | --- | --- |
-| [sing-box](https://github.com/SagerNet/sing-box) | VPN core downloaded by `npm run vpn:core` into `build/vpn-core/` | GPL-3.0 | `build/vpn-core/LICENSE-sing-box.txt` |
-| [v2ray-plugin](https://github.com/shadowsocks/v2ray-plugin) | Shadowsocks plugin alongside sing-box | MIT | `build/vpn-core/LICENSE-v2ray-plugin.txt` |
-| [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) | Binary inside `electron/bin/mac-vpn.tar.gz` (`clash_pkg/clash`) used for the macOS elevated VPN path | GPL-3.0 | `build/vpn-core/LICENSE-mihomo.txt` and `electron/bin/LICENSE-mihomo.txt` |
+| [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) | Binary inside `electron/bin/mac-vpn.tar.gz` (`clash_pkg/clash`), the only VPN core of the macOS app; shipped as `Contents/Resources/bin/` | GPL-3.0 | `electron/bin/LICENSE-mihomo.txt` (also `build/vpn-core/LICENSE-mihomo.txt`) |
 
-`scripts/download-vpn-core.mjs` refreshes the sing-box and v2ray-plugin license text from upstream when cores are downloaded.
+sing-box and v2ray-plugin are **not** shipped in the app. `scripts/download-vpn-core.mjs` only downloads them when `WLSAPLUS_FETCH_SING_BOX=1` is set (used by the optional `electron/vpn-config.test.cjs`); their licenses are kept in `build/vpn-core/LICENSE-sing-box.txt` (GPL-3.0) and `build/vpn-core/LICENSE-v2ray-plugin.txt` (MIT).
 
 ## Major npm / runtime dependencies
 

@@ -44,6 +44,9 @@ const IGNORE_PATHS = [
   /^\/powerschool-worker($|\/)/,
   /^\/vpn-subscription-worker($|\/)/,
   /^\/release-kit($|\/)/,
+  // build/ holds packaging inputs. Only build/icon.png is read at runtime (window icon);
+  // build/vpn-core (legacy sing-box/v2ray-plugin, unused on macOS) and icon.icns stay out of app.asar.
+  /^\/build\/(?!icon\.png$).+/,
   /^\/electron\/.*\.test\.cjs$/,
   /^\/electron\/bin($|\/)/,
   /^\/output($|\/)/,
@@ -79,9 +82,9 @@ module.exports = {
     appCategoryType: 'public.app-category.education',
     osxSign,
     osxNotarize,
-    // vpn-core -> Resources/vpn-core; electron/bin -> Resources/bin (mac-vpn.tar.gz)
+    // electron/bin -> Resources/bin (mac-vpn.tar.gz = mihomo, the only macOS VPN core,
+    // plus LICENSE-mihomo.txt). sing-box/v2ray-plugin are not shipped.
     extraResource: [
-      path.join(__dirname, 'build', 'vpn-core'),
       path.join(__dirname, 'electron', 'bin'),
     ],
     ignore: (file) => {

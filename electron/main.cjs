@@ -168,11 +168,6 @@ function setVpnStatus(patch) {
   return vpnStatus;
 }
 
-function vpnCorePath() {
-  const executable = 'sing-box';
-  return app.isPackaged ? path.join(process.resourcesPath, 'vpn-core', executable) : path.join(__dirname, '..', 'build', 'vpn-core', executable);
-}
-
 function decodeBase64Url(value) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '='), 'base64').toString('utf8');
@@ -525,6 +520,9 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
     execSync(`tar -xzf ${JSON.stringify(tarPath)} -C ${JSON.stringify(targetDir)}`);
     if (!fsSync.existsSync(execPath)) throw new Error('VPN helper binary was not found after extraction.');
     execSync(`chmod +x ${JSON.stringify(execPath)}`);
+    // Older mac-vpn.tar.gz builds carried com.apple.quarantine in their tar headers, which macOS tar
+    // restores; a quarantined helper can be blocked by Gatekeeper. Strip it (best effort).
+    try { execSync(`xattr -dr com.apple.quarantine ${JSON.stringify(targetDir)}`, { stdio: 'ignore' }); } catch {}
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     setVpnStatus({

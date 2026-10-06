@@ -81,14 +81,14 @@ The **`wlsaplus1.0.9.zip`** build kit in Releases contains:
 On a fresh Apple-silicon Mac, `working.command` will:
 
 1. 检查/安装 Xcode 命令行工具（Apple 官方）· Check / install Xcode Command Line Tools (from Apple)
-2. 从 **清华 TUNA** 镜像安装 Homebrew · Install Homebrew from the **TUNA** mirror
-3. 从 **Gitee（nvm-cn）** 安装 nvm，从 **npmmirror** 安装 Node.js 22 · nvm via **Gitee (nvm-cn)**, Node.js 22 via **npmmirror**
+2. 从 **Gitee**（`gitee.com/mirrors/nvm`，固定版本）安装 nvm，从 **npmmirror** 安装 Node.js 22 · nvm (pinned tag) via **Gitee**, Node.js 22 via **npmmirror**
+3. 仅当 nvm 失败时才安装 Homebrew（**清华 TUNA**，失败换 **中科大 USTC**）· Homebrew only as a fallback if nvm fails (**TUNA**, then **USTC**)
 4. npm / Electron 均走 **npmmirror** · npm and Electron downloads via **npmmirror**
 5. 构建 arm64 应用 → ad-hoc 签名 → `xattr -cr` → 生成 `wlsaplus<版本>.dmg` 并打开
    Build the arm64 app → ad-hoc sign → `xattr -cr` → create `wlsaplus<version>.dmg` and open it
 
-VPN 内核（sing-box / v2ray-plugin，arm64）已随构建包放在 `wlsaplusformacos/build/vpn-core/`，构建时无需访问境外网站。
-The VPN cores (sing-box / v2ray-plugin, arm64) are bundled in the kit under `wlsaplusformacos/build/vpn-core/`, so no overseas downloads are needed.
+macOS 版的 VPN 内核是 **mihomo（Clash Meta）**，已在源码 `electron/bin/mac-vpn.tar.gz` 中，构建时不下载任何 VPN 内核，也无需访问境外网站。
+The macOS VPN core is **mihomo (Clash Meta)**, already in the source at `electron/bin/mac-vpn.tar.gz`; the build downloads no VPN cores and needs no overseas sites.
 
 ## 开发 · Development
 
@@ -142,6 +142,4 @@ Passwords and cookies are redacted, but captures may still contain personal data
 源代码以 **GNU GPL v3** 发布，见 [`LICENSE`](LICENSE)。第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 以及：
 Source code is released under **GNU GPL v3** ([`LICENSE`](LICENSE)). Third-party notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and
 
-- [`build/vpn-core/LICENSE-sing-box.txt`](build/vpn-core/LICENSE-sing-box.txt)
-- [`build/vpn-core/LICENSE-v2ray-plugin.txt`](build/vpn-core/LICENSE-v2ray-plugin.txt)
-- [`build/vpn-core/LICENSE-mihomo.txt`](build/vpn-core/LICENSE-mihomo.txt)（`electron/bin/mac-vpn.tar.gz` 中的 mihomo / Clash Meta 核心 · mihomo / Clash Meta core）
+- [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)（`electron/bin/mac-vpn.tar.gz` 中的 mihomo / Clash Meta 核心，随应用分发 · mihomo / Clash Meta core, shipped in the app）

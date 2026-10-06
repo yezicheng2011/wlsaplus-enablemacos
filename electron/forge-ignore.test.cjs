@@ -22,3 +22,18 @@ test('forge ignore keeps main-process runtime modules and dist UI', () => {
   assert.equal(ignore('/src/app/app.ts'), true);
   assert.equal(ignore('node_modules/tesseract.js'), true); // no leading slash
 });
+
+test('forge keeps sing-box/v2ray-plugin out of the app; mihomo ships via Resources/bin', () => {
+  const forge = require(path.join('..', 'forge.config.cjs'));
+  const ignore = forge.packagerConfig.ignore;
+  // build/icon.png is the runtime window icon (electron/main.cjs iconPath)
+  assert.equal(ignore('/build'), false);
+  assert.equal(ignore('/build/icon.png'), false);
+  assert.equal(ignore('/build/icon.icns'), true);
+  assert.equal(ignore('/build/vpn-core'), true);
+  assert.equal(ignore('/build/vpn-core/sing-box'), true);
+  assert.equal(ignore('/build/vpn-core/v2ray-plugin'), true);
+  assert.equal(ignore('/electron/bin/mac-vpn.tar.gz'), true); // extraResource, not asar
+  const extra = forge.packagerConfig.extraResource.map((entry) => path.relative(path.join(__dirname, '..'), entry));
+  assert.deepEqual(extra, [path.join('electron', 'bin')]);
+});

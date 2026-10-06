@@ -1,4 +1,14 @@
+// VPN core preparation.
+//
+// The macOS app's only VPN core is mihomo (Clash Meta), shipped in electron/bin/mac-vpn.tar.gz and
+// copied to Resources/bin by forge (extraResource). main.cjs extracts it and runs clash_pkg/clash.
+// sing-box / v2ray-plugin are NOT used at runtime and are no longer packaged, so by default this
+// script only checks that the mihomo package is present and never touches the network.
+//
+// The legacy sing-box + v2ray-plugin download (GitHub, not reachable via China mirrors) is kept
+// opt-in for electron/vpn-config.test.cjs: set WLSAPLUS_FETCH_SING_BOX=1.
 import { spawnSync } from 'node:child_process';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,9 +62,26 @@ async function findPluginFile(directory) {
   return null;
 }
 
+const macVpnPackage = path.join(root, 'electron', 'bin', 'mac-vpn.tar.gz');
+
+function checkMacVpnPackage() {
+  if (!fsSync.existsSync(macVpnPackage)) {
+    throw new Error(`Missing ${path.relative(root, macVpnPackage)} (mihomo, the macOS VPN core). Restore it from git.`);
+  }
+  const listing = spawnSync('tar', ['-tzf', macVpnPackage], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (listing.status === 0 && !/(^|\/)clash_pkg\/clash$/m.test(listing.stdout)) {
+    throw new Error(`${path.relative(root, macVpnPackage)} does not contain clash_pkg/clash.`);
+  }
+  console.log(`macOS VPN core: mihomo in ${path.relative(root, macVpnPackage)} (sing-box/v2ray-plugin not needed)`);
+}
+
+checkMacVpnPackage();
+if (process.env.WLSAPLUS_FETCH_SING_BOX !== '1') process.exit(0);
+
 const target = targets[`${process.platform}-${process.arch}`];
 if (!target) {
-  throw new Error(`No VPN core is configured for ${process.platform}-${process.arch}. Mac-only builds require darwin-x64 or darwin-arm64.`);
+  console.log(`No legacy sing-box build is configured for ${process.platform}-${process.arch}; skipping.`);
+  process.exit(0);
 }
 
 if (!(await works())) {
