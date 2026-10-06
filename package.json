@@ -60,6 +60,9 @@
     "vitest": "^4.1.11",
     "wait-on": "^9.0.1"
   },
+  "overrides": {
+    "@electron/node-gyp": "10.2.0-electron.1"
+  },
   "engines": {
     "node": ">=22.22.3"
   },
