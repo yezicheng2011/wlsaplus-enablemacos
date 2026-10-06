@@ -1,0 +1,64 @@
+// WLSAPlus 论坛 (forum) configuration for the Electron main process.
+// Keep FORUM_URL / FORUM_FALLBACK_URL in sync with src/app/core/forum.config.ts
+// (forum-config.test.cjs enforces this).
+
+const FORUM_URL = 'https://wlsaforum.02studio.xyz/';
+const FORUM_FALLBACK_URL = 'https://34-81-212-116.sslip.io/';
+const FORUM_PARTITION = 'persist:forum';
+
+const FORUM_ORIGINS = new Set([new URL(FORUM_URL).origin, new URL(FORUM_FALLBACK_URL).origin]);
+
+function parseUrl(value) {
+  if (typeof value !== 'string' || !value) return null;
+  try { return new URL(value); } catch { return null; }
+}
+
+/** True when the URL is an https page on one of the forum origins. */
+function isForumUrl(value) {
+  const url = parseUrl(value);
+  return !!url && url.protocol === 'https:' && FORUM_ORIGINS.has(url.origin);
+}
+
+/** True for plain web links that may be handed to the system browser. */
+function isWebUrl(value) {
+  const url = parseUrl(value);
+  return !!url && (url.protocol === 'https:' || url.protocol === 'http:');
+}
+
+/** Entry URL for the forum; `fallback` selects the backup host. */
+function forumBaseUrl(fallback = false) {
+  return fallback ? FORUM_FALLBACK_URL : FORUM_URL;
+}
+
+/** Decide whether a <webview> may attach (only the forum, only in its own partition). */
+function isForumWebviewAttachAllowed(params) {
+  return !!params && params.partition === FORUM_PARTITION && isForumUrl(params.src);
+}
+
+/**
+ * Harden the guest's webPreferences in place (called from will-attach-webview).
+ * The forum page never gets the app preload, Node, or nested webviews.
+ */
+function hardenForumWebPreferences(webPreferences) {
+  delete webPreferences.preload;
+  delete webPreferences.preloadURL;
+  webPreferences.nodeIntegration = false;
+  webPreferences.nodeIntegrationInSubFrames = false;
+  webPreferences.contextIsolation = true;
+  webPreferences.sandbox = true;
+  webPreferences.webviewTag = false;
+  webPreferences.partition = FORUM_PARTITION;
+  return webPreferences;
+}
+
+module.exports = {
+  FORUM_URL,
+  FORUM_FALLBACK_URL,
+  FORUM_PARTITION,
+  FORUM_ORIGINS,
+  isForumUrl,
+  isWebUrl,
+  forumBaseUrl,
+  isForumWebviewAttachAllowed,
+  hardenForumWebPreferences,
+};

@@ -24,6 +24,10 @@
   --task-blue: #3569ad;
   --task-purple: #7453ad;
   --task-pink: #a94474;
+  /* WLSAPlus 论坛 brand — the single place to change forum colors (defaults follow the app accent). */
+  --forum-accent: var(--app-accent);
+  --forum-accent-soft: var(--app-accent-soft);
+  --forum-on-accent: var(--app-on-accent);
 }
 
 :root.dark-theme {

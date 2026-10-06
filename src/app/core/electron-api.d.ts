@@ -32,6 +32,11 @@ declare global {
         }): Promise<PlatformHttpResponse>;
         clearSession(baseUrl: string): Promise<void>;
       };
+      forum: {
+        /** Forum entry URL: a one-time SSO login URL when available, else the plain forum URL. */
+        ssoUrl(options?: { fallback?: boolean }): Promise<string>;
+        clearSession(): Promise<void>;
+      };
       vpn: {
         status(): Promise<VpnStatus>;
         listNodes(sourceId?: string): Promise<VpnNode[]>;

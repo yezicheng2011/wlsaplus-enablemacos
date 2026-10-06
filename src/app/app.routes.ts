@@ -10,6 +10,7 @@ import { ToolsPage } from './pages/tools.page';
 import { TranslatorPage } from './pages/translator.page';
 import { VpnPage } from './pages/vpn.page';
 import { MapPage } from './pages/map.page';
+import { ForumPage } from './pages/forum.page';
 
 export const routes: Routes = [
   { path: 'connect', component: ConnectPage },
@@ -19,6 +20,7 @@ export const routes: Routes = [
       { path: '', component: HomePage },
       { path: 'schedule', component: SchedulePage },
       { path: 'progress', component: ProgressPage },
+      { path: 'forum', component: ForumPage },
       { path: 'tools/vpn', component: VpnPage },
       { path: 'tools/translate', component: TranslatorPage },
       { path: 'tools/map', component: MapPage },

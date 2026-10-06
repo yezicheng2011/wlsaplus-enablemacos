@@ -11,6 +11,15 @@ const { autoUpdater } = require('electron-updater');
 const { VPN_CONNECTION_MODES, buildVpnConfig } = require('./vpn-config.cjs');
 const { updateFeed } = require('./update-config.cjs');
 const { validateExternalHelpUrl } = require('./external-links.cjs');
+const {
+  FORUM_PARTITION,
+  isForumUrl,
+  isWebUrl,
+  forumBaseUrl,
+  isForumWebviewAttachAllowed,
+  hardenForumWebPreferences,
+} = require('./forum-config.cjs');
+const { resolveForumEntryUrl } = require('./forum-sso.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
 const yaml = require('js-yaml');
 
@@ -51,6 +60,7 @@ const vpnConfigFile = () => path.join(vpnDirectory(), 'config.json');
 const vpnProxyStateFile = () => path.join(vpnDirectory(), 'proxy-state.json');
 const powerSchoolSession = () => session.fromPartition('persist:powerschool');
 const appSession = () => session.fromPartition('persist:wlsaplus');
+const forumSession = () => session.fromPartition(FORUM_PARTITION);
 const iconPath = () => path.join(__dirname, '..', 'build', 'icon.png');
 
 function rendererIndexPath() {
@@ -89,6 +99,38 @@ function configureExternalHelpLinks(win) {
     try { void shell.openExternal(validateExternalHelpUrl(url)); } catch { /* Ignore unapproved popup URLs. */ }
     return { action: 'deny' };
   });
+}
+
+// WLSAPlus 论坛: the only <webview> allowed is the forum, in its own partition,
+// without the app preload. Popups and off-forum navigation go to the system browser.
+function configureForumWebview(win) {
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!isForumWebviewAttachAllowed(params)) {
+      console.warn(`Blocked <webview> attach for ${params?.src} (partition ${params?.partition}).`);
+      event.preventDefault();
+      return;
+    }
+    hardenForumWebPreferences(webPreferences);
+  });
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      if (isForumUrl(url)) void guest.loadURL(url);
+      else if (isWebUrl(url)) void shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    guest.on('will-navigate', (event, url) => {
+      if (isForumUrl(url)) return;
+      event.preventDefault();
+      if (isWebUrl(url)) void shell.openExternal(url);
+    });
+  });
+}
+
+function configureForumSession() {
+  const forum = forumSession();
+  const allowed = new Set(['clipboard-sanitized-write', 'fullscreen']);
+  forum.setPermissionRequestHandler((_webContents, permission, callback) => callback(allowed.has(permission)));
+  forum.setPermissionCheckHandler((_webContents, permission) => allowed.has(permission));
 }
 
 function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
@@ -984,8 +1026,9 @@ async function translateText(text, source, target) {
 }
 
 function createMainWindow(route = '') {
-  mainWindow = new BrowserWindow({ width: 1220, height: 820, minWidth: 380, minHeight: 600, backgroundColor: '#f7f8fa', title: 'WLSAPlus', icon: iconPath(), webPreferences: webPreferences() });
+  mainWindow = new BrowserWindow({ width: 1220, height: 820, minWidth: 380, minHeight: 600, backgroundColor: '#f7f8fa', title: 'WLSAPlus', icon: iconPath(), webPreferences: webPreferences({ webviewTag: true }) });
   configureExternalHelpLinks(mainWindow);
+  configureForumWebview(mainWindow);
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // -3 = aborted
     console.error(`Renderer failed to load (${errorCode}): ${errorDescription} @ ${validatedURL}`);
@@ -1025,13 +1068,15 @@ function validateBaseUrl(value) {
 
 ipcMain.handle('system:open-external', (_event, url) => shell.openExternal(validateExternalHelpUrl(url)));
 
-ipcMain.handle('credentials:get', async () => {
+async function readCredentials() {
   try {
     const encrypted = await fs.readFile(credentialFile());
     if (!safeStorage.isEncryptionAvailable()) return null;
     return JSON.parse(safeStorage.decryptString(encrypted));
   } catch { return null; }
-});
+}
+
+ipcMain.handle('credentials:get', () => readCredentials());
 ipcMain.handle('credentials:set', async (_event, value) => {
   if (!safeStorage.isEncryptionAvailable()) throw new Error('System credential encryption is unavailable.');
   const credentials = { schoolUrl: String(value.schoolUrl), username: String(value.username), password: String(value.password) };
@@ -1071,6 +1116,18 @@ ipcMain.handle('powerschool:request', async (_event, options) => {
 ipcMain.handle('powerschool:clear-session', async (_event, baseUrl) => {
   const origin = validateBaseUrl(baseUrl);
   await powerSchoolSession().clearStorageData({ origin, storages: ['cookies'] });
+});
+
+ipcMain.handle('forum:sso-url', async (_event, options) => resolveForumEntryUrl({
+  baseUrl: forumBaseUrl(options?.fallback === true),
+  credentials: await readCredentials(),
+  powerSchoolSession: powerSchoolSession(),
+  fetch: (url, init) => forumSession().fetch(url, init),
+}));
+ipcMain.handle('forum:clear-session', async () => {
+  const forum = forumSession();
+  await forum.clearStorageData();
+  await forum.clearCache();
 });
 
 ipcMain.handle('vpn:status', () => vpnStatus);
@@ -1145,6 +1202,7 @@ app.whenReady().then(async () => {
   configureAppUpdater();
   await restoreSavedSystemProxy().catch(() => {});
   await appSession().clearStorageData({ storages: ['serviceworkers', 'cachestorage'] }).catch(() => {});
+  configureForumSession();
   if (!isAutostart || vpnAutoConnectMode) showMainWindow(vpnAutoConnectMode ? 'tools/vpn' : '');
   if (vpnAutoConnectMode) void connectVpn(vpnAutoConnectMode, vpnAutoConnectSource);
   if (updatesSupported && !vpnAutoConnectMode) {

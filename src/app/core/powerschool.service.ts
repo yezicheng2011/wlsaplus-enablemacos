@@ -53,6 +53,8 @@ export class PowerSchoolService {
       this.fetchSchedule(normalized.schoolUrl),
       this.fetchProgress(normalized.schoolUrl, result.text),
     ]);
+    const previous = await this.vault.get();
+    if (previous && (previous.username !== normalized.username || previous.schoolUrl !== normalized.schoolUrl)) await this.clearForumSession();
     await this.vault.set(normalized);
     this.store.saveSchedule(snapshot);
     this.store.saveProgress(progress);
@@ -74,8 +76,14 @@ export class PowerSchoolService {
     } catch {
       // Local data must still be removable while the remote gateway is unavailable.
     }
+    await this.clearForumSession();
     await this.vault.clear();
     this.store.clearAll();
+  }
+
+  /** Signs the WLSAPlus 论坛 webview out so the next account doesn't inherit the forum login. */
+  private async clearForumSession(): Promise<void> {
+    try { await window.wlsaplus?.forum?.clearSession(); } catch { /* Forum data is best-effort. */ }
   }
 
   async loadCourse(courseId: string, force = false): Promise<ProgressCourse> {

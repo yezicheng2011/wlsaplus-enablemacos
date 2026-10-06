@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('wlsaplus', {
     request: (options) => ipcRenderer.invoke('powerschool:request', options),
     clearSession: (baseUrl) => ipcRenderer.invoke('powerschool:clear-session', baseUrl),
   },
+  forum: {
+    ssoUrl: (options) => ipcRenderer.invoke('forum:sso-url', options),
+    clearSession: () => ipcRenderer.invoke('forum:clear-session'),
+  },
   vpn: {
     status: () => ipcRenderer.invoke('vpn:status'),
     listNodes: (sourceId) => ipcRenderer.invoke('vpn:list-nodes', sourceId),

@@ -9,6 +9,9 @@ import { PowerSchoolService } from '../core/powerschool.service';
 import { UpdateService } from '../core/update.service';
 import { NoticeService } from '../core/notice.service';
 import { ClassReminderService } from '../core/class-reminder.service';
+import { FORUM_BRAND } from '../core/forum.config';
+
+interface NavItem { path: string; label: string; icon: string; tooltip?: string; brand?: 'forum' }
 
 @Component({
   selector: 'app-shell',
@@ -19,7 +22,7 @@ import { ClassReminderService } from '../core/class-reminder.service';
         <a class="brand" routerLink="/" aria-label="WLSAPlus home"><img src="icons/app-icon.svg" alt=""></a>
         <nav aria-label="Main navigation">
           @for (item of nav; track item.path) {
-            <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }" [matTooltip]="item.label" matTooltipPosition="right">
+            <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }" [class.forum]="item.brand === 'forum'" [matTooltip]="item.tooltip ?? item.label" matTooltipPosition="right" [attr.aria-label]="item.tooltip ?? item.label">
               <span class="material-symbols-rounded">{{ item.icon }}</span><span>{{ item.label }}</span>
             </a>
           }
@@ -54,7 +57,7 @@ import { ClassReminderService } from '../core/class-reminder.service';
       }
       <nav class="bottom-nav" aria-label="Main navigation">
         @for (item of nav; track item.path) {
-          <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }">
+          <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }" [class.forum]="item.brand === 'forum'" [attr.aria-label]="item.tooltip ?? item.label">
             <span class="material-symbols-rounded">{{ item.icon }}</span><span>{{ item.label }}</span>
           </a>
         }
@@ -70,6 +73,7 @@ import { ClassReminderService } from '../core/class-reminder.service';
     nav a { min-height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 8px; color: var(--app-muted); text-decoration: none; font-size: 12px; font-weight: 500; }
     nav a .material-symbols-rounded { font-size: 24px; }
     nav a.active { color: var(--app-accent); background: var(--app-accent-soft); }
+    nav a.forum.active { color: var(--forum-accent); background: var(--forum-accent-soft); }
     main { margin-left: 88px; }
     .bottom-nav { display: none; }
     .notice-overlay { position: fixed; inset: 0; z-index: 39; display: grid; place-items: center; padding: 24px; background: rgb(0 0 0 / 32%); }
@@ -84,7 +88,7 @@ import { ClassReminderService } from '../core/class-reminder.service';
     .progress-row { display: grid; grid-template-columns: minmax(0,1fr) 34px; align-items: center; gap: 8px; margin-top: 4px; color: var(--app-muted); font-size: 11px; } progress { width: 100%; height: 6px; accent-color: var(--app-accent); }
     @media (max-width: 899px) {
       .rail { display: none; } main { margin-left: 0; }
-      .bottom-nav { position: fixed; display: grid; grid-template-columns: repeat(5, 1fr); inset: auto 0 0; z-index: 20; min-height: 72px; padding: 4px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: color-mix(in srgb, var(--app-surface) 94%, transparent); border-top: 1px solid var(--app-border); backdrop-filter: blur(18px); }
+      .bottom-nav { position: fixed; display: grid; grid-template-columns: repeat(6, 1fr); inset: auto 0 0; z-index: 20; min-height: 72px; padding: 4px max(8px, env(safe-area-inset-right)) max(4px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: color-mix(in srgb, var(--app-surface) 94%, transparent); border-top: 1px solid var(--app-border); backdrop-filter: blur(18px); }
       .bottom-nav a { min-height: 62px; }
       .update-alert { right: 12px; bottom: 84px; width: calc(100vw - 24px); grid-template-columns: 38px minmax(0,1fr); } .update-alert button { grid-column: 2; justify-self: start; }
       .notice-overlay { padding: 16px; } .notice-alert { padding: 22px; } .notice-alert button { grid-column: 1 / -1; }
@@ -101,10 +105,11 @@ export class ShellComponent implements OnInit {
   readonly notice = inject(NoticeService);
   // Starts macOS class reminders when schedule data is available.
   private readonly classReminders = inject(ClassReminderService);
-  readonly nav = [
+  readonly nav: NavItem[] = [
     { path: '/', label: 'Home', icon: 'home' },
     { path: '/schedule', label: 'Schedule', icon: 'calendar_month' },
     { path: '/progress', label: 'Progress', icon: 'monitoring' },
+    { path: '/forum', label: FORUM_BRAND.navLabel, icon: FORUM_BRAND.icon, tooltip: FORUM_BRAND.name, brand: 'forum' },
     { path: '/tools', label: 'Tools', icon: 'build' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
