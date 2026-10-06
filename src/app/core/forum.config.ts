@@ -6,6 +6,9 @@ export const FORUM_URL = 'https://wlsaforum.02studio.xyz/';
 export const FORUM_FALLBACK_URL = 'https://34-81-212-116.sslip.io/';
 export const FORUM_PARTITION = 'persist:forum';
 
+/** SSO codes the forum team asked us to surface (report code + time, never cookie values). */
+export const FORUM_SSO_REPORTABLE_CODES: readonly string[] = ['invalid_session', 'identity_not_found'];
+
 export const FORUM_BRAND = {
   /** Full product name (page title, tooltip). */
   name: 'WLSAPlus 论坛',
@@ -13,4 +16,6 @@ export const FORUM_BRAND = {
   navLabel: 'Forum',
   /** Material Symbols Rounded icon name. Replace when the forum brand icon is available. */
   icon: 'forum',
+  /** Forum logo (teal variant from the forum brand kit), served from public/icons. */
+  logo: 'icons/forum-logo-teal.svg',
 } as const;

@@ -2,7 +2,7 @@ import { Component, NO_ERRORS_SCHEMA, ElementRef, OnInit, inject, signal, viewCh
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { PlatformService } from '../core/platform.service';
-import { FORUM_BRAND, FORUM_URL } from '../core/forum.config';
+import { FORUM_BRAND, FORUM_SSO_REPORTABLE_CODES, FORUM_URL } from '../core/forum.config';
 
 /** Subset of Electron's <webview> element API used by the forum page. */
 interface ForumWebview extends HTMLElement {
@@ -23,7 +23,7 @@ interface WebviewNavigateEvent extends Event { url: string; isMainFrame?: boolea
   template: `
     <section class="forum" [attr.aria-label]="brand.name">
       <header class="forum-bar">
-        <span class="forum-mark material-symbols-rounded" aria-hidden="true">{{ brand.icon }}</span>
+        <img class="forum-logo" [src]="brand.logo" alt="" width="32" height="32">
         <h1>{{ brand.name }}</h1>
         <span class="spacer"></span>
         @if (desktop) {
@@ -33,6 +33,13 @@ interface WebviewNavigateEvent extends Event { url: string; isMainFrame?: boolea
         <button mat-icon-button type="button" (click)="openInBrowser()" matTooltip="Open in browser" aria-label="Open in browser"><span class="material-symbols-rounded">open_in_new</span></button>
       </header>
       <div class="forum-loading" [class.active]="loading()" aria-hidden="true"></div>
+      @if (ssoIssue(); as issue) {
+        <div class="forum-sso-issue" role="status">
+          <span class="material-symbols-rounded" aria-hidden="true">info</span>
+          <span>Automatic sign-in didn't work ({{ issue.code }}, {{ issue.time }}). You're browsing as a guest; please report this code to the forum team.</span>
+          <button mat-icon-button type="button" (click)="ssoIssue.set(null)" aria-label="Dismiss"><span class="material-symbols-rounded">close</span></button>
+        </div>
+      }
       <div class="forum-body">
         @if (!desktop) {
           <div class="empty-state"><div><span class="material-symbols-rounded big">{{ brand.icon }}</span><p>The forum opens in your browser on the web version.</p><a mat-flat-button [href]="forumUrl" target="_blank" rel="noopener">Open {{ brand.name }}</a></div></div>
@@ -50,7 +57,10 @@ interface WebviewNavigateEvent extends Event { url: string; isMainFrame?: boolea
     :host { display: block; }
     .forum { height: 100vh; display: flex; flex-direction: column; background: var(--app-bg); }
     .forum-bar { flex: 0 0 auto; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 6px 12px 6px 18px; background: var(--app-surface); border-bottom: 1px solid var(--app-border); }
-    .forum-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: var(--forum-accent-soft); color: var(--forum-accent); font-size: 21px; }
+    .forum-logo { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 8px; display: block; }
+    .forum-sso-issue { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 4px 8px 4px 16px; background: var(--forum-accent-soft); color: var(--app-text); font-size: 13px; }
+    .forum-sso-issue > span:nth-child(2) { flex: 1; }
+    .forum-sso-issue > .material-symbols-rounded { color: var(--forum-accent); }
     h1 { margin: 0; font-size: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .forum-loading { flex: 0 0 3px; background: transparent; }
     .forum-loading.active { background: linear-gradient(90deg, transparent, var(--forum-accent), transparent) 0 0 / 40% 100% no-repeat var(--forum-accent-soft); animation: forum-loading 1.1s linear infinite; }
@@ -71,6 +81,7 @@ export class ForumPage implements OnInit {
   readonly loading = signal(false);
   readonly failed = signal<string | null>(null);
   readonly canGoBack = signal(false);
+  readonly ssoIssue = signal<{ code: string; time: string } | null>(null);
   private currentUrl = FORUM_URL;
   private usingFallback = false;
 
@@ -95,7 +106,8 @@ export class ForumPage implements OnInit {
   }
 
   openInBrowser(): void {
-    const url = this.currentUrl || FORUM_URL;
+    // Never hand a one-time SSO link to the browser.
+    const url = this.currentUrl && !this.currentUrl.includes('/sso/consume') ? this.currentUrl : FORUM_URL;
     if (window.wlsaplus) void window.wlsaplus.system.openExternal(url).catch(() => window.wlsaplus?.system.openExternal(FORUM_URL));
     else window.open(url, '_blank', 'noopener');
   }
@@ -135,6 +147,16 @@ export class ForumPage implements OnInit {
       url = FORUM_URL;
     }
     this.src.set(url);
+    await this.checkSsoStatus();
+  }
+
+  private async checkSsoStatus(): Promise<void> {
+    try {
+      const status = await window.wlsaplus?.forum.ssoStatus?.();
+      if (status && FORUM_SSO_REPORTABLE_CODES.includes(status.code)) {
+        this.ssoIssue.set({ code: status.code, time: new Date(status.at).toLocaleString() });
+      }
+    } catch { /* Status is informational only. */ }
   }
 
   private updateHistory(): void {

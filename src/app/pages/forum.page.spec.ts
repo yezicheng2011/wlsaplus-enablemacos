@@ -5,12 +5,14 @@ import { FORUM_FALLBACK_URL, FORUM_URL } from '../core/forum.config';
 
 type Bridge = NonNullable<Window['wlsaplus']>;
 
-function installBridge(ssoUrl: (options?: { fallback?: boolean }) => Promise<string>): ReturnType<typeof vi.fn> {
+type SsoStatus = { code: string; httpStatus: number | null; at: string } | null;
+
+function installBridge(ssoUrl: (options?: { fallback?: boolean }) => Promise<string>, status: SsoStatus = null): ReturnType<typeof vi.fn> {
   const spy = vi.fn(ssoUrl);
   window.wlsaplus = {
     platform: { os: 'macos' },
     system: { openExternal: vi.fn().mockResolvedValue(undefined) },
-    forum: { ssoUrl: spy, clearSession: vi.fn().mockResolvedValue(undefined) },
+    forum: { ssoUrl: spy, ssoStatus: vi.fn().mockResolvedValue(status), clearSession: vi.fn().mockResolvedValue(undefined) },
   } as unknown as Bridge;
   return spy;
 }
@@ -18,8 +20,11 @@ function installBridge(ssoUrl: (options?: { fallback?: boolean }) => Promise<str
 async function render() {
   const fixture = TestBed.createComponent(ForumPage);
   fixture.detectChanges();
-  await fixture.whenStable();
-  fixture.detectChanges();
+  for (let i = 0; i < 3; i++) {
+    await new Promise((resolve) => setTimeout(resolve));
+    await fixture.whenStable();
+    fixture.detectChanges();
+  }
   return fixture;
 }
 
@@ -44,6 +49,20 @@ describe('ForumPage', () => {
     fixture.detectChanges();
     expect(ssoUrl).toHaveBeenLastCalledWith({ fallback: true });
     expect((fixture.nativeElement as HTMLElement).querySelector('webview')?.getAttribute('src')).toBe(FORUM_FALLBACK_URL);
+  });
+
+  it('surfaces reportable SSO failures (invalid_session / identity_not_found) as a guest notice', async () => {
+    installBridge(async () => FORUM_URL, { code: 'invalid_session', httpStatus: 401, at: '2026-10-06T01:25:01.035Z' });
+    const fixture = await render();
+    const notice = (fixture.nativeElement as HTMLElement).querySelector('.forum-sso-issue');
+    expect(notice?.textContent).toContain('invalid_session');
+  });
+
+  it('stays quiet for normal SSO outcomes', async () => {
+    installBridge(async () => FORUM_URL, { code: 'already_logged_in', httpStatus: null, at: '2026-10-06T01:25:01.035Z' });
+    const fixture = await render();
+    expect((fixture.nativeElement as HTMLElement).querySelector('.forum-sso-issue')).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).querySelector('img.forum-logo')?.getAttribute('src')).toBe('icons/forum-logo-teal.svg');
   });
 
   it('shows an open-in-browser link on the web build', async () => {

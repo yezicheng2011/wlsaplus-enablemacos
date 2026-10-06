@@ -24,10 +24,10 @@
   --task-blue: #3569ad;
   --task-purple: #7453ad;
   --task-pink: #a94474;
-  /* WLSAPlus 论坛 brand — the single place to change forum colors (defaults follow the app accent). */
-  --forum-accent: var(--app-accent);
-  --forum-accent-soft: var(--app-accent-soft);
-  --forum-on-accent: var(--app-on-accent);
+  /* WLSAPlus 论坛 brand (forum brand kit README) — fixed teal, independent of the user's app color. */
+  --forum-accent: #00677a;
+  --forum-accent-soft: #b9eaf4;
+  --forum-on-accent: #ffffff;
 }
 
 :root.dark-theme {
@@ -54,6 +54,9 @@
   --task-blue: #8db7f0;
   --task-purple: #c0a4ef;
   --task-pink: #ec93bb;
+  --forum-accent: #79d7e8;
+  --forum-accent-soft: #174d58;
+  --forum-on-accent: #00363f;
 }
 
 [data-task-color='red'] { --task-color: var(--task-red); --task-on-color: #ffffff; }

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('wlsaplus', {
   },
   forum: {
     ssoUrl: (options) => ipcRenderer.invoke('forum:sso-url', options),
+    ssoStatus: () => ipcRenderer.invoke('forum:sso-status'),
     clearSession: () => ipcRenderer.invoke('forum:clear-session'),
   },
   vpn: {

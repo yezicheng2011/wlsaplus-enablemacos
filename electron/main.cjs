@@ -19,7 +19,7 @@ const {
   isForumWebviewAttachAllowed,
   hardenForumWebPreferences,
 } = require('./forum-config.cjs');
-const { resolveForumEntryUrl } = require('./forum-sso.cjs');
+const { resolveForumEntryUrl, getLastForumSsoStatus } = require('./forum-sso.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
 const yaml = require('js-yaml');
 
@@ -1124,6 +1124,7 @@ ipcMain.handle('forum:sso-url', async (_event, options) => resolveForumEntryUrl(
   powerSchoolSession: powerSchoolSession(),
   fetch: (url, init) => forumSession().fetch(url, init),
 }));
+ipcMain.handle('forum:sso-status', () => getLastForumSsoStatus());
 ipcMain.handle('forum:clear-session', async () => {
   const forum = forumSession();
   await forum.clearStorageData();

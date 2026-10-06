@@ -35,6 +35,8 @@ declare global {
       forum: {
         /** Forum entry URL: a one-time SSO login URL when available, else the plain forum URL. */
         ssoUrl(options?: { fallback?: boolean }): Promise<string>;
+        /** Last SSO outcome (code + time only), e.g. 'ok', 'already_logged_in', 'invalid_session'. */
+        ssoStatus(): Promise<{ code: string; httpStatus: number | null; at: string } | null>;
         clearSession(): Promise<void>;
       };
       vpn: {
