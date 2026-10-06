@@ -16,6 +16,7 @@ const {
   isForumUrl,
   isWebUrl,
   forumBaseUrl,
+  forumSsoNext,
   isForumWebviewAttachAllowed,
   hardenForumWebPreferences,
 } = require('./forum-config.cjs');
@@ -1132,6 +1133,8 @@ ipcMain.handle('forum:sso-url', async (_event, options) => resolveForumEntryUrl(
   credentials: await readCredentials(),
   powerSchoolSession: powerSchoolSession(),
   fetch: (url, init) => forumSession().fetch(url, init),
+  // After consume, land in embed mode with the app theme (forum §7.5).
+  next: forumSsoNext(options?.theme),
 }));
 ipcMain.handle('forum:sso-status', () => getLastForumSsoStatus());
 // Theme + embed cookies on every forum origin (forum partition only) and prefers-color-scheme for live guests.

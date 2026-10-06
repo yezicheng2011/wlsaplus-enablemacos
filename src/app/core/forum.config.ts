@@ -12,7 +12,9 @@ export const FORUM_PARTITION = 'persist:forum';
  * - Cookies (set by main on every forum origin in the forum partition; Secure, Path=/, SameSite=Lax):
  *     wlsaplus_theme=light|dark, wlsaplus_embed=1
  * - Query params on the initial (non-SSO) entry URL: ?theme=light|dark&embed=wlsaplus
- * - Live change: window.postMessage({ type: 'wlsaplus-theme', theme }, '*') inside the forum page.
+ * - SSO: issue request next = '/?embed=wlsaplus&theme=light|dark' (built in electron/forum-config.cjs forumSsoNext).
+ * - Live change: window.postMessage({ type: 'wlsaplus-theme', theme }, location.origin) inside the forum page.
+ * Contract: /workspace/wlsaplus-forum-brand/SSO_INTEGRATION.md §7.
  */
 export type ForumTheme = 'light' | 'dark';
 export const FORUM_THEME_COOKIE = 'wlsaplus_theme';
@@ -55,7 +57,8 @@ export function withForumEntryParams(value: string, theme: ForumTheme): string {
 
 /** Script run inside the forum page (via <webview>.executeJavaScript) to announce a theme change. */
 export function forumThemeMessageScript(theme: ForumTheme): string {
-  return `window.postMessage(${JSON.stringify({ type: FORUM_THEME_MESSAGE_TYPE, theme })}, '*'); true;`;
+  // Target our own origin: the forum only accepts same-window / same-origin messages (§7.3).
+  return `window.postMessage(${JSON.stringify({ type: FORUM_THEME_MESSAGE_TYPE, theme })}, location.origin); true;`;
 }
 
 /** SSO codes the forum team asked us to surface (report code + time, never cookie values). */

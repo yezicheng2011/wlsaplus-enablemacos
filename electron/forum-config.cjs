@@ -9,6 +9,9 @@ const FORUM_PARTITION = 'persist:forum';
 const FORUM_THEME_COOKIE = 'wlsaplus_theme';
 const FORUM_EMBED_COOKIE = 'wlsaplus_embed';
 const FORUM_EMBED_COOKIE_VALUE = '1';
+const FORUM_THEME_PARAM = 'theme';
+const FORUM_EMBED_PARAM = 'embed';
+const FORUM_EMBED_PARAM_VALUE = 'wlsaplus';
 
 const FORUM_ORIGINS = new Set([new URL(FORUM_URL).origin, new URL(FORUM_FALLBACK_URL).origin]);
 
@@ -32,6 +35,16 @@ function isWebUrl(value) {
 /** Entry URL for the forum; `fallback` selects the backup host. */
 function forumBaseUrl(fallback = false) {
   return fallback ? FORUM_FALLBACK_URL : FORUM_URL;
+}
+
+/**
+ * `next` for the SSO issue request: land on the forum home in embed mode with the app theme
+ * (SSO_INTEGRATION.md §7.5). Unknown themes just omit the theme param.
+ */
+function forumSsoNext(theme) {
+  const params = new URLSearchParams({ [FORUM_EMBED_PARAM]: FORUM_EMBED_PARAM_VALUE });
+  if (theme === 'light' || theme === 'dark') params.set(FORUM_THEME_PARAM, theme);
+  return `/?${params.toString()}`;
 }
 
 /** Decide whether a <webview> may attach (only the forum, only in its own partition). */
@@ -63,6 +76,10 @@ module.exports = {
   FORUM_THEME_COOKIE,
   FORUM_EMBED_COOKIE,
   FORUM_EMBED_COOKIE_VALUE,
+  FORUM_THEME_PARAM,
+  FORUM_EMBED_PARAM,
+  FORUM_EMBED_PARAM_VALUE,
+  forumSsoNext,
   isForumUrl,
   isWebUrl,
   forumBaseUrl,

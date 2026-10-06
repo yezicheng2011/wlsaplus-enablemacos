@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   FORUM_URL, FORUM_FALLBACK_URL, FORUM_PARTITION, FORUM_THEME_COOKIE, FORUM_EMBED_COOKIE, FORUM_EMBED_COOKIE_VALUE,
+  FORUM_THEME_PARAM, FORUM_EMBED_PARAM, FORUM_EMBED_PARAM_VALUE, forumSsoNext,
   isForumUrl, isWebUrl, forumBaseUrl, isForumWebviewAttachAllowed, hardenForumWebPreferences,
 } = require('./forum-config.cjs');
 
@@ -59,4 +60,14 @@ test('renderer forum config matches the main-process config', () => {
   assert.match(source, new RegExp(`FORUM_THEME_COOKIE = '${FORUM_THEME_COOKIE}'`));
   assert.match(source, new RegExp(`FORUM_EMBED_COOKIE = '${FORUM_EMBED_COOKIE}'`));
   assert.match(source, new RegExp(`FORUM_EMBED_COOKIE_VALUE = '${FORUM_EMBED_COOKIE_VALUE}'`));
+  assert.match(source, new RegExp(`FORUM_THEME_PARAM = '${FORUM_THEME_PARAM}'`));
+  assert.match(source, new RegExp(`FORUM_EMBED_PARAM = '${FORUM_EMBED_PARAM}'`));
+  assert.match(source, new RegExp(`FORUM_EMBED_PARAM_VALUE = '${FORUM_EMBED_PARAM_VALUE}'`));
+});
+
+test('forumSsoNext targets the forum home in embed mode with the app theme', () => {
+  assert.equal(forumSsoNext('dark'), '/?embed=wlsaplus&theme=dark');
+  assert.equal(forumSsoNext('light'), '/?embed=wlsaplus&theme=light');
+  assert.equal(forumSsoNext('purple'), '/?embed=wlsaplus');
+  assert.equal(forumSsoNext(undefined), '/?embed=wlsaplus');
 });

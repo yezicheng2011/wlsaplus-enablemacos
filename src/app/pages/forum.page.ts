@@ -132,7 +132,7 @@ export class ForumPage implements OnInit {
     await this.setThemeCookies(theme);
     let url: string;
     try {
-      url = await window.wlsaplus!.forum.ssoUrl({ fallback });
+      url = await window.wlsaplus!.forum.ssoUrl({ fallback, theme });
     } catch {
       url = FORUM_URL;
     }

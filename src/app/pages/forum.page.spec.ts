@@ -68,7 +68,7 @@ describe('ForumPage', () => {
     const { ssoUrl, setTheme } = installBridge(async () => `${FORUM_URL}sso/consume?token=t&next=%2F`);
     const fixture = await render();
     const view = el(fixture).querySelector('webview');
-    expect(ssoUrl).toHaveBeenCalledWith({ fallback: false });
+    expect(ssoUrl).toHaveBeenCalledWith({ fallback: false, theme: 'dark' });
     expect(setTheme).toHaveBeenCalledWith('dark');
     expect(calls.slice(0, 2)).toEqual(['setTheme:dark', 'ssoUrl']);
     expect(view?.getAttribute('partition')).toBe('persist:forum');
@@ -87,7 +87,7 @@ describe('ForumPage', () => {
     const view = el(fixture).querySelector('webview')!;
     view.dispatchEvent(Object.assign(new Event('did-fail-load'), { errorCode: -105, errorDescription: 'ERR_NAME_NOT_RESOLVED', isMainFrame: true, validatedURL: FORUM_URL }));
     await settle(fixture);
-    expect(ssoUrl).toHaveBeenLastCalledWith({ fallback: true });
+    expect(ssoUrl).toHaveBeenLastCalledWith({ fallback: true, theme: 'light' });
     expect(el(fixture).querySelector('webview')?.getAttribute('src')).toBe(`${FORUM_FALLBACK_URL}?theme=light&embed=wlsaplus`);
   });
 

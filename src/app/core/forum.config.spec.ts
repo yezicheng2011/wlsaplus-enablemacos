@@ -21,6 +21,6 @@ describe('forum.config theme/embed helpers', () => {
   });
 
   it('builds a postMessage script with a JSON payload only', () => {
-    expect(forumThemeMessageScript('light')).toBe(`window.postMessage({"type":"wlsaplus-theme","theme":"light"}, '*'); true;`);
+    expect(forumThemeMessageScript('light')).toBe(`window.postMessage({"type":"wlsaplus-theme","theme":"light"}, location.origin); true;`);
   });
 });

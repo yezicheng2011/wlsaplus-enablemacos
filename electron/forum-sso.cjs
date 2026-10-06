@@ -48,12 +48,17 @@ function errorCode(error) {
 }
 
 /** A consume URL is only accepted on the forum host we asked, at /sso/consume, with a token and a relative next. */
+/** Same-site relative path (e.g. '/?embed=wlsaplus&theme=dark'); anything else is not sent. */
+function isRelativeForumPath(value) {
+  return typeof value === 'string' && value.length <= 512 && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\') && !/[\u0000-\u001f\s]/.test(value);
+}
+
 function isValidConsumeUrl(value, baseUrl) {
   if (!isForumUrl(value)) return false;
   const url = new URL(value);
   if (url.origin !== new URL(baseUrl).origin || url.pathname !== '/sso/consume' || !url.searchParams.get('token')) return false;
   const next = url.searchParams.get('next');
-  return next === null || (next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\'));
+  return next === null || isRelativeForumPath(next);
 }
 
 /** True when the forum partition already has a logged-in session (skip SSO). */
@@ -74,7 +79,7 @@ async function isForumLoggedIn(baseUrl, fetchImpl, timeoutMs) {
  * Ask the forum for a one-time login URL. Returns the consume URL, or null to open the forum
  * as-is (already logged in, no PowerSchool session, or any error = guest).
  */
-async function requestForumLogin({ baseUrl, account, powerSchoolSession, fetch: fetchImpl, timeouts = {} }) {
+async function requestForumLogin({ baseUrl, account, powerSchoolSession, fetch: fetchImpl, timeouts = {}, next = '/' }) {
   if (!fetchImpl || !powerSchoolSession) { reportSso('unavailable_in_app'); return null; }
   const sessionTimeout = timeouts.sessionCheckMs ?? SESSION_CHECK_TIMEOUT_MS;
   const issueTimeout = timeouts.issueMs ?? ISSUE_TIMEOUT_MS;
@@ -96,7 +101,7 @@ async function requestForumLogin({ baseUrl, account, powerSchoolSession, fetch: 
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ cookies, schoolUrl: psOrigin, next: '/' }),
+      body: JSON.stringify({ cookies, schoolUrl: psOrigin, next: isRelativeForumPath(next) ? next : '/' }),
     }, issueTimeout);
   } catch (error) {
     reportSso(errorCode(error));
@@ -125,7 +130,7 @@ function withTimeout(promise, ms) {
  * Resolve the URL the forum <webview> should open. Signed-out users, SSO errors,
  * timeouts and non-forum URLs all fall back to `baseUrl` (guest / existing session).
  */
-async function resolveForumEntryUrl({ baseUrl, credentials, powerSchoolSession, fetch: fetchImpl, timeouts }, request = requestForumLogin, timeoutMs = SSO_TIMEOUT_MS) {
+async function resolveForumEntryUrl({ baseUrl, credentials, powerSchoolSession, fetch: fetchImpl, timeouts, next }, request = requestForumLogin, timeoutMs = SSO_TIMEOUT_MS) {
   if (!credentials || !credentials.username || !credentials.schoolUrl) { reportSso('signed_out'); return baseUrl; }
   try {
     const url = await withTimeout(Promise.resolve(request({
@@ -134,6 +139,7 @@ async function resolveForumEntryUrl({ baseUrl, credentials, powerSchoolSession, 
       powerSchoolSession,
       fetch: fetchImpl,
       timeouts,
+      next,
     })), timeoutMs);
     if (url && isForumUrl(url)) return url;
     if (url) reportSso('invalid_consume_url');
@@ -150,5 +156,6 @@ module.exports = {
   requestForumLogin,
   resolveForumEntryUrl,
   isValidConsumeUrl,
+  isRelativeForumPath,
   getLastForumSsoStatus,
 };

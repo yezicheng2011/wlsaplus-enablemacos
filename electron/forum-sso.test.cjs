@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  resolveForumEntryUrl, requestForumLogin, isValidConsumeUrl, getLastForumSsoStatus, PS_COOKIE_NAMES,
+  resolveForumEntryUrl, requestForumLogin, isValidConsumeUrl, isRelativeForumPath, getLastForumSsoStatus, PS_COOKIE_NAMES,
 } = require('./forum-sso.cjs');
 const { FORUM_URL, FORUM_FALLBACK_URL } = require('./forum-config.cjs');
 
@@ -62,6 +62,20 @@ test('success: posts only whitelisted PowerSchool cookies and returns the consum
   assert.equal(body.schoolUrl, 'https://ps.wlsash.org.cn');
   assert.equal(body.next, '/');
   assert.equal(getLastForumSsoStatus().code, 'ok');
+});
+
+test('SSO next lands in embed mode with the app theme; unsafe next values fall back to /', async () => {
+  const sent = async (next) => {
+    const fetch = mockFetch();
+    await run(fetch, { next });
+    return JSON.parse(fetch.requests.find((r) => r.url.endsWith('/sso/wlsaplus/issue')).init.body).next;
+  };
+  assert.equal(await sent('/?embed=wlsaplus&theme=dark'), '/?embed=wlsaplus&theme=dark');
+  for (const bad of ['https://evil.com/', '//evil.com', '/\\evil.com', 'relative', '/a b', `/${'x'.repeat(600)}`, 42]) {
+    assert.equal(await sent(bad), '/', String(bad));
+  }
+  assert.ok(isRelativeForumPath('/ai?embed=wlsaplus'));
+  assert.ok(isValidConsumeUrl(`${FORUM_URL}sso/consume?token=t&next=${encodeURIComponent('/?embed=wlsaplus&theme=light')}`, FORUM_URL));
 });
 
 test('session pre-check runs first and skips SSO when already logged in', async () => {
