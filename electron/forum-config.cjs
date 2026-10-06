@@ -2,8 +2,8 @@
 // Keep FORUM_URL / FORUM_FALLBACK_URL in sync with src/app/core/forum.config.ts
 // (forum-config.test.cjs enforces this).
 
-const FORUM_URL = 'https://wlsaforum.02studio.xyz/';
-const FORUM_FALLBACK_URL = 'https://34-81-212-116.sslip.io/';
+const FORUM_URL = 'https://lt.spacehubxyz.hk/';
+const FORUM_FALLBACK_URL = 'https://lt.spacehubxyz.xn--j6w193g/';
 const FORUM_PARTITION = 'persist:forum';
 // Theme/embed cookie contract with the forum server; names are owned by src/app/core/forum.config.ts.
 const FORUM_THEME_COOKIE = 'wlsaplus_theme';

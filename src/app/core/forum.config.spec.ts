@@ -15,7 +15,7 @@ describe('forum.config theme/embed helpers', () => {
     expect(isForumSsoConsumeUrl(consume)).toBe(true);
     expect(withForumEntryParams(consume, 'dark')).toBe(consume);
     expect(withForumEntryParams('https://example.com/', 'dark')).toBe('https://example.com/');
-    expect(withForumEntryParams('http://wlsaforum.02studio.xyz/', 'dark')).toBe('http://wlsaforum.02studio.xyz/');
+    expect(withForumEntryParams('http://lt.spacehubxyz.hk/', 'dark')).toBe('http://lt.spacehubxyz.hk/');
     expect(withForumEntryParams('not a url', 'dark')).toBe('not a url');
     expect(isForumSsoConsumeUrl(FORUM_URL)).toBe(false);
   });

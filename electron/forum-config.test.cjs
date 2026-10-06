@@ -9,18 +9,18 @@ const {
 } = require('./forum-config.cjs');
 
 test('forum URLs are https on the official and fallback hosts', () => {
-  assert.equal(FORUM_URL, 'https://wlsaforum.02studio.xyz/');
-  assert.equal(FORUM_FALLBACK_URL, 'https://34-81-212-116.sslip.io/');
+  assert.equal(FORUM_URL, 'https://lt.spacehubxyz.hk/');
+  assert.equal(FORUM_FALLBACK_URL, 'https://lt.spacehubxyz.xn--j6w193g/');
   assert.equal(forumBaseUrl(), FORUM_URL);
   assert.equal(forumBaseUrl(true), FORUM_FALLBACK_URL);
 });
 
 test('isForumUrl only accepts https forum origins', () => {
-  assert.ok(isForumUrl('https://wlsaforum.02studio.xyz/post/42?x=1'));
-  assert.ok(isForumUrl('https://34-81-212-116.sslip.io/login'));
-  assert.ok(!isForumUrl('http://wlsaforum.02studio.xyz/'));
-  assert.ok(!isForumUrl('https://wlsaforum.02studio.xyz.evil.com/'));
-  assert.ok(!isForumUrl('https://evil.com/?https://wlsaforum.02studio.xyz/'));
+  assert.ok(isForumUrl('https://lt.spacehubxyz.hk/post/42?x=1'));
+  assert.ok(isForumUrl('https://lt.spacehubxyz.xn--j6w193g/login'));
+  assert.ok(!isForumUrl('http://lt.spacehubxyz.hk/'));
+  assert.ok(!isForumUrl('https://lt.spacehubxyz.hk.evil.com/'));
+  assert.ok(!isForumUrl('https://evil.com/?https://lt.spacehubxyz.hk/'));
   assert.ok(!isForumUrl('javascript:alert(1)'));
   assert.ok(!isForumUrl(undefined));
 });

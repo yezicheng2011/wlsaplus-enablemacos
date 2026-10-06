@@ -15,10 +15,10 @@ test('only light/dark themes are accepted', () => {
 test('theme + embed cookies are set on both forum origins: Secure, Path=/, SameSite=Lax, host-only', () => {
   const cookies = forumThemeCookies('dark', NOW);
   assert.deepEqual(cookies.map((c) => `${c.url} ${c.name}=${c.value}`), [
-    'https://wlsaforum.02studio.xyz/ wlsaplus_theme=dark',
-    'https://wlsaforum.02studio.xyz/ wlsaplus_embed=1',
-    'https://34-81-212-116.sslip.io/ wlsaplus_theme=dark',
-    'https://34-81-212-116.sslip.io/ wlsaplus_embed=1',
+    'https://lt.spacehubxyz.hk/ wlsaplus_theme=dark',
+    'https://lt.spacehubxyz.hk/ wlsaplus_embed=1',
+    'https://lt.spacehubxyz.xn--j6w193g/ wlsaplus_theme=dark',
+    'https://lt.spacehubxyz.xn--j6w193g/ wlsaplus_embed=1',
   ]);
   for (const cookie of cookies) {
     assert.equal(cookie.secure, true);

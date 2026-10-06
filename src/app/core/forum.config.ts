@@ -2,8 +2,8 @@
 // Keep the URLs/partition in sync with electron/forum-config.cjs (checked by forum-config.test.cjs).
 // Brand colors live in src/styles.scss as --forum-accent / --forum-accent-soft / --forum-on-accent.
 
-export const FORUM_URL = 'https://wlsaforum.02studio.xyz/';
-export const FORUM_FALLBACK_URL = 'https://34-81-212-116.sslip.io/';
+export const FORUM_URL = 'https://lt.spacehubxyz.hk/';
+export const FORUM_FALLBACK_URL = 'https://lt.spacehubxyz.xn--j6w193g/';
 export const FORUM_PARTITION = 'persist:forum';
 
 /**

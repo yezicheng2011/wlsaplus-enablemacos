@@ -54,7 +54,7 @@ test('success: posts only whitelisted PowerSchool cookies and returns the consum
   const { result } = await run(fetch);
   assert.equal(result, consume());
   const issue = fetch.requests.find((r) => r.url.endsWith('/sso/wlsaplus/issue'));
-  assert.equal(issue.url, 'https://wlsaforum.02studio.xyz/sso/wlsaplus/issue');
+  assert.equal(issue.url, 'https://lt.spacehubxyz.hk/sso/wlsaplus/issue');
   assert.equal(issue.init.method, 'POST');
   const body = JSON.parse(issue.init.body);
   assert.deepEqual(body.cookies.map((c) => c.name).sort(), ['JSESSIONID', 'current_locale', 'psaid']);
@@ -82,7 +82,7 @@ test('session pre-check runs first and skips SSO when already logged in', async 
   const fetch = mockFetch({ loggedIn: true });
   const { result } = await run(fetch);
   assert.equal(result, FORUM_URL);
-  assert.deepEqual(fetch.requests.map((r) => r.url), ['https://wlsaforum.02studio.xyz/api/session']);
+  assert.deepEqual(fetch.requests.map((r) => r.url), ['https://lt.spacehubxyz.hk/api/session']);
   assert.equal(getLastForumSsoStatus().code, 'already_logged_in');
 });
 
@@ -123,7 +123,7 @@ test('rejects consume URLs that are off-forum, wrong host, wrong path, or have a
     `${FORUM_URL}sso/consume`,
     `${FORUM_URL}sso/consume?token=t&next=https%3A%2F%2Fevil.com`,
     `${FORUM_URL}sso/consume?token=t&next=%2F%2Fevil.com`,
-    'http://wlsaforum.02studio.xyz/sso/consume?token=t',
+    'http://lt.spacehubxyz.hk/sso/consume?token=t',
   ];
   for (const url of bad) {
     assert.equal(isValidConsumeUrl(url, FORUM_URL), false, url);
