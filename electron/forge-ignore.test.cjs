@@ -13,6 +13,8 @@ test('forge ignore keeps main-process runtime modules and dist UI', () => {
   assert.equal(ignore('/electron/main.cjs'), false);
   assert.equal(ignore('/electron/forum-config.cjs'), false);
   assert.equal(ignore('/electron/forum-sso.cjs'), false);
+  assert.equal(ignore('/electron/forum-theme.cjs'), false);
+  assert.equal(ignore('/electron/forum-theme.test.cjs'), true);
   assert.equal(ignore('/electron/forum-config.test.cjs'), true);
   assert.equal(ignore('/node_modules/tesseract.js'), true);
   assert.equal(ignore('/node_modules/rxjs'), true);

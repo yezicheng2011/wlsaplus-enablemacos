@@ -20,6 +20,7 @@ const {
   hardenForumWebPreferences,
 } = require('./forum-config.cjs');
 const { resolveForumEntryUrl, getLastForumSsoStatus } = require('./forum-sso.cjs');
+const { applyForumTheme, emulateForumColorScheme, validateForumTheme } = require('./forum-theme.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
 const yaml = require('js-yaml');
 
@@ -61,6 +62,9 @@ const vpnProxyStateFile = () => path.join(vpnDirectory(), 'proxy-state.json');
 const powerSchoolSession = () => session.fromPartition('persist:powerschool');
 const appSession = () => session.fromPartition('persist:wlsaplus');
 const forumSession = () => session.fromPartition(FORUM_PARTITION);
+// Live forum <webview> guests and the app theme last reported by the renderer (light/dark).
+const forumGuests = new Set();
+let forumTheme = null;
 const iconPath = () => path.join(__dirname, '..', 'build', 'icon.png');
 
 function rendererIndexPath() {
@@ -113,6 +117,11 @@ function configureForumWebview(win) {
     hardenForumWebPreferences(webPreferences);
   });
   win.webContents.on('did-attach-webview', (_event, guest) => {
+    forumGuests.add(guest);
+    guest.once('destroyed', () => forumGuests.delete(guest));
+    // Prefer the app's color scheme inside the forum page (re-applied after each navigation).
+    if (forumTheme) void emulateForumColorScheme(guest, forumTheme);
+    guest.on('did-navigate', () => { if (forumTheme) void emulateForumColorScheme(guest, forumTheme); });
     guest.setWindowOpenHandler(({ url }) => {
       if (isForumUrl(url)) void guest.loadURL(url);
       else if (isWebUrl(url)) void shell.openExternal(url);
@@ -1125,6 +1134,11 @@ ipcMain.handle('forum:sso-url', async (_event, options) => resolveForumEntryUrl(
   fetch: (url, init) => forumSession().fetch(url, init),
 }));
 ipcMain.handle('forum:sso-status', () => getLastForumSsoStatus());
+// Theme + embed cookies on every forum origin (forum partition only) and prefers-color-scheme for live guests.
+ipcMain.handle('forum:set-theme', async (_event, theme) => {
+  forumTheme = validateForumTheme(theme);
+  await applyForumTheme({ session: forumSession(), guests: forumGuests, theme: forumTheme });
+});
 ipcMain.handle('forum:clear-session', async () => {
   const forum = forumSession();
   await forum.clearStorageData();

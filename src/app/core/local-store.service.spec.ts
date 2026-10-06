@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalStore } from './local-store.service';
 import type { AppSettings, ProgressSnapshot, ScheduleSnapshot, TodoItem } from './models';
 
@@ -216,5 +216,54 @@ describe('LocalStore', () => {
     }]));
 
     expect(new LocalStore().todos()[0].icon).toBeNull();
+  });
+  describe('resolved theme', () => {
+    let listeners: Array<() => void> = [];
+    let systemDark = false;
+    const original = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+
+    beforeEach(() => {
+      listeners = [];
+      systemDark = false;
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        writable: true,
+        value: (query: string) => ({
+          media: query,
+          get matches() { return systemDark; },
+          addEventListener: (_type: string, listener: () => void) => listeners.push(listener),
+          removeEventListener: () => undefined,
+        }),
+      });
+    });
+
+    afterEach(() => {
+      if (original) Object.defineProperty(window, 'matchMedia', original);
+      else delete (window as { matchMedia?: unknown }).matchMedia;
+    });
+
+    it('follows the user toggle', () => {
+      const store = new LocalStore();
+      store.updateSettings({ theme: 'dark' });
+      expect(store.resolvedTheme()).toBe('dark');
+      expect(document.documentElement.classList.contains('dark-theme')).toBe(true);
+      store.updateSettings({ theme: 'light' });
+      expect(store.resolvedTheme()).toBe('light');
+    });
+
+    it('follows live OS changes only while set to system', () => {
+      const store = new LocalStore();
+      store.applyTheme();
+      expect(store.settings().theme).toBe('system');
+      expect(store.resolvedTheme()).toBe('light');
+      systemDark = true;
+      listeners.forEach((listener) => listener());
+      expect(store.resolvedTheme()).toBe('dark');
+      expect(document.documentElement.classList.contains('dark-theme')).toBe(true);
+
+      store.updateSettings({ theme: 'light' });
+      listeners.forEach((listener) => listener());
+      expect(store.resolvedTheme()).toBe('light');
+    });
   });
 });

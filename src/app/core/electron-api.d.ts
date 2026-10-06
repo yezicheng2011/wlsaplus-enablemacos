@@ -38,6 +38,8 @@ declare global {
         /** Last SSO outcome (code + time only), e.g. 'ok', 'already_logged_in', 'invalid_session'. */
         ssoStatus(): Promise<{ code: string; httpStatus: number | null; at: string } | null>;
         clearSession(): Promise<void>;
+        /** Write the wlsaplus_theme / wlsaplus_embed cookies on the forum origins and set the guest's color scheme. */
+        setTheme?(theme: 'light' | 'dark'): Promise<void>;
       };
       vpn: {
         status(): Promise<VpnStatus>;

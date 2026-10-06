@@ -5,6 +5,10 @@
 const FORUM_URL = 'https://wlsaforum.02studio.xyz/';
 const FORUM_FALLBACK_URL = 'https://34-81-212-116.sslip.io/';
 const FORUM_PARTITION = 'persist:forum';
+// Theme/embed cookie contract with the forum server; names are owned by src/app/core/forum.config.ts.
+const FORUM_THEME_COOKIE = 'wlsaplus_theme';
+const FORUM_EMBED_COOKIE = 'wlsaplus_embed';
+const FORUM_EMBED_COOKIE_VALUE = '1';
 
 const FORUM_ORIGINS = new Set([new URL(FORUM_URL).origin, new URL(FORUM_FALLBACK_URL).origin]);
 
@@ -56,6 +60,9 @@ module.exports = {
   FORUM_FALLBACK_URL,
   FORUM_PARTITION,
   FORUM_ORIGINS,
+  FORUM_THEME_COOKIE,
+  FORUM_EMBED_COOKIE,
+  FORUM_EMBED_COOKIE_VALUE,
   isForumUrl,
   isWebUrl,
   forumBaseUrl,

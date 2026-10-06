@@ -38,6 +38,8 @@ export class LocalStore {
   readonly progress = signal(this.read<ProgressSnapshot>('progress', EMPTY_PROGRESS));
   readonly todos = signal(this.readTodos());
   readonly settings = signal(this.readSettings());
+  /** Theme actually shown (settings.theme resolved against the OS preference); the forum follows this. */
+  readonly resolvedTheme = signal<'light' | 'dark'>(this.resolveTheme(this.settings().theme));
   readonly hasSchedule = computed(() => this.schedule().sessions.length > 0);
   readonly hasProgress = computed(() => this.progress().courses.length > 0 || this.progress().syncedAt !== '');
 
@@ -51,6 +53,10 @@ export class LocalStore {
         this.settings.set(this.parseSettings(event.newValue));
         this.applyTheme();
       }
+    });
+    // Follow live OS light/dark changes while the user's theme setting is "system".
+    this.systemDarkQuery()?.addEventListener?.('change', () => {
+      if (this.settings().theme === 'system') this.applyTheme();
     });
   }
 
@@ -167,11 +173,21 @@ export class LocalStore {
 
   applyTheme(): void {
     const { theme: mode, color } = this.settings();
-    const dark = mode === 'dark' || (mode === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+    const dark = this.resolveTheme(mode) === 'dark';
+    this.resolvedTheme.set(dark ? 'dark' : 'light');
     document.documentElement.classList.toggle('dark-theme', dark);
     document.documentElement.dataset['appColor'] = color;
     document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101114' : '#ffffff');
+  }
+
+  private resolveTheme(mode: ThemeMode): 'light' | 'dark' {
+    if (mode === 'system') return this.systemDarkQuery()?.matches ? 'dark' : 'light';
+    return mode;
+  }
+
+  private systemDarkQuery(): MediaQueryList | null {
+    return typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
   }
 
   private key(name: string): string {
