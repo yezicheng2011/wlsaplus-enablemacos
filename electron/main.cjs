@@ -962,7 +962,12 @@ function writeUpdateMarker() {
   try {
     require('node:fs').mkdirSync(path.dirname(marker), { recursive: true });
     require('node:fs').writeFileSync(marker, `${app.getVersion()}\n`);
-  } catch (error) { console.error('Could not write update marker:', error); }
+  } catch (error) {
+    console.error('Could not write update marker:', error);
+    return;
+  }
+  // The helper writes its result right after seeing the marker: show "Updated to …" in this session already.
+  if (!updateVerifyOnly) setTimeout(() => void macUpdater?.consumeLastResult().catch(() => {}), 8_000).unref();
 }
 
 async function cleanupBeforeUpdate() {
