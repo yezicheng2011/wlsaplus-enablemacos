@@ -22,9 +22,15 @@ rm -rf "$WORK" "$LOGS"; mkdir -p "$FEED" "$LOGS"
 step() { echo; echo "=== $* ==="; }
 fail() { echo "::error::E2E: $*"; exit 1; }
 plist_version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$TARGET/Contents/Info.plist"; }
-# The next app start consumes last-result.json, so checks read a snapshot taken when the state first matched.
+# The next app start consumes last-result.json within a second, so checks read the helper's "result {...}" log
+# line for the current round (update.log lines after ROUND_START).
 result_field() { node -e "try{const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(r[process.argv[2]]??'')}catch{console.log('')}" "$WORK/result.json" "$1"; }
-result_is() { rm -f "$WORK/result.json"; cp "$UPD/last-result.json" "$WORK/result.json" 2>/dev/null || return 1; [ "$(result_field state)" = "$1" ]; }
+ROUND_START=0
+new_round() { ROUND_START="$(wc -l < "$UPD/update.log" 2>/dev/null | tr -d ' ' || echo 0)"; [ -n "$ROUND_START" ] || ROUND_START=0; }
+result_is() {
+  tail -n "+$((ROUND_START + 1))" "$UPD/update.log" 2>/dev/null | sed -n 's/^\[[^]]*\] result //p' | tail -n 1 > "$WORK/result.json"
+  [ -s "$WORK/result.json" ] && [ "$(result_field state)" = "$1" ]
+}
 app_running() { pgrep -f "$TARGET/Contents/MacOS/WLSAPlus" >/dev/null 2>&1; }
 stop_apps() {
   pkill -f "$TARGET/Contents/MacOS/" 2>/dev/null || true
@@ -102,6 +108,7 @@ FEED_PID=$!
 sleep 1
 
 step "R1: 1.1.0 -> 1.1.1 (stable channel, restart)"
+new_round
 publish 1.1.1 stable
 launch_with_feed 1
 wait_until 240 "R1 result" result_is updated
@@ -116,6 +123,7 @@ echo "R1 OK: $(grep 'marker after' "$UPD/update.log" | tail -n 1)"
 stop_apps
 
 step "R2: 1.1.1 -> 1.1.2 (broken) must roll back"
+new_round
 publish 1.1.2 stable
 launch_with_feed 1
 wait_until 300 "R2 rollback" result_is rolled_back
@@ -129,6 +137,7 @@ echo "R2 OK: $(grep -i 'rolling back' "$UPD/update.log" | tail -n 1)"
 stop_apps
 
 step "R3: 1.1.1 -> 1.1.3-beta.1 (beta channel, installed on quit)"
+new_round
 publish 1.1.3-beta.1 beta
 rm -f "$UPD/update-helper.sh"
 launch_with_feed 0 --update-channel=beta

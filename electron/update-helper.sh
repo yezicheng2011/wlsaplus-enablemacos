@@ -69,11 +69,13 @@ SELF="$0"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\n\r'; }
 write_result() { # state message
+  local json
+  json="$(printf '{"state":"%s","from":"%s","to":"%s","message":"%s","at":"%s"}' \
+    "$1" "$(json_escape "$FROM")" "$(json_escape "$VERSION")" "$(json_escape "$2")" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
+  log "result $json"
   [ -n "$RESULT" ] || return 0
   mkdir -p "$(dirname "$RESULT")" 2>/dev/null
-  printf '{"state":"%s","from":"%s","to":"%s","message":"%s","at":"%s"}\n' \
-    "$1" "$(json_escape "$FROM")" "$(json_escape "$VERSION")" "$(json_escape "$2")" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >"$RESULT.tmp" \
-    && mv "$RESULT.tmp" "$RESULT"
+  printf '%s\n' "$json" >"$RESULT.tmp" && mv "$RESULT.tmp" "$RESULT"
 }
 run_privileged() { # --swap|--restore A B C
   if [ "$ADMIN" = "1" ]; then
