@@ -1,0 +1,46 @@
+name: macOS live update-check probe
+
+# Installs a PUBLISHED test build (DMG from the official site) on a real Mac and records what the Updates row
+# shows when "Check now" is clicked against the live feed. Diagnostic only; publishes nothing.
+on:
+  push:
+    branches: [feat/mac-autoupdate]
+    paths: ['.github/workflows/mac-live-check-probe.yml', 'scripts/ci/mac-live-check-probe.mjs']
+  workflow_dispatch:
+    inputs:
+      tag: { description: 'Release tag to install (for example v1.1.0-beta.2)', required: true }
+      channel: { description: 'Pre-set channel in updates/settings.json (beta, stable or none)', required: false, default: 'beta' }
+      seconds: { description: 'How long to watch after the click', required: false, default: '420' }
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install the published DMG into /Applications
+        env: { TAG: '${{ inputs.tag || 'v1.1.0-beta.2' }}' }
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"
+          curl -fL --retry 3 -o /tmp/w.dmg "https://wlsaplus.spacehubxyz.hk/download/$TAG/WLSAPlus-$v-macOS-universal.dmg?via=direct"
+          mnt="$(hdiutil attach -nobrowse -readonly /tmp/w.dmg | awk -F'\t' '/\/Volumes\// {print $NF}' | tail -1)"
+          ditto "$mnt/WLSAPlus.app" /Applications/WLSAPlus.app
+          hdiutil detach "$mnt" || true
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/WLSAPlus.app/Contents/Info.plist
+          sw_vers; uname -m
+      - name: Pre-set channel
+        env: { CHANNEL: '${{ inputs.channel || 'beta' }}' }
+        run: |
+          d="$HOME/Library/Application Support/WLSAPlus/updates"; mkdir -p "$d"
+          if [ "$CHANNEL" != none ]; then printf '{"channel":"%s","failedVersions":[]}\n' "$CHANNEL" > "$d/settings.json"; fi
+      - name: Probe
+        run: node scripts/ci/mac-live-check-probe.mjs /Applications/WLSAPlus.app "${{ inputs.seconds || '420' }}" e2e-logs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: probe-logs, path: e2e-logs/, if-no-files-found: ignore }
