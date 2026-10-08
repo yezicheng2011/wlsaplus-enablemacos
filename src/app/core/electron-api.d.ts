@@ -58,6 +58,7 @@ declare global {
         check(): Promise<UpdateStatus>;
         download(): Promise<UpdateStatus>;
         install(): Promise<UpdateStatus>;
+        setChannel(channel: 'stable' | 'beta'): Promise<UpdateStatus>;
         onStatus(callback: (status: UpdateStatus) => void): () => void;
       };
       translator: {

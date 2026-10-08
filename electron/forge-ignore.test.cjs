@@ -6,9 +6,13 @@ test('forge ignore keeps main-process runtime modules and dist UI', () => {
   const forge = require(path.join('..', 'forge.config.cjs'));
   const ignore = forge.packagerConfig.ignore;
   assert.equal(forge.packagerConfig.prune, false);
-  assert.equal(ignore('/node_modules/electron-updater'), false);
   assert.equal(ignore('/node_modules/js-yaml'), false);
-  assert.equal(ignore('/node_modules/electron-updater/node_modules/semver/index.js'), false);
+  assert.equal(ignore('/node_modules/argparse'), false);
+  assert.equal(ignore('/node_modules/electron-updater'), true); // replaced by electron/mac-updater.cjs
+  assert.equal(ignore('/electron/mac-updater.cjs'), false);
+  assert.equal(ignore('/electron/update-core.cjs'), false);
+  assert.equal(ignore('/electron/update-config.cjs'), false);
+  assert.equal(ignore('/electron/update-helper.sh'), false); // copied out of app.asar at install time
   assert.equal(ignore('/dist/wlsaplus/browser/index.html'), false);
   assert.equal(ignore('/electron/main.cjs'), false);
   assert.equal(ignore('/electron/forum-config.cjs'), false);
@@ -20,6 +24,8 @@ test('forge ignore keeps main-process runtime modules and dist UI', () => {
   assert.equal(ignore('/node_modules/rxjs'), true);
   assert.equal(ignore('/node_modules/@angular/core'), true);
   assert.equal(ignore('/src/app/app.ts'), true);
+  assert.equal(ignore('/release-assets/WLSAPlus-1.1.0-mac-arm64.zip'), true);
+  assert.equal(ignore('/e2e-logs/update.log'), true);
   assert.equal(ignore('node_modules/tesseract.js'), true); // no leading slash
 });
 

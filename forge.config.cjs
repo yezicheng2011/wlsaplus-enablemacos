@@ -24,27 +24,11 @@ const osxNotarize = osxSign && process.env.APPLE_ID && process.env.APPLE_APP_PAS
   : undefined;
 
 // Main-process runtime packages (and their transitive deps). Angular/web deps live in dist/,
-// so the rest of node_modules must stay out of the asar — but blanketing all of
-// node_modules made packaged apps crash on require('electron-updater') / require('js-yaml').
+// so the rest of node_modules must stay out of the asar. electron-updater is gone (the macOS self-updater
+// in electron/mac-updater.cjs uses only Node built-ins); js-yaml (VPN profiles) needs argparse.
 const RUNTIME_NODE_MODULES = new Set([
   'argparse',
-  'builder-util-runtime',
-  'debug',
-  'electron-updater',
-  'fs-extra',
-  'graceful-fs',
-  'has-flag',
   'js-yaml',
-  'jsonfile',
-  'lazy-val',
-  'lodash.escaperegexp',
-  'lodash.isequal',
-  'ms',
-  'sax',
-  'semver',
-  'supports-color',
-  'tiny-typed-emitter',
-  'universalify',
 ]);
 
 const IGNORE_PATHS = [
@@ -61,6 +45,9 @@ const IGNORE_PATHS = [
   /^\/electron\/bin($|\/)/,
   /^\/output($|\/)/,
   /^\/out($|\/)/,
+  // CI outputs: build-mac-release.sh packages several arches in a row, so earlier zips must never end up in app.asar.
+  /^\/release-assets($|\/)/,
+  /^\/e2e-logs($|\/)/,
   /^\/\.git($|\/)/,
   /^\/\.github($|\/)/,
   /^\/\.angular($|\/)/,

@@ -42,15 +42,10 @@ interface NavItem { path: string; label: string; icon: string; tooltip?: string;
         <aside class="update-alert" aria-live="polite">
           <span class="update-icon material-symbols-rounded">system_update</span>
           <div class="update-copy">
-            <strong>@if (updater.status().state === 'ready') { Update ready } @else { New WLSAPlus version }</strong>
+            <strong>@if (updater.status().state === 'ready') { Update ready } @else { Installing update }</strong>
             <span>{{ updater.status().message }}</span>
-            @if (updater.status().state === 'downloading') {
-              <div class="progress-row"><progress [value]="updater.status().percent ?? 0" max="100"></progress><span>{{ updater.status().percent ?? 0 }}%</span></div>
-            }
           </div>
-          @if (updater.status().state === 'available') {
-            <button mat-flat-button (click)="updater.download()"><span class="material-symbols-rounded">download</span>Download</button>
-          } @else if (updater.status().state === 'ready') {
+          @if (updater.status().state === 'ready') {
             <button mat-flat-button (click)="updater.install()"><span class="material-symbols-rounded">restart_alt</span>Restart</button>
           }
         </aside>

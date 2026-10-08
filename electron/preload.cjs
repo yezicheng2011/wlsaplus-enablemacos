@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('wlsaplus', {
     check: () => ipcRenderer.invoke('updater:check'),
     download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
+    setChannel: (channel) => ipcRenderer.invoke('updater:set-channel', channel),
     onStatus: (callback) => {
       const handler = (_event, status) => callback(status);
       ipcRenderer.on('updater:status', handler);

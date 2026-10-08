@@ -1,0 +1,56 @@
+name: macOS self-update E2E
+
+# Real apps, real update-helper.sh, real codesign, loopback feed: update, rollback, beta channel + install on quit.
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/mac-autoupdate]
+    paths:
+      - 'electron/**'
+      - 'scripts/**'
+      - 'forge.config.cjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/mac-update-e2e.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-update-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Unit tests (main process + helper)
+        run: node --test electron/*.test.cjs
+      - name: Build UI
+        run: npm run vpn:core && npm run build:web
+      - name: Import self-signed code-signing identity
+        env:
+          WLSAPLUS_CODESIGN_P12_BASE64: ${{ secrets.WLSAPLUS_CODESIGN_P12_BASE64 }}
+          WLSAPLUS_CODESIGN_P12_PASSWORD: ${{ secrets.WLSAPLUS_CODESIGN_P12_PASSWORD }}
+        run: bash scripts/ci/import-codesign-identity.sh
+      - name: Package + sign base app (1.1.0, arm64)
+        run: |
+          set -euo pipefail
+          unset APPLE_IDENTITY
+          npx electron-forge package --platform darwin --arch arm64
+          bash scripts/ci/sign-mac-app.sh out/WLSAPlus-darwin-arm64/WLSAPlus.app "$(node -p "require('./package.json').version")"
+      - name: Self-update end-to-end
+        env:
+          WLSAPLUS_UPDATE_ED25519_KEY: ${{ secrets.WLSAPLUS_UPDATE_ED25519_KEY }}
+        run: bash scripts/ci/mac-update-e2e.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-logs
+          path: e2e-logs/
+          if-no-files-found: ignore
