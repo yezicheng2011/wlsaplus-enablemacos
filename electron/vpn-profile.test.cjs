@@ -2,19 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const yaml = require('js-yaml');
 
-function listClashProxyNodes(document) {
-  if (!document || !Array.isArray(document.proxies)) return [];
-  const nodes = [];
-  const seen = new Set();
-  for (const proxy of document.proxies) {
-    const name = typeof proxy?.name === 'string' ? proxy.name.trim() : '';
-    if (!name || seen.has(name)) continue;
-    if (!proxy.server || !proxy.port) continue;
-    seen.add(name);
-    nodes.push({ id: name, name, type: typeof proxy.type === 'string' ? proxy.type : 'unknown', server: String(proxy.server), port: Number(proxy.port) });
-  }
-  return nodes;
-}
+// Same implementation main.cjs uses.
+const { listClashProxyNodes } = require('./mac-clash-controller.cjs');
 
 function selectClashOrThrow(document, nodes, nodeName) {
   if (!nodes.length) throw new Error('no nodes');

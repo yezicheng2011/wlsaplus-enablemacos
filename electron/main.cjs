@@ -24,6 +24,21 @@ const { resolveForumEntryUrl, getLastForumSsoStatus } = require('./forum-sso.cjs
 const { applyForumTheme, emulateForumColorScheme, validateForumTheme } = require('./forum-theme.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
 const { createClassReminderScheduler } = require('./class-reminders.cjs');
+const {
+  MAC_CLASH_CONTROLLER_PORT,
+  newControllerSecret,
+  applyControllerSettings,
+  listClashProxyNodes,
+  applySelectedClashNode,
+  controllerRequest,
+  isCoreUp,
+  waitForCore,
+  groupsContainingNode,
+  enforceSelectedNode,
+  connectedStatusFor,
+  tailLines,
+  createWatchdog,
+} = require('./mac-clash-controller.cjs');
 const yaml = require('js-yaml');
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -43,6 +58,10 @@ let vpnProcess = null;
 let vpnDisconnecting = false;
 let vpnStatus = { state: 'idle', message: 'Ready', connectedAt: null, mode: 'full-tunnel' };
 let vpnProcessError = '';
+// macOS elevated mihomo core: per-connect controller secret (main memory only), watchdog, attempt id.
+let macCoreController = null;
+let macCoreWatchdog = null;
+let macConnectAttempt = 0;
 let quitAfterCleanup = false;
 let updateInstallRequested = false;
 let updateFeedSource = 'mirror';
@@ -201,26 +220,6 @@ function parseClashDocument(body) {
   try { return yaml.load(body); } catch { return null; }
 }
 
-function listClashProxyNodes(document) {
-  if (!document || !Array.isArray(document.proxies)) return [];
-  const nodes = [];
-  const seen = new Set();
-  for (const proxy of document.proxies) {
-    const name = typeof proxy?.name === 'string' ? proxy.name.trim() : '';
-    if (!name || seen.has(name)) continue;
-    if (!proxy.server || !proxy.port) continue;
-    seen.add(name);
-    nodes.push({
-      id: name,
-      name,
-      type: typeof proxy.type === 'string' ? proxy.type : 'unknown',
-      server: String(proxy.server),
-      port: Number(proxy.port),
-    });
-  }
-  return nodes;
-}
-
 function listShadowsocksUriNodes(body) {
   let text = body;
   if (!body.startsWith('ss://')) {
@@ -265,32 +264,6 @@ function measureTcpLatency(server, port, timeoutMs = 2500) {
     socket.once('timeout', () => finish(null));
     socket.once('error', () => finish(null));
   });
-}
-
-function applySelectedClashNode(document, nodeName) {
-  const nodes = listClashProxyNodes(document);
-  if (!nodes.length) throw new Error('The VPN subscription did not include any nodes.');
-  const selected = nodes.some((node) => node.id === nodeName) ? nodeName : nodes[0].id;
-  const next = { ...document };
-  // Keep Mac TUN defaults if the subscription omitted them.
-  next.tun = {
-    enable: true,
-    stack: 'gvisor',
-    'auto-route': true,
-    'auto-detect-interface': true,
-    'dns-hijack': ['8.8.8.8:53', 'tcp://8.8.8.8:53'],
-    ...(document.tun && typeof document.tun === 'object' ? document.tun : {}),
-    enable: true,
-  };
-  if (Array.isArray(document['proxy-groups'])) {
-    next['proxy-groups'] = document['proxy-groups'].map((group) => {
-      if (!group || group.type !== 'select' || !Array.isArray(group.proxies) || !group.proxies.includes(selected)) {
-        return group;
-      }
-      return { ...group, proxies: [selected, ...group.proxies.filter((name) => name !== selected)] };
-    });
-  }
-  return { document: next, selected, nodes };
 }
 
 function parseClashShadowsocksProfile(body) {
@@ -482,6 +455,33 @@ async function validateVpnConfig(core) {
 
 
 
+function macCoreRequest(controller) {
+  return (options) => controllerRequest({ port: controller.port, secret: controller.secret, ...options });
+}
+
+function stopMacCoreWatchdog() {
+  macCoreWatchdog?.stop();
+  macCoreWatchdog = null;
+}
+
+function startMacCoreWatchdog(controller, attempt) {
+  stopMacCoreWatchdog();
+  const request = macCoreRequest(controller);
+  macCoreWatchdog = createWatchdog({
+    check: () => isCoreUp(request),
+    onDead: () => {
+      macCoreWatchdog = null;
+      // Never turn an intentional disconnect/reconnect into an error.
+      if (attempt !== macConnectAttempt || vpnDisconnecting || vpnStatus.state !== 'connected') return;
+      setVpnStatus({ state: 'error', message: 'VPN core exited unexpectedly', connectedAt: null, requiresElevation: false });
+    },
+  });
+}
+
+function readMacCoreLogTail(logPath) {
+  try { return tailLines(require('node:fs').readFileSync(logPath, 'utf8'), 6); } catch { return ''; }
+}
+
 async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
   if (process.platform !== 'darwin') {
     throw new Error('Administrator VPN restart is only available on macOS.');
@@ -489,6 +489,9 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
 
   const { execFile, execSync } = require('node:child_process');
   const fsSync = require('node:fs');
+  const attempt = ++macConnectAttempt;
+  stopMacCoreWatchdog();
+  macCoreController = null;
   // Best-effort stop of a previous elevated helper so reconnect does not stack tunnels.
   await stopMacClashHelper({ elevated: false }).catch(() => {});
 
@@ -516,6 +519,8 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
   const clashPkgDir = path.join(targetDir, 'clash_pkg');
   const execPath = path.join(clashPkgDir, 'clash');
   const scriptPath = path.join(targetDir, 'run.sh');
+  const logPath = path.join(targetDir, 'core.log');
+  const controller = { port: MAC_CLASH_CONTROLLER_PORT, secret: newControllerSecret() };
 
   try {
     execSync(`mkdir -p ${JSON.stringify(targetDir)}`);
@@ -537,9 +542,13 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
     throw err;
   }
 
+  // Runs as root: stop a stale core (root-owned, so the unprivileged pkill above cannot), then start
+  // the new one with its output in core.log (truncated on every start) for diagnostics.
   const scriptContent = `#!/bin/bash
-"${execPath}" -d "${clashPkgDir}" > /dev/null 2>&1 &
+/usr/bin/pkill -f "${execPath}" > /dev/null 2>&1 && sleep 0.5
+"${execPath}" -d "${clashPkgDir}" > "${logPath}" 2>&1 &
 `;
+  let selectedGroups = [];
   // Refresh proxies from the live subscription and pin the user-selected node.
   try {
     setVpnStatus({
@@ -551,22 +560,31 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
       requiresElevation: false,
     });
     const { document } = await fetchVpnNodes(sourceId);
-    const applied = applySelectedClashNode(document, nodeName);
+    const applied = applySelectedClashNode(document, nodeName, { secret: controller.secret, port: controller.port });
     const configPath = path.join(clashPkgDir, 'config.yaml');
     fsSync.writeFileSync(configPath, yaml.dump(applied.document, { lineWidth: -1, noRefs: true }), 'utf8');
     nodeName = applied.selected;
+    selectedGroups = groupsContainingNode(applied.document, nodeName);
   } catch (err) {
     // Keep bundled config.yaml if subscription refresh fails — still try to pin node name locally.
     try {
       const configPath = path.join(clashPkgDir, 'config.yaml');
       if (fsSync.existsSync(configPath)) {
         const document = parseClashDocument(fsSync.readFileSync(configPath, 'utf8'));
-        const applied = applySelectedClashNode(document, nodeName);
-        fsSync.writeFileSync(configPath, yaml.dump(applied.document, { lineWidth: -1, noRefs: true }), 'utf8');
-        nodeName = applied.selected;
+        let next;
+        try {
+          const applied = applySelectedClashNode(document, nodeName, { secret: controller.secret, port: controller.port });
+          next = applied.document;
+          nodeName = applied.selected;
+          selectedGroups = groupsContainingNode(next, nodeName);
+        } catch {
+          // No usable node list: still install the private controller so start-up can be verified.
+          next = applyControllerSettings(document, controller.secret, controller.port);
+        }
+        fsSync.writeFileSync(configPath, yaml.dump(next, { lineWidth: -1, noRefs: true }), 'utf8');
       }
     } catch {
-      /* continue with the packaged default config */
+      /* continue with the packaged default config; start-up verification will report a failure */
     }
   }
 
@@ -609,17 +627,50 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
         reject(error);
         return;
       }
-      resolve(setVpnStatus({
-        state: 'connected',
-        message: nodeName ? `Connected · ${nodeName}` : 'Connected with macOS VPN helper',
-        connectedAt: new Date().toISOString(),
-        mode,
-        sourceId: getVpnSource(sourceId).id,
-        nodeName: nodeName || undefined,
-        requiresElevation: false,
-      }));
+      resolve(verifyMacCoreStarted({ attempt, controller, logPath, mode, sourceId, nodeName, selectedGroups }));
     });
   });
+}
+
+// osascript returns as soon as run.sh has backgrounded the core, so only the core's own controller
+// can tell whether it really started and which node it uses.
+async function verifyMacCoreStarted({ attempt, controller, logPath, mode, sourceId, nodeName, selectedGroups }) {
+  const source = getVpnSource(sourceId).id;
+  const superseded = () => attempt !== macConnectAttempt || vpnDisconnecting;
+  setVpnStatus({ state: 'connecting', message: 'Starting the VPN core…', connectedAt: null, mode, sourceId: source, requiresElevation: false });
+  const request = macCoreRequest(controller);
+  const up = await waitForCore(request, { cancelled: superseded });
+  if (superseded()) return vpnStatus;
+  if (!up) {
+    const tail = readMacCoreLogTail(logPath);
+    await stopMacClashHelper({ elevated: false }).catch(() => {});
+    if (superseded()) return vpnStatus;
+    return setVpnStatus({
+      state: 'error',
+      message: tail ? `The VPN core did not start.\n${tail}` : 'The VPN core did not start',
+      connectedAt: null,
+      mode,
+      sourceId: source,
+      requiresElevation: false,
+    });
+  }
+  const enforcement = nodeName && selectedGroups.length
+    ? await enforceSelectedNode(request, selectedGroups, nodeName)
+    : { ok: !nodeName, actual: null, groups: [] };
+  if (superseded()) return vpnStatus;
+  macCoreController = controller;
+  const connected = connectedStatusFor(nodeName, enforcement);
+  const status = setVpnStatus({
+    state: 'connected',
+    message: connected.message,
+    connectedAt: new Date().toISOString(),
+    mode,
+    sourceId: source,
+    nodeName: connected.nodeName,
+    requiresElevation: false,
+  });
+  startMacCoreWatchdog(controller, attempt);
+  return status;
 }
 
 async function waitForPort(port, timeoutMs = 10_000) {
@@ -872,12 +923,15 @@ async function disconnectVpn() {
   const connectedAt = vpnStatus.connectedAt;
   setVpnStatus({ state: 'disconnecting', message: 'Disconnecting...', mode, sourceId, nodeName, requiresElevation: false });
   vpnDisconnecting = true;
+  stopMacCoreWatchdog();
+  const attempt = ++macConnectAttempt;
   await restoreSavedSystemProxy().catch(() => {});
   await stopVpnProcess();
   // Mac full-tunnel uses an elevated clash helper, not vpnProcess — stop it too.
   const macStop = await stopMacClashHelper({ elevated: true }).catch(() => ({ stopped: false, cancelled: false }));
   vpnDisconnecting = false;
   if (macStop?.cancelled) {
+    if (macCoreController) startMacCoreWatchdog(macCoreController, attempt);
     return setVpnStatus({
       state: 'connected',
       message: nodeName ? `Still connected · ${nodeName}` : 'Still connected (disconnect cancelled)',
@@ -888,6 +942,7 @@ async function disconnectVpn() {
       requiresElevation: true,
     });
   }
+  macCoreController = null;
   return setVpnStatus({ state: 'idle', message: 'Ready', connectedAt: null, mode, requiresElevation: false });
 }
 
@@ -1265,11 +1320,12 @@ app.whenReady().then(async () => {
 });
 app.on('before-quit', (event) => {
   isQuitting = true;
+  stopMacCoreWatchdog();
   if ((vpnProcess || vpnStatus.state === 'connected') && !quitAfterCleanup) {
     event.preventDefault();
     void disconnectVpn().finally(() => { quitAfterCleanup = true; app.quit(); });
   }
 });
-app.on('will-quit', () => { classReminderScheduler?.stop(); });
+app.on('will-quit', () => { classReminderScheduler?.stop(); stopMacCoreWatchdog(); });
 // macOS: closing the last window keeps the app (and the class reminder scheduler) running.
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
