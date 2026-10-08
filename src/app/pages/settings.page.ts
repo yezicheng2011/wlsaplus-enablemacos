@@ -46,7 +46,7 @@ import { BUILD_VERSION } from '../build-info';
       </div></section>
 
       <section><h2 class="section-title">Updates</h2><div class="settings-list surface">
-        <div class="setting"><div><strong>WLSAPlus {{ version }}</strong><span>{{ updater.status().message }}</span>
+        <div class="setting"><div><strong>WLSAPlus {{ version }}</strong><span>{{ updater.message() }}</span>
           @if (updater.status().state === 'downloading' && updater.status().percent !== null) {
             <div class="update-progress"><progress [value]="updater.status().percent ?? 0" max="100"></progress><span>{{ updater.status().percent ?? 0 }}%</span></div>
           }
@@ -57,7 +57,7 @@ import { BUILD_VERSION } from '../build-info';
             <button mat-stroked-button (click)="updater.check()" [disabled]="!updater.supported() || updater.busy()"><span class="material-symbols-rounded">update</span>Check now</button>
           }
         </div>
-        <div class="setting"><div><strong>Test builds (测试版更新)</strong><span>Also install beta versions before everyone else. Only turn this on if you were asked to test.</span></div><mat-slide-toggle [checked]="updater.channel() === 'beta'" [disabled]="!updater.supported()" (change)="updater.setChannel($event.checked ? 'beta' : 'stable')"></mat-slide-toggle></div>
+        <div class="setting"><div><strong>Test builds (测试版更新)</strong><span>Also install beta versions before everyone else. Only turn this on if you were asked to test. @if (updater.supported()) { <a href="" class="update-log-link" (click)="$event.preventDefault(); updater.revealLog()">Show update log</a> }</span></div><mat-slide-toggle [checked]="updater.channel() === 'beta'" [disabled]="!updater.supported()" (change)="updater.setChannel($event.checked ? 'beta' : 'stable')"></mat-slide-toggle></div>
       </div></section>
 
       <section><h2 class="section-title">Local Data</h2><div class="settings-list surface danger-zone"><div class="setting"><div><strong>Clear this device</strong><span>Remove saved account information, schedule, and tasks.</span></div><button mat-stroked-button (click)="clearData()">Clear data</button></div></div></section>

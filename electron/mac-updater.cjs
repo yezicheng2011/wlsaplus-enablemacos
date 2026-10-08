@@ -28,6 +28,28 @@ const {
 
 const MARKER_NAME = 'launched.marker';
 const BUSY = new Set(['checking', 'downloading', 'ready', 'installing']);
+const LOG_MAX_BYTES = 512 * 1024;
+
+/** Every state has something to show, even if a code path forgets its message. */
+const FALLBACK_MESSAGES = {
+  idle: 'Ready to check for updates.',
+  checking: 'Checking for updates...',
+  available: 'An update is available.',
+  downloading: 'Downloading the update...',
+  ready: 'The update is ready. Restart to update.',
+  installing: 'Installing the update...',
+  'up-to-date': 'WLSAPlus is up to date.',
+  error: 'The update check failed. Try again later.',
+  unsupported: 'Automatic updates need the installed macOS app.',
+};
+
+function describeError(error) {
+  if (!error) return 'unknown error';
+  const parts = [error.name && error.name !== 'Error' ? error.name : '', error.message || String(error)];
+  const cause = error.cause;
+  if (cause) parts.push(`(cause: ${cause.code || ''} ${cause.message || String(cause)})`.replace(/\s+/gu, ' '));
+  return parts.filter(Boolean).join(': ').slice(0, 500);
+}
 
 function updatesDirFor(userData) { return path.join(userData, 'updates'); }
 
@@ -88,6 +110,10 @@ function createMacUpdater(options) {
   let staged = null; // { version, stagedApp, marker, file }
   let checkTimer = null;
   let intervalTimer = null;
+  let job = null;   // promise of the running background download (check() never waits for it)
+  let seq = 0;      // increases with every status, so the UI can ignore stale replies
+  const logFile = path.join(updatesDir, 'update.log');
+  let logReady = null;
   let status = {
     state: supported ? 'idle' : 'unsupported',
     message: supported ? 'Ready to check for updates.' : 'Automatic updates need the installed macOS app.',
@@ -95,14 +121,38 @@ function createMacUpdater(options) {
     version: null,
     percent: null,
     channel: 'stable',
+    seq: 0,
   };
+
+  /** Appends one line to updates/update.log (shared with update-helper.sh); never throws. */
+  function log(line) {
+    const text = `${new Date().toISOString()} [app ${currentVersion}] ${line}\n`;
+    logReady = (logReady || Promise.resolve()).then(async () => {
+      try {
+        await fsp.mkdir(updatesDir, { recursive: true });
+        const info = await fsp.stat(logFile).catch(() => null);
+        if (info && info.size > LOG_MAX_BYTES) await fsp.rename(logFile, `${logFile}.1`).catch(() => {});
+        await fsp.appendFile(logFile, text);
+      } catch {}
+    });
+    return logReady;
+  }
 
   function channel() {
     return channelOverride || settings.channel || (isPrerelease(currentVersion) ? 'beta' : 'stable');
   }
 
   function setStatus(patch) {
-    status = { ...status, ...patch, channel: channel() };
+    const next = { ...status, ...patch, channel: channel() };
+    if (typeof next.message !== 'string' || !next.message.trim()) next.message = FALLBACK_MESSAGES[next.state] || FALLBACK_MESSAGES.error;
+    seq += 1;
+    next.seq = seq;
+    const changed = next.state !== status.state || next.message !== status.message;
+    status = next;
+    // Progress ticks are not logged one by one (only every 10 %).
+    if (changed && !(status.state === 'downloading' && status.percent !== null && status.percent % 10 !== 0 && status.percent !== 100)) {
+      void log(`status ${status.state}: ${status.message}`);
+    }
     try { onStatus(status); } catch {}
     return status;
   }
@@ -161,15 +211,27 @@ function createMacUpdater(options) {
   }
 
   async function fetchManifest(tag) {
-    const text = await fetchText(assetUrls(feed, tag, MANIFEST_NAME), { fetchImpl });
-    return verifyManifest(text, publicKeyPem);
+    const urls = assetUrls(feed, tag, MANIFEST_NAME);
+    const started = Date.now();
+    try {
+      const text = await fetchText(urls, { fetchImpl, onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`) });
+      const manifest = verifyManifest(text, publicKeyPem);
+      void log(`manifest ${tag}: version ${manifest.version}, files ${Object.keys(manifest.files || {}).join('/')} (${Date.now() - started} ms, signature ok)`);
+      return manifest;
+    } catch (error) {
+      void log(`manifest ${tag}: FAILED after ${Date.now() - started} ms: ${describeError(error)}`);
+      throw error;
+    }
   }
 
   async function fetchStableManifest() {
     let latest = null;
     try {
-      latest = JSON.parse(await fetchText([stableLatestUrl(feed)], { fetchImpl }));
+      const started = Date.now();
+      latest = JSON.parse(await fetchText([stableLatestUrl(feed)], { fetchImpl, onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`) }));
+      void log(`stable latest: ${latest?.tag} (${Date.now() - started} ms)`);
     } catch (error) {
+      void log(`stable latest: FAILED: ${describeError(error)}; trying mirrors`);
       // Site unavailable: the mirrors can still resolve GitHub's "latest" (non-prerelease) release.
       for (const mirror of feed.mirrors) {
         try {
@@ -180,14 +242,35 @@ function createMacUpdater(options) {
       throw error;
     }
     const assets = Array.isArray(latest?.assets) ? latest.assets : [];
-    if (typeof latest?.tag !== 'string' || !assets.some((asset) => asset && asset.name === MANIFEST_NAME)) return null; // e.g. 1.0.9: no self-update yet
+    if (typeof latest?.tag !== 'string' || !assets.some((asset) => asset && asset.name === MANIFEST_NAME)) {
+      void log(`stable latest ${latest?.tag} has no ${MANIFEST_NAME} (not self-updating yet)`);
+      return null; // e.g. 1.0.9: no self-update yet
+    }
     return fetchManifest(latest.tag);
   }
 
-  async function check() {
+  /**
+   * Looks for an update and, if there is one, starts downloading it in the background. Resolves as soon as the
+   * check itself is done (never waits for the download, which can take minutes); progress and the final result
+   * arrive through onStatus. Every outcome, including unexpected exceptions, ends in a state with a message.
+   */
+  async function check({ reason = 'manual' } = {}) {
     if (!supported) return status;
-    if (BUSY.has(status.state)) return status;
+    if (BUSY.has(status.state)) {
+      void log(`check (${reason}) ignored: already ${status.state}`);
+      return status;
+    }
     setStatus({ state: 'checking', message: 'Checking for updates...', version: null, percent: null });
+    void log(`check (${reason}): version ${currentVersion}, channel ${channel()}, arch ${arch}, macOS ${systemVersion || '?'}, feed ${feed.base}`);
+    try {
+      return await checkInner();
+    } catch (error) {
+      void log(`check: unexpected error: ${describeError(error)}\n${error?.stack || ''}`);
+      return setStatus({ state: 'error', message: `Could not check for updates: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300), percent: null });
+    }
+  }
+
+  async function checkInner() {
     const wanted = channel();
     const manifests = [];
     const errors = [];
@@ -195,10 +278,13 @@ function createMacUpdater(options) {
       manifests.push(await fetchStableManifest());
     } catch (error) { errors.push(error); }
     if (wanted === 'beta') {
-      try { manifests.push(await fetchManifest(BETA_CHANNEL_TAG)); } catch (error) { if (!error?.notFound) errors.push(error); }
+      try { manifests.push(await fetchManifest(BETA_CHANNEL_TAG)); } catch (error) {
+        if (error?.notFound) void log('beta channel: no test build is published right now');
+        else errors.push(error);
+      }
     }
     if (!manifests.some(Boolean) && errors.length) {
-      const signatureProblem = errors.find((error) => /signature|manifest/iu.test(String(error?.message)));
+      const signatureProblem = errors.find((error) => /signature|not valid JSON|unexpected product/iu.test(String(error?.message)));
       return setStatus({
         state: 'error',
         message: signatureProblem ? `Update rejected: ${signatureProblem.message}` : 'Could not check for updates. Check your internet connection.',
@@ -206,13 +292,26 @@ function createMacUpdater(options) {
       });
     }
     const chosen = chooseUpdate({ currentVersion, channel: wanted, manifests, failedVersions: settings.failedVersions, systemVersion });
-    if (!chosen) return setStatus({ state: 'up-to-date', message: 'WLSAPlus is up to date.', version: null, percent: null });
+    void log(`candidates: ${manifests.filter(Boolean).map((m) => m.version).join(', ') || 'none'}; skipped failed: ${settings.failedVersions.join(', ') || 'none'}; chosen: ${chosen ? chosen.version : 'none'}`);
+    if (!chosen) {
+      const partial = errors.length ? ' (some update sources did not answer)' : '';
+      return setStatus({ state: 'up-to-date', message: `WLSAPlus ${currentVersion} is up to date${wanted === 'beta' ? ' (test builds on)' : ''}.${partial}`, version: null, percent: null });
+    }
     const file = pickUpdateFile(chosen, arch);
     if (!file) return setStatus({ state: 'error', message: `WLSAPlus ${chosen.version} has no build for this Mac.`, version: chosen.version, percent: null });
     const location = await installLocation();
+    void log(`install location: ${location.problem || `${location.target} (admin needed: ${location.admin})`}`);
     if (location.problem) return setStatus({ state: 'error', message: location.problem, version: chosen.version, percent: null });
     setStatus({ state: 'available', message: `WLSAPlus ${chosen.version} is available.`, version: chosen.version, percent: null });
-    return download(chosen, file, location);
+    // Background: the IPC reply (and the button) must not wait minutes for the download.
+    job = download(chosen, file, location).finally(() => { job = null; });
+    return status;
+  }
+
+  /** Resolves with the final status of the running background download (tests, auto-install poll). */
+  async function idle() {
+    if (job) await job;
+    return status;
   }
 
   async function verifyStagedApp(appDir, manifest, file) {
@@ -252,12 +351,15 @@ function createMacUpdater(options) {
       setStatus({ state: 'downloading', message: `Downloading WLSAPlus ${manifest.version}...`, version: manifest.version, percent: 0 });
       let lastPercent = -1;
       const zipPath = path.join(stagingDir, file.name);
-      await downloadVerified({
+      void log(`download ${file.name} (${file.size} bytes, sha256 ${file.sha256.slice(0, 12)}...)`);
+      const startedAt = Date.now();
+      const usedUrl = await downloadVerified({
         urls: assetUrls(feed, manifest.tag, file.name),
         dest: zipPath,
         size: file.size,
         sha256: file.sha256,
         fetchImpl,
+        onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`),
         onProgress: (received, total) => {
           const percent = Math.max(0, Math.min(100, Math.floor((received / total) * 100)));
           if (percent !== lastPercent) {
@@ -266,6 +368,7 @@ function createMacUpdater(options) {
           }
         },
       });
+      void log(`download done from ${usedUrl || 'existing file'} in ${Math.round((Date.now() - startedAt) / 1000)} s, sha256 ok`);
       setStatus({ state: 'downloading', message: `Verifying WLSAPlus ${manifest.version}...`, percent: 100 });
       const appDir = path.join(stagingDir, 'app');
       await fsp.rm(appDir, { recursive: true, force: true });
@@ -286,6 +389,7 @@ function createMacUpdater(options) {
       return setStatus({ state: 'ready', message: `WLSAPlus ${manifest.version} is ready. Restart to update (or it installs when you quit).`, version: manifest.version, percent: 100 });
     } catch (error) {
       staged = null;
+      void log(`download/verify FAILED: ${describeError(error)}`);
       const detail = error instanceof Error ? error.message : String(error);
       return setStatus({ state: 'error', message: `Update failed: ${detail}`.slice(0, 300), percent: null });
     }
@@ -316,6 +420,7 @@ function createMacUpdater(options) {
     const location = await installLocation();
     if (location.problem) return setStatus({ state: 'error', message: location.problem, percent: null });
     setStatus({ state: 'installing', message: 'Closing WLSAPlus and installing the update...', percent: 100 });
+    void log(`install (restart): ${staged.version} -> ${location.target} (admin: ${location.admin})`);
     try {
       await beforeInstall();
       spawnDetached('/bin/bash', helperArgs(location, 'restart'));
@@ -334,6 +439,7 @@ function createMacUpdater(options) {
   function installOnQuit() {
     if (quitInstallStarted || status.state !== 'ready' || !staged || !staged.location?.target || staged.location.admin) return false;
     quitInstallStarted = true;
+    void log(`install on quit: ${staged.version}`);
     try {
       spawnDetached('/bin/bash', helperArgs(staged.location, 'quit'));
       return true;
@@ -346,6 +452,7 @@ function createMacUpdater(options) {
     if (!['beta', 'stable'].includes(next)) return status;
     settings.channel = next;
     await saveSettings().catch(() => {});
+    void log(`channel set to ${next}`);
     setStatus({});
     return status;
   }
@@ -354,9 +461,10 @@ function createMacUpdater(options) {
     await loadSettings();
     if (!supported) return status;
     await consumeLastResult();
-    checkTimer = setTimeout(() => void check(), CHECK_DELAY_MS);
+    void log(`started: version ${currentVersion}, channel ${channel()}, arch ${arch}, exe ${exePath}`);
+    checkTimer = setTimeout(() => void check({ reason: 'startup' }), CHECK_DELAY_MS);
     checkTimer.unref?.();
-    intervalTimer = setInterval(() => void check(), CHECK_INTERVAL_MS);
+    intervalTimer = setInterval(() => void check({ reason: 'interval' }), CHECK_INTERVAL_MS);
     intervalTimer.unref?.();
     return status;
   }
@@ -370,6 +478,8 @@ function createMacUpdater(options) {
     start,
     stop,
     check,
+    idle,
+    log,
     install,
     installOnQuit,
     installLocation,
@@ -383,4 +493,4 @@ function createMacUpdater(options) {
   };
 }
 
-module.exports = { createMacUpdater, bundlePathFromExe, validMarkerPath, argValue, updatesDirFor, MARKER_NAME };
+module.exports = { createMacUpdater, bundlePathFromExe, validMarkerPath, argValue, updatesDirFor, MARKER_NAME, FALLBACK_MESSAGES };

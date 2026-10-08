@@ -31,3 +31,18 @@ electron-updater cannot be used. The app updates itself instead:
 Box backup: `/home/box/secrets/wlsaplus-update/` (chmod 600). Secrets: `WLSAPLUS_UPDATE_ED25519_KEY`,
 `WLSAPLUS_CODESIGN_P12_BASE64`, `WLSAPLUS_CODESIGN_P12_PASSWORD`. Losing the Ed25519 key means installed apps can no
 longer update themselves (one manual reinstall); changing the certificate means one Keychain prompt per user.
+
+## Troubleshooting (update.log)
+
+Every check, download and install is logged to
+`~/Library/Application Support/WLSAPlus/updates/update.log` (Settings → Updates → "Show update log" opens it in
+Finder). One line per step: the app version, channel and architecture, every URL tried with its HTTP result and
+time, the manifests found (signature ok or the reason they were rejected), the chosen version, the install
+location, download progress every 10 %, and the helper's swap/rollback result. The log rotates at 512 KB.
+
+- "Check now" only checks; when an update is found the download continues in the background and the row shows
+  the progress. The button never waits for the download.
+- Network requests use Chromium's network stack (system proxy, VPN, macOS certificates, like the browser) and
+  fall back to Node's fetch if Chromium cannot connect.
+- `scripts/ci/mac-live-check-probe.mjs` (workflow "macOS live update-check probe") installs a published build on
+  a real Mac and records exactly what the Updates row shows after clicking "Check now".

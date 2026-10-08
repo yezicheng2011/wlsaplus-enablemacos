@@ -51,4 +51,44 @@ describe('UpdateService', () => {
     expect(bridge.install).toHaveBeenCalledOnce();
     expect(service.status().state).toBe('installing');
   });
+
+  it('never lets an older IPC reply overwrite a newer status event', async () => {
+    const { bridge, push } = installBridge(status({ state: 'idle', message: 'Ready to check for updates.', seq: 1 }));
+    let reply: (s: UpdateStatus) => void = () => {};
+    bridge.check.mockImplementationOnce(() => new Promise<UpdateStatus>((resolve) => { reply = resolve; }));
+    const service = TestBed.runInInjectionContext(() => new UpdateService());
+    await flush();
+    const pending = service.check();
+    push(status({ state: 'checking', message: 'Checking for updates...', seq: 2 }));
+    push(status({ state: 'error', message: 'Could not check for updates.', seq: 4 }));
+    reply(status({ state: 'checking', message: 'Checking for updates...', seq: 2 }));
+    await pending;
+    expect(service.status().state).toBe('error');
+    expect(service.message()).toBe('Could not check for updates.');
+  });
+
+  it('shows an error instead of going blank when the check call fails', async () => {
+    const { bridge } = installBridge(status({ state: 'idle', message: 'Ready to check for updates.' }));
+    bridge.check.mockRejectedValueOnce(new Error('No handler registered for updater:check'));
+    const service = TestBed.runInInjectionContext(() => new UpdateService());
+    await flush();
+    await service.check();
+    expect(service.status().state).toBe('error');
+    expect(service.busy()).toBe(false);
+    expect(service.message()).toContain('Could not check for updates');
+  });
+
+  it('ignores malformed statuses and falls back to a message for every state', async () => {
+    const { push } = installBridge(status({ state: 'idle', message: 'Ready to check for updates.' }));
+    const service = TestBed.runInInjectionContext(() => new UpdateService());
+    await flush();
+    push(undefined as unknown as UpdateStatus);
+    push({} as UpdateStatus);
+    push('oops' as unknown as UpdateStatus);
+    expect(service.status().state).toBe('idle');
+    for (const state of ['idle', 'checking', 'available', 'downloading', 'ready', 'installing', 'up-to-date', 'error'] as const) {
+      push(status({ state, message: '' }));
+      expect(service.message().length).toBeGreaterThan(0);
+    }
+  });
 });

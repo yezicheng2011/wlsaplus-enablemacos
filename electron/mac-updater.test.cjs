@@ -35,11 +35,18 @@ async function feedServer(routes) {
     hits.push(url);
     const body = routes[url];
     if (body === undefined) { res.writeHead(404); res.end('nope'); return; }
+    if (typeof body === 'function') { body(req, res); return; }
     res.writeHead(200);
     res.end(body);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   return { server, hits, base: `http://127.0.0.1:${server.address().port}` };
+}
+
+/** check() returns once the check is done; the download continues in the background. */
+async function settled(updater) {
+  await updater.check();
+  return updater.idle();
 }
 
 function fakeMac({ plistVersion, archs = 'x86_64 arm64', codesignFails = false } = {}) {
@@ -58,11 +65,12 @@ function fakeMac({ plistVersion, archs = 'x86_64 arm64', codesignFails = false }
   return { run, calls };
 }
 
-function setup(t, { currentVersion = '1.1.0', routes, mac, argv = [], exePath = '/Applications/WLSAPlus.app/Contents/MacOS/WLSAPlus', writable = true, supported = true, arch = 'arm64', launchedByUpdater = false }) {
+function setup(t, { currentVersion = '1.1.0', routes, mac, argv = [], exePath = '/Applications/WLSAPlus.app/Contents/MacOS/WLSAPlus', fetchImpl = undefined, writable = true, supported = true, arch = 'arm64', launchedByUpdater = false }) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'wlsa-upd-'));
   t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
   const spawned = [];
   const statuses = [];
+  const full = [];
   let quits = 0;
   let cleanups = 0;
   return feedServer(routes).then(({ server, hits, base }) => {
@@ -81,27 +89,28 @@ function setup(t, { currentVersion = '1.1.0', routes, mac, argv = [], exePath = 
       helperSource,
       beforeInstall: async () => { cleanups += 1; },
       quit: () => { quits += 1; },
-      onStatus: (status) => statuses.push(status.state),
+      onStatus: (status) => { statuses.push(status.state); full.push(status); },
       accessImpl: async () => { if (!writable) throw new Error('EACCES'); },
       publicKeyPem,
       launchedByUpdater,
+      ...(fetchImpl ? { fetchImpl } : {}),
       pid: 4242,
     });
-    return { updater, userData, spawned, statuses, hits, base, counts: () => ({ quits, cleanups }) };
+    return { updater, userData, spawned, statuses, full, hits, base, counts: () => ({ quits, cleanups }) };
   });
 }
 
 test('unsupported (dev / non-mac) builds never touch the network', async (t) => {
   const ctx = await setup(t, { routes: {}, mac: fakeMac(), supported: false });
   await ctx.updater.loadSettings();
-  assert.equal((await ctx.updater.check()).state, 'unsupported');
+  assert.equal((await settled(ctx.updater)).state, 'unsupported');
   assert.deepEqual(ctx.hits, []);
 });
 
 test('stable release without update-manifest.json (e.g. 1.0.9) means up to date', async (t) => {
   const ctx = await setup(t, { routes: { '/api/latest': JSON.stringify({ tag: 'v1.0.9', assets: [{ name: 'wlsaplus1.0.9.zip' }] }) }, mac: fakeMac() });
   await ctx.updater.loadSettings();
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.state, 'up-to-date');
   assert.equal(status.channel, 'stable');
   assert.ok(!ctx.hits.includes('/download/channel-beta/update-manifest.json'), 'stable channel never asks for the beta manifest');
@@ -119,7 +128,7 @@ test('stable update: download, verify, stage, then Restart spawns the helper and
     },
   });
   await ctx.updater.loadSettings();
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.state, 'ready', status.message);
   assert.equal(status.version, '1.1.1');
   assert.ok(ctx.statuses.includes('downloading'));
@@ -162,7 +171,7 @@ test('prerelease builds default to the beta channel and take the newest beta', a
     },
   });
   await ctx.updater.loadSettings();
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.channel, 'beta');
   assert.equal(status.state, 'ready', status.message);
   assert.equal(status.version, '1.1.1-beta.1');
@@ -181,10 +190,10 @@ test('a stable build ignores beta builds unless the test channel is switched on'
     },
   });
   await ctx.updater.loadSettings();
-  assert.equal((await ctx.updater.check()).state, 'up-to-date');
+  assert.equal((await settled(ctx.updater)).state, 'up-to-date');
   await ctx.updater.setChannel('beta');
   assert.equal(JSON.parse(fs.readFileSync(path.join(ctx.userData, 'updates', 'settings.json'), 'utf8')).channel, 'beta');
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.state, 'ready', status.message);
   assert.equal(status.version, '1.1.1-beta.1');
 });
@@ -208,7 +217,7 @@ test('a manifest signed with another key is rejected', async (t) => {
     },
   });
   await ctx.updater.loadSettings();
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.state, 'error');
   assert.match(status.message, /signature is invalid/);
   assert.ok(!ctx.hits.some((hit) => hit.endsWith('.zip')), 'nothing downloaded');
@@ -225,7 +234,7 @@ test('an app whose bundle version does not match the manifest is not staged', as
     },
   });
   await ctx.updater.loadSettings();
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.state, 'error');
   assert.match(status.message, /contains version 9\.9\.9/);
   assert.equal(fs.existsSync(path.join(ctx.userData, 'updates', 'staging', '1.1.1')), false);
@@ -242,10 +251,10 @@ test('codesign failures and wrong architectures block the update', async (t) => 
   };
   const a = await setup(t, { mac: fakeMac({ plistVersion: '1.1.1', codesignFails: true }), routes });
   await a.updater.loadSettings();
-  assert.match((await a.updater.check()).message, /codesign failed/);
+  assert.match((await settled(a.updater)).message, /codesign failed/);
   const b = await setup(t, { mac: fakeMac({ plistVersion: '1.1.1', archs: 'x86_64' }), routes });
   await b.updater.loadSettings();
-  assert.match((await b.updater.check()).message, /built for x86_64/);
+  assert.match((await settled(b.updater)).message, /built for x86_64/);
 });
 
 test('a translocated app asks to be moved to Applications instead of downloading', async (t) => {
@@ -260,7 +269,7 @@ test('a translocated app asks to be moved to Applications instead of downloading
     },
   });
   await ctx.updater.loadSettings();
-  const status = await ctx.updater.check();
+  const status = await settled(ctx.updater);
   assert.equal(status.state, 'error');
   assert.match(status.message, /Applications folder/);
   assert.ok(!ctx.hits.some((hit) => hit.endsWith('.zip')));
@@ -278,7 +287,7 @@ test('non-writable install location: Restart uses the admin path, quit-install i
     },
   });
   await ctx.updater.loadSettings();
-  assert.equal((await ctx.updater.check()).state, 'ready');
+  assert.equal((await settled(ctx.updater)).state, 'ready');
   assert.equal(ctx.updater.installOnQuit(), false);
   await ctx.updater.install();
   const args = ctx.spawned[0];
@@ -297,7 +306,7 @@ test('install on quit spawns the helper in quit mode once', async (t) => {
   });
   await ctx.updater.loadSettings();
   assert.equal(ctx.updater.installOnQuit(), false, 'nothing staged yet');
-  await ctx.updater.check();
+  await settled(ctx.updater);
   assert.equal(ctx.updater.installOnQuit(), true);
   assert.equal(ctx.updater.installOnQuit(), false);
   const args = ctx.spawned[0];
@@ -325,7 +334,7 @@ test('a rolled-back version is remembered and not offered again', async (t) => {
   assert.equal(fs.existsSync(path.join(updatesDir, 'last-result.json')), false);
   assert.equal(fs.existsSync(path.join(updatesDir, 'backup')), false, 'old backup cleaned up');
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(updatesDir, 'settings.json'), 'utf8')).failedVersions, ['1.1.1']);
-  assert.equal((await ctx.updater.check()).state, 'up-to-date');
+  assert.equal((await settled(ctx.updater)).state, 'up-to-date');
 });
 
 test('a successful update is reported once after restart', async (t) => {
@@ -357,4 +366,94 @@ test('an app launched by the helper keeps the staging folder (marker) and the ba
   await ctx.updater.consumeLastResult();
   assert.equal(fs.existsSync(path.join(updatesDir, 'staging', '1.1.1')), true);
   assert.equal(fs.existsSync(path.join(updatesDir, 'backup', 'WLSAPlus.app')), true);
+});
+
+// --- Regression tests for the beta.2 report: "Checking for updates..." then a blank row, no download ---
+
+const readLog = (ctx) => { try { return fs.readFileSync(path.join(ctx.userData, 'updates', 'update.log'), 'utf8'); } catch { return ''; } };
+const betaRoutes = (zip, extra = {}) => ({
+  '/api/latest': JSON.stringify({ tag: 'v1.0.9', assets: [{ name: 'wlsaplus1.0.9.zip' }] }),
+  '/download/channel-beta/update-manifest.json': manifestFor('1.1.1-beta.3', zip, { channel: 'beta' }),
+  ...extra,
+});
+
+test('check() returns as soon as the download starts; the download finishes in the background', async (t) => {
+  const zip = crypto.randomBytes(4000);
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const ctx = await setup(t, {
+    currentVersion: '1.1.0-beta.3',
+    mac: fakeMac({ plistVersion: '1.1.1-beta.3' }),
+    routes: betaRoutes(zip, {
+      '/download/v1.1.1-beta.3/WLSAPlus-1.1.1-beta.3-mac-arm64.zip': (req, res) => { void gate.then(() => { res.writeHead(200); res.end(zip); }); },
+    }),
+  });
+  await ctx.updater.loadSettings();
+  const replied = await ctx.updater.check();
+  assert.ok(['available', 'downloading'].includes(replied.state), `check() replied with ${replied.state}`);
+  assert.equal(replied.version, '1.1.1-beta.3');
+  assert.ok(replied.message.length > 0);
+  // A second click while downloading is a no-op that also replies immediately.
+  assert.equal((await ctx.updater.check()).state, ctx.updater.getStatus().state);
+  release();
+  const done = await ctx.updater.idle();
+  assert.equal(done.state, 'ready', done.message);
+  // Every status the UI received had a message and an increasing seq.
+  assert.ok(ctx.full.every((s) => typeof s.message === 'string' && s.message.trim().length > 0));
+  assert.ok(ctx.full.every((s, i) => i === 0 || s.seq > ctx.full[i - 1].seq));
+});
+
+test('every outcome of a check ends in a non-busy state with a visible message', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const cases = [
+    ['up to date (beta)', { currentVersion: '1.1.1-beta.3', routes: betaRoutes(zip) }, 'up-to-date', /up to date \(test builds on\)/u],
+    ['no test build published', { currentVersion: '1.1.0-beta.3', routes: { '/api/latest': JSON.stringify({ tag: 'v1.0.9', assets: [] }) } }, 'up-to-date', /up to date/u],
+    ['site down', { currentVersion: '1.1.0-beta.3', routes: {}, fetchImpl: async () => { throw new TypeError('fetch failed'); } }, 'error', /Could not check for updates/u],
+    ['bad signature', { currentVersion: '1.1.0-beta.3', routes: { '/api/latest': JSON.stringify({ tag: 'v1.0.9', assets: [] }), '/download/channel-beta/update-manifest.json': manifestFor('1.1.1-beta.3', zip, { channel: 'beta', key: crypto.generateKeyPairSync('ed25519').privateKey }) } }, 'error', /signature/u],
+    ['download fails', { currentVersion: '1.1.0-beta.3', routes: betaRoutes(zip) }, 'error', /Update failed/u],
+    ['unexpected exception', { currentVersion: '1.1.0-beta.3', routes: betaRoutes(zip), exePath: null }, 'error', /Could not check for updates/u],
+  ];
+  for (const [name, options, state, message] of cases) {
+    const ctx = await setup(t, { mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), ...options });
+    await ctx.updater.loadSettings();
+    const final = await settled(ctx.updater);
+    assert.equal(final.state, state, `${name}: ${final.message}`);
+    assert.match(final.message, message, name);
+    assert.ok(!['checking', 'downloading', 'installing'].includes(final.state), name);
+    assert.ok(ctx.full.every((s) => typeof s.message === 'string' && s.message.trim()), `${name}: blank message`);
+  }
+});
+
+test('a beta build with no saved setting uses the beta channel and finds the beta update', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const ctx = await setup(t, { currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), routes: betaRoutes(zip, { '/download/v1.1.1-beta.3/WLSAPlus-1.1.1-beta.3-mac-arm64.zip': zip }) });
+  await ctx.updater.loadSettings();
+  assert.equal(ctx.updater.getChannel(), 'beta');
+  assert.equal((await settled(ctx.updater)).state, 'ready');
+  assert.ok(ctx.hits.includes('/download/channel-beta/update-manifest.json'));
+});
+
+test('check results are written to updates/update.log', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const ctx = await setup(t, { currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), routes: betaRoutes(zip) });
+  await ctx.updater.loadSettings();
+  await settled(ctx.updater);
+  await ctx.updater.log('flush');
+  const text = readLog(ctx);
+  assert.match(text, /check \(manual\): version 1\.1\.0-beta\.3, channel beta, arch arm64/u);
+  assert.match(text, /GET http:\/\/127\.0\.0\.1:\d+\/api\/latest -> 200/u);
+  assert.match(text, /manifest channel-beta: version 1\.1\.1-beta\.3/u);
+  assert.match(text, /chosen: 1\.1\.1-beta\.3/u);
+  assert.match(text, /download\/verify FAILED: .*404/u);
+  assert.match(text, /status error: Update failed/u);
+});
+
+test('a check error from an unexpected exception is logged with its stack', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const ctx = await setup(t, { currentVersion: '1.1.0-beta.3', mac: fakeMac(), routes: betaRoutes(zip), exePath: null });
+  await ctx.updater.loadSettings();
+  const final = await settled(ctx.updater);
+  assert.equal(final.state, 'error');
+  await ctx.updater.log('flush');
+  assert.match(readLog(ctx), /check: unexpected error: TypeError/u);
 });

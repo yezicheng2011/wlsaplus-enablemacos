@@ -43,7 +43,7 @@ interface NavItem { path: string; label: string; icon: string; tooltip?: string;
           <span class="update-icon material-symbols-rounded">system_update</span>
           <div class="update-copy">
             <strong>@if (updater.status().state === 'ready') { Update ready } @else { Installing update }</strong>
-            <span>{{ updater.status().message }}</span>
+            <span>{{ updater.message() }}</span>
           </div>
           @if (updater.status().state === 'ready') {
             <button mat-flat-button (click)="updater.install()"><span class="material-symbols-rounded">restart_alt</span>Restart</button>

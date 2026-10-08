@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Notification, ipcMain, powerMonitor, safeStorage, session, shell } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, net, powerMonitor, safeStorage, session, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -991,6 +991,23 @@ function runForUpdate(command, args) {
   });
 }
 
+/**
+ * Update downloads use Chromium's network stack first (same proxy settings, VPN and certificate store as the
+ * browser the user downloaded WLSAPlus with), then Node's fetch if Chromium cannot connect at all.
+ */
+const updateFetchLogged = new Set();
+async function updateFetch(url, init = {}) {
+  try {
+    const response = await net.fetch(url, { ...init, bypassCustomProtocolHandlers: true });
+    if (!updateFetchLogged.has('net')) { updateFetchLogged.add('net'); void macUpdater?.log('network: using Chromium net.fetch'); }
+    return response;
+  } catch (error) {
+    if (init.signal?.aborted) throw error;
+    void macUpdater?.log(`network: net.fetch failed for ${url}: ${error?.message || error}; retrying with Node fetch`);
+    return fetch(url, init);
+  }
+}
+
 function configureAppUpdater() {
   macUpdater = createMacUpdater({
     currentVersion: app.getVersion(),
@@ -1006,6 +1023,7 @@ function configureAppUpdater() {
     quit: () => app.quit(),
     onStatus: (status) => setUpdateStatus(status),
     launchedByUpdater: Boolean(updateMarkerArg),
+    fetchImpl: updateFetch,
   });
   updateStatus = macUpdater.getStatus();
   void macUpdater.start().catch((error) => console.error('Updater failed to start:', error));
@@ -1232,6 +1250,10 @@ ipcMain.handle('updater:check', () => macUpdater?.check() ?? updateStatus);
 // Downloads start automatically after a successful check; "download" is kept as an alias for older UI code.
 ipcMain.handle('updater:download', () => macUpdater?.check() ?? updateStatus);
 ipcMain.handle('updater:install', () => macUpdater?.install() ?? updateStatus);
+ipcMain.handle('updater:reveal-log', async () => {
+  const file = path.join(app.getPath('userData'), 'updates', 'update.log');
+  try { await fs.access(file); shell.showItemInFolder(file); return true; } catch { return false; }
+});
 ipcMain.handle('updater:set-channel', (_event, channel) => macUpdater?.setChannel(channel === 'beta' ? 'beta' : 'stable') ?? updateStatus);
 ipcMain.handle('translator:translate', (_event, text, source, target) => translateText(text, source, target));
 ipcMain.handle('translator:capture-region', () => Promise.reject(new Error('Screen translation is not available on macOS.')));

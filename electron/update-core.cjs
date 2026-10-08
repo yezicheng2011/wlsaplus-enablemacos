@@ -164,19 +164,24 @@ async function fileSize(file) {
 }
 
 /** Fetches a small text resource from the first URL that answers. */
-async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes = MAX_MANIFEST_BYTES } = {}) {
+async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes = MAX_MANIFEST_BYTES, onAttempt = () => {} } = {}) {
   let lastError = null;
   for (const url of urls) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(new Error(`Timed out after ${Math.round(timeoutMs / 1000)} s: ${url}`)), timeoutMs);
+    const started = Date.now();
+    const note = (outcome) => { try { onAttempt(url, `${outcome} (${Date.now() - started} ms)`); } catch {} };
     try {
       const response = await fetchImpl(url, { cache: 'no-store', signal: controller.signal, headers: { 'Cache-Control': 'no-cache' } });
-      if (response.status === 404) { lastError = Object.assign(new Error(`Not found: ${url}`), { notFound: true }); continue; }
-      if (!response.ok) { lastError = new Error(`HTTP ${response.status} for ${url}`); continue; }
+      if (response.status === 404) { note('404'); lastError = Object.assign(new Error(`Not found: ${url}`), { notFound: true }); continue; }
+      if (!response.ok) { note(`HTTP ${response.status}`); lastError = new Error(`HTTP ${response.status} for ${url}`); continue; }
       const text = await response.text();
-      if (text.length > maxBytes) { lastError = new Error(`Response too large: ${url}`); continue; }
+      if (text.length > maxBytes) { note('too large'); lastError = new Error(`Response too large: ${url}`); continue; }
+      note(`200, ${text.length} bytes`);
       return text;
     } catch (error) {
+      const cause = error?.cause ? ` (${error.cause.code || ''} ${error.cause.message || error.cause})` : '';
+      note(`error: ${error?.message || error}${cause}`);
       lastError = error;
     } finally {
       clearTimeout(timer);
@@ -191,7 +196,7 @@ async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes
  */
 // Timeouts are generous: on a cold cache the official site first pulls the whole file from GitHub into its
 // Drive-backed cache before the first byte arrives (measured 15-40 s), so the first byte may take minutes.
-async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, onProgress = () => {}, firstByteTimeoutMs = 300_000, idleTimeoutMs = 120_000 }) {
+async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, onProgress = () => {}, onAttempt = () => {}, firstByteTimeoutMs = 300_000, idleTimeoutMs = 120_000 }) {
   if ((await fileSize(dest)) === size && (await sha256File(dest)) === sha256) {
     onProgress(size, size);
     return null;
@@ -249,6 +254,7 @@ async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, o
         await fsp.rename(part, dest);
         return url;
       } catch (error) {
+        try { onAttempt(url, `attempt ${attempt + 1} failed: ${error?.message || error}`); } catch {}
         lastError = error;
       }
     }

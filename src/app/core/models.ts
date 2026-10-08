@@ -243,6 +243,8 @@ export interface UpdateStatus {
   percent: number | null;
   /** macOS self-update channel: stable (default) or beta (test builds, opt-in). */
   channel?: UpdateChannel;
+  /** Increases with every status from the main process (stale IPC replies are ignored). */
+  seq?: number;
 }
 
 export type UpdateChannel = 'stable' | 'beta';
