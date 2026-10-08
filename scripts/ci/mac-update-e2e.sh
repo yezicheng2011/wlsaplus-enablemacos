@@ -23,13 +23,14 @@ step() { echo; echo "=== $* ==="; }
 fail() { echo "::error::E2E: $*"; exit 1; }
 plist_version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$TARGET/Contents/Info.plist"; }
 result_field() { node -e "try{const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(r[process.argv[2]]??'')}catch{console.log('')}" "$UPD/last-result.json" "$1"; }
+result_is() { [ "$(result_field state)" = "$1" ]; }
 app_running() { pgrep -f "$TARGET/Contents/MacOS/WLSAPlus" >/dev/null 2>&1; }
 stop_apps() {
   pkill -f "$TARGET/Contents/MacOS/" 2>/dev/null || true
   for _ in $(seq 1 10); do app_running || return 0; sleep 1; done
   pkill -9 -f "$TARGET/Contents/MacOS/" 2>/dev/null || true; sleep 1
 }
-wait_until() { # seconds description command...
+wait_until() { # seconds description command... (command is re-run every second; pass a function, not "$(...)")
   local limit="$1" what="$2"; shift 2
   for _ in $(seq 1 "$limit"); do if "$@"; then return 0; fi; sleep 1; done
   fail "timed out after ${limit}s waiting for: $what"
@@ -102,7 +103,7 @@ sleep 1
 step "R1: 1.1.0 -> 1.1.1 (stable channel, restart)"
 publish 1.1.1 stable
 launch_with_feed 1
-wait_until 240 "R1 result" test "$(result_field state)" = updated
+wait_until 240 "R1 result" result_is updated
 [ "$(plist_version)" = 1.1.1 ] || fail "R1: installed version is $(plist_version)"
 [ "$(result_field to)" = 1.1.1 ] && [ "$(result_field from)" = 1.1.0 ] || fail "R1: wrong result $(cat "$UPD/last-result.json")"
 codesign --verify --deep --strict "$TARGET" || fail "R1: installed app fails codesign --verify"
@@ -116,7 +117,7 @@ stop_apps
 step "R2: 1.1.1 -> 1.1.2 (broken) must roll back"
 publish 1.1.2 stable
 launch_with_feed 1
-wait_until 300 "R2 rollback" test "$(result_field state)" = rolled_back
+wait_until 300 "R2 rollback" result_is rolled_back
 [ "$(plist_version)" = 1.1.1 ] || fail "R2: version after rollback is $(plist_version)"
 [ "$(result_field to)" = 1.1.2 ] || fail "R2: wrong result $(cat "$UPD/last-result.json")"
 codesign --verify --deep --strict "$TARGET" || fail "R2: restored app fails codesign --verify"
@@ -135,7 +136,7 @@ sleep 3
 [ "$(plist_version)" = 1.1.1 ] || fail "R3: installed before quitting"
 grep -q "/download/v1.1.2/WLSAPlus-1.1.2" "$LOGS/feed.log" && [ "$(grep -c "/download/v1.1.2/WLSAPlus-1.1.2" "$LOGS/feed.log")" -gt 1 ] && fail "R3: the rolled-back 1.1.2 was downloaded again"
 kill -TERM "$APP_PID"
-wait_until 180 "R3 result" test "$(result_field state)" = updated
+wait_until 180 "R3 result" result_is updated
 [ "$(plist_version)" = 1.1.3-beta.1 ] || fail "R3: installed version is $(plist_version)"
 codesign --verify --deep --strict "$TARGET" || fail "R3: installed app fails codesign --verify"
 grep -q "mode quit" "$UPD/update.log" || fail "R3: helper did not run in quit mode"
