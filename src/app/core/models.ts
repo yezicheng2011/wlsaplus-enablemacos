@@ -27,6 +27,16 @@ export interface ClassSession {
   endsAt: string;
 }
 
+/** Minimal session fields the main process needs to schedule a class reminder. */
+export type ClassReminderSession = Pick<ClassSession, 'id' | 'startsAt' | 'courseName' | 'room' | 'teacher'>;
+
+export interface ClassReminderSyncPayload {
+  enabled: boolean;
+  sessions: ClassReminderSession[];
+  /** One-time migration of the dedupe keys the old renderer timer kept in localStorage. */
+  legacyNotified?: string[];
+}
+
 export interface ScheduleSnapshot {
   syncedAt: string;
   weekStart: string;

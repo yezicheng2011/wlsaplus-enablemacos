@@ -1,4 +1,5 @@
 import type {
+  ClassReminderSyncPayload,
   PlatformHttpResponse,
   PowerSchoolCredentials,
   TranslationResult,
@@ -64,6 +65,10 @@ declare global {
       };
       notifications: {
         showClassReminder(options: { title: string; body: string; sessionId: string }): Promise<boolean>;
+      };
+      /** Class reminders are scheduled in the main process; the renderer only syncs schedule + switch. */
+      reminders: {
+        sync(payload: ClassReminderSyncPayload): Promise<boolean>;
       };
     };
   }

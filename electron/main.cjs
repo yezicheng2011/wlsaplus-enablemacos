@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Notification, ipcMain, safeStorage, session, shell } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, powerMonitor, safeStorage, session, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -23,6 +23,7 @@ const {
 const { resolveForumEntryUrl, getLastForumSsoStatus } = require('./forum-sso.cjs');
 const { applyForumTheme, emulateForumColorScheme, validateForumTheme } = require('./forum-theme.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
+const { createClassReminderScheduler } = require('./class-reminders.cjs');
 const yaml = require('js-yaml');
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -60,6 +61,7 @@ const credentialFile = () => path.join(app.getPath('userData'), 'credentials.bin
 const vpnDirectory = () => path.join(app.getPath('userData'), 'vpn');
 const vpnConfigFile = () => path.join(vpnDirectory(), 'config.json');
 const vpnProxyStateFile = () => path.join(vpnDirectory(), 'proxy-state.json');
+const classRemindersFile = () => path.join(app.getPath('userData'), 'class-reminders.json');
 const powerSchoolSession = () => session.fromPartition('persist:powerschool');
 const appSession = () => session.fromPartition('persist:wlsaplus');
 const forumSession = () => session.fromPartition(FORUM_PARTITION);
@@ -1188,14 +1190,42 @@ ipcMain.handle('updater:install', () => installAppUpdate());
 ipcMain.handle('translator:translate', (_event, text, source, target) => translateText(text, source, target));
 ipcMain.handle('translator:capture-region', () => Promise.reject(new Error('Screen translation is not available on macOS.')));
 
-ipcMain.handle('notifications:show-class-reminder', (_event, options) => {
+// Notifications must stay referenced until dismissed, or their click handler can be garbage-collected.
+const activeClassReminderNotifications = new Set();
+
+function showClassReminderNotification(options) {
   if (process.platform !== 'darwin') return false;
   if (!Notification.isSupported()) return false;
   const title = String(options?.title || 'Class starting soon').slice(0, 120);
   const body = String(options?.body || '').slice(0, 240);
   const notification = new Notification({ title, body, silent: false });
+  const release = () => activeClassReminderNotifications.delete(notification);
+  activeClassReminderNotifications.add(notification);
+  notification.on('click', () => { release(); showMainWindow(); });
+  notification.on('close', release);
   notification.show();
   return true;
+}
+
+// Class reminders run in the main process so they survive the last window being closed on macOS
+// (the app keeps running) and work after a windowless --autostart launch.
+let classReminderScheduler = null;
+function classReminders() {
+  if (process.platform !== 'darwin') return null;
+  if (!classReminderScheduler) {
+    classReminderScheduler = createClassReminderScheduler({
+      file: classRemindersFile(),
+      showNotification: showClassReminderNotification,
+    });
+  }
+  return classReminderScheduler;
+}
+
+ipcMain.handle('notifications:show-class-reminder', (_event, options) => showClassReminderNotification(options));
+ipcMain.handle('reminders:sync', async (_event, payload) => {
+  const scheduler = classReminders();
+  if (!scheduler) return false;
+  return scheduler.sync(payload);
 });
 
 if (hasSingleInstanceLock) {
@@ -1219,6 +1249,12 @@ app.whenReady().then(async () => {
   await restoreSavedSystemProxy().catch(() => {});
   await appSession().clearStorageData({ storages: ['serviceworkers', 'cachestorage'] }).catch(() => {});
   configureForumSession();
+  const reminders = classReminders();
+  if (reminders) {
+    reminders.start();
+    // Timers stall while the Mac sleeps; re-check as soon as it wakes.
+    powerMonitor.on('resume', () => void reminders.tick().catch(() => {}));
+  }
   if (!isAutostart || vpnAutoConnectMode) showMainWindow(vpnAutoConnectMode ? 'tools/vpn' : '');
   if (vpnAutoConnectMode) void connectVpn(vpnAutoConnectMode, vpnAutoConnectSource);
   if (updatesSupported && !vpnAutoConnectMode) {
@@ -1234,4 +1270,6 @@ app.on('before-quit', (event) => {
     void disconnectVpn().finally(() => { quitAfterCleanup = true; app.quit(); });
   }
 });
+app.on('will-quit', () => { classReminderScheduler?.stop(); });
+// macOS: closing the last window keeps the app (and the class reminder scheduler) running.
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
