@@ -164,7 +164,7 @@ async function fileSize(file) {
 }
 
 /** Fetches a small text resource from the first URL that answers. */
-async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 30_000, maxBytes = MAX_MANIFEST_BYTES } = {}) {
+async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes = MAX_MANIFEST_BYTES } = {}) {
   let lastError = null;
   for (const url of urls) {
     const controller = new AbortController();
@@ -189,9 +189,9 @@ async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 30_000, maxBytes
  * Downloads one file into `dest`, resuming `dest + '.part'` with a Range request when possible, trying each
  * URL in turn, and only renames it into place after size and sha256 match. Returns the URL that worked.
  */
-// idleTimeoutMs is generous: on a cold cache the official site first pulls the file from GitHub into its
-// Drive-backed cache before the first byte arrives.
-async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, onProgress = () => {}, idleTimeoutMs = 120_000 }) {
+// Timeouts are generous: on a cold cache the official site first pulls the whole file from GitHub into its
+// Drive-backed cache before the first byte arrives (measured 15-40 s), so the first byte may take minutes.
+async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, onProgress = () => {}, firstByteTimeoutMs = 300_000, idleTimeoutMs = 120_000 }) {
   if ((await fileSize(dest)) === size && (await sha256File(dest)) === sha256) {
     onProgress(size, size);
     return null;
@@ -214,7 +214,7 @@ async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, o
           have = -1;
         }
         const controller = new AbortController();
-        let idle = setTimeout(() => controller.abort(), idleTimeoutMs);
+        let idle = setTimeout(() => controller.abort(), firstByteTimeoutMs);
         const headers = have > 0 ? { Range: `bytes=${have}-` } : {};
         try {
           const response = await fetchImpl(url, { headers, signal: controller.signal, redirect: 'follow' });

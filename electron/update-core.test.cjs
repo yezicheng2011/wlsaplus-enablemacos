@@ -166,3 +166,21 @@ test('fetchText tries URLs in order and flags 404s', async () => {
     server.close();
   }
 });
+
+test('downloadVerified waits for a slow first byte but aborts a stalled transfer', async () => {
+  const body = crypto.randomBytes(50_000);
+  const { server, base } = await startServer((req, res) => {
+    if (req.url === '/slow') { setTimeout(() => { res.writeHead(200); res.end(body); }, 400); return; }
+    res.writeHead(200, { 'Content-Length': body.length });
+    res.write(body.subarray(0, 1000)); // then stall forever
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wlsa-dl-'));
+  try {
+    await core.downloadVerified({ urls: [`${base}/slow`], dest: path.join(dir, 'a.zip'), size: body.length, sha256: sha(body), firstByteTimeoutMs: 2000, idleTimeoutMs: 100 });
+    await assert.rejects(core.downloadVerified({ urls: [`${base}/stall`], dest: path.join(dir, 'b.zip'), size: body.length, sha256: sha(body), firstByteTimeoutMs: 2000, idleTimeoutMs: 200 }));
+  } finally {
+    server.closeAllConnections?.();
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
