@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Notification, ipcMain, powerMonitor, safeStorage, session, shell } = require('electron');
+const { app, BrowserWindow, Notification, ipcMain, net, powerMonitor, safeStorage, session, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
@@ -7,9 +7,8 @@ const nodeNet = require('node:net');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
-const { autoUpdater } = require('electron-updater');
 const { VPN_CONNECTION_MODES, buildVpnConfig } = require('./vpn-config.cjs');
-const { updateFeed } = require('./update-config.cjs');
+const { createMacUpdater, validMarkerPath, argValue } = require('./mac-updater.cjs');
 const { validateExternalHelpUrl } = require('./external-links.cjs');
 const {
   FORUM_PARTITION,
@@ -65,15 +64,23 @@ let macCoreWatchdog = null;
 let macConnectAttempt = 0;
 let quitAfterCleanup = false;
 let updateInstallRequested = false;
-let updateFeedSource = 'mirror';
 const vpnDnsCache = new Map();
-const updatesSupported = process.platform === 'win32' && app.isPackaged;
+// macOS self-update (electron/mac-updater.cjs). The CI end-to-end test also runs it against a loopback feed.
+const updatesSupported = process.platform === 'darwin' && app.isPackaged;
+// Set by update-helper.sh when it launches a freshly installed version: the app proves it started by writing
+// this marker (after the window loaded; --wlsaplus-update-verify-only: right after start-up, then quits).
+const updateMarkerArg = argValue(process.argv, 'wlsaplus-update-marker');
+const updateVerifyOnly = process.argv.includes('--wlsaplus-update-verify-only');
+let updateMarkerWritten = false;
+let systemShuttingDown = false;
+let macUpdater = null;
 let updateStatus = {
   state: updatesSupported ? 'idle' : 'unsupported',
-  message: updatesSupported ? 'Ready to check for updates.' : 'Automatic updates are not enabled in this macOS build.',
+  message: updatesSupported ? 'Ready to check for updates.' : 'Automatic updates need the installed macOS app.',
   currentVersion: app.getVersion(),
   version: null,
   percent: null,
+  channel: 'stable',
 };
 
 const preload = path.join(__dirname, 'preload.cjs');
@@ -947,58 +954,20 @@ async function disconnectVpn() {
   return setVpnStatus({ state: 'idle', message: 'Ready', connectedAt: null, mode, requiresElevation: false });
 }
 
-function updaterErrorMessage(error) {
-  const detail = error instanceof Error ? error.message : String(error || '');
-  if (/net::|network|internet|ENOTFOUND|ETIMEDOUT|ECONN/u.test(detail)) return 'Could not check for updates. Check your internet connection.';
-  return 'The update service is temporarily unavailable.';
-}
-
-function configureUpdateFeed(source) {
-  autoUpdater.setFeedURL(updateFeed(source));
-  updateFeedSource = source;
-}
-
-async function checkForAppUpdate() {
-  if (!updatesSupported) return updateStatus;
-  if (updateStatus.state === 'checking' || updateStatus.state === 'downloading' || updateStatus.state === 'ready') return updateStatus;
-  setUpdateStatus({ state: 'checking', message: 'Checking for updates...', percent: null });
+function writeUpdateMarker() {
+  if (updateMarkerWritten || !updateMarkerArg) return;
+  const marker = validMarkerPath(app.getPath('userData'), updateMarkerArg);
+  if (!marker) return;
+  updateMarkerWritten = true;
   try {
-    configureUpdateFeed('mirror');
-    await autoUpdater.checkForUpdates();
-  } catch {
-    setUpdateStatus({ state: 'checking', message: 'Update mirror unavailable. Trying GitHub...', percent: null });
-    try {
-      configureUpdateFeed('github');
-      await autoUpdater.checkForUpdates();
-    } catch (error) {
-      setUpdateStatus({ state: 'error', message: updaterErrorMessage(error), percent: null });
-    }
-  }
-  return updateStatus;
-}
-
-async function downloadAppUpdate() {
-  if (!updatesSupported || updateStatus.state !== 'available') return updateStatus;
-  setUpdateStatus({ state: 'downloading', message: `Downloading WLSAPlus ${updateStatus.version}...`, percent: 0 });
-  try {
-    await autoUpdater.downloadUpdate();
+    require('node:fs').mkdirSync(path.dirname(marker), { recursive: true });
+    require('node:fs').writeFileSync(marker, `${app.getVersion()}\n`);
   } catch (error) {
-    if (updateFeedSource !== 'mirror') {
-      setUpdateStatus({ state: 'error', message: updaterErrorMessage(error), percent: null });
-      return updateStatus;
-    }
-    const version = updateStatus.version;
-    setUpdateStatus({ state: 'checking', message: 'Update mirror unavailable. Trying GitHub...', percent: null });
-    try {
-      configureUpdateFeed('github');
-      await autoUpdater.checkForUpdates();
-      setUpdateStatus({ state: 'downloading', message: `Downloading WLSAPlus ${version}...`, version, percent: 0 });
-      await autoUpdater.downloadUpdate();
-    } catch (fallbackError) {
-      setUpdateStatus({ state: 'error', message: updaterErrorMessage(fallbackError), percent: null });
-    }
+    console.error('Could not write update marker:', error);
+    return;
   }
-  return updateStatus;
+  // The helper writes its result right after seeing the marker: show "Updated to …" in this session already.
+  if (!updateVerifyOnly) setTimeout(() => void macUpdater?.consumeLastResult().catch(() => {}), 8_000).unref();
 }
 
 async function cleanupBeforeUpdate() {
@@ -1009,29 +978,64 @@ async function cleanupBeforeUpdate() {
   quitAfterCleanup = true;
 }
 
-async function installAppUpdate() {
-  if (!updatesSupported || updateStatus.state !== 'ready') return updateStatus;
-  setUpdateStatus({ state: 'installing', message: 'Closing WLSAPlus and installing the update...', percent: 100 });
-  await cleanupBeforeUpdate();
-  autoUpdater.quitAndInstall(false, true);
-  return updateStatus;
+function runForUpdate(command, args) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { maxBuffer: 4 * 1024 * 1024, timeout: 10 * 60 * 1000 }, (error, stdout, stderr) => {
+      if (error) {
+        const detail = String(stderr || error.message || '').trim().split('\n').slice(-2).join(' ');
+        reject(new Error(`${path.basename(command)} failed: ${detail}`.slice(0, 240)));
+        return;
+      }
+      resolve(String(stdout));
+    });
+  });
+}
+
+/**
+ * Update downloads use Chromium's network stack first (same proxy settings, VPN and certificate store as the
+ * browser the user downloaded WLSAPlus with), then Node's fetch if Chromium cannot connect at all.
+ */
+const updateFetchLogged = new Set();
+async function updateFetch(url, init = {}) {
+  try {
+    const response = await net.fetch(url, { ...init, bypassCustomProtocolHandlers: true });
+    if (!updateFetchLogged.has('net')) { updateFetchLogged.add('net'); void macUpdater?.log('network: using Chromium net.fetch'); }
+    return response;
+  } catch (error) {
+    if (init.signal?.aborted) throw error;
+    void macUpdater?.log(`network: net.fetch failed for ${url}: ${error?.message || error}; retrying with Node fetch`);
+    return fetch(url, init);
+  }
 }
 
 function configureAppUpdater() {
-  if (!updatesSupported) return;
-  configureUpdateFeed('mirror');
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = false;
-  autoUpdater.on('update-available', (info) => setUpdateStatus({ state: 'available', message: `WLSAPlus ${info.version} is available.`, version: info.version, percent: null }));
-  autoUpdater.on('update-not-available', () => setUpdateStatus({ state: 'up-to-date', message: 'WLSAPlus is up to date.', version: null, percent: null }));
-  autoUpdater.on('download-progress', (progress) => {
-    const percent = Math.max(0, Math.min(100, Math.round(progress.percent)));
-    setUpdateStatus({ state: 'downloading', message: `Downloading update: ${percent}%`, percent });
+  macUpdater = createMacUpdater({
+    currentVersion: app.getVersion(),
+    userData: app.getPath('userData'),
+    exePath: app.getPath('exe'),
+    arch: process.arch === 'arm64' || app.runningUnderARM64Translation ? 'arm64' : 'x64',
+    systemVersion: typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : null,
+    supported: updatesSupported,
+    run: runForUpdate,
+    spawnDetached: (command, args) => spawn(command, args, { detached: true, stdio: 'ignore' }).unref(),
+    helperSource: path.join(__dirname, 'update-helper.sh'),
+    beforeInstall: cleanupBeforeUpdate,
+    quit: () => app.quit(),
+    onStatus: (status) => setUpdateStatus(status),
+    launchedByUpdater: Boolean(updateMarkerArg),
+    fetchImpl: updateFetch,
   });
-  autoUpdater.on('update-downloaded', (info) => setUpdateStatus({ state: 'ready', message: `WLSAPlus ${info.version} is ready to install.`, version: info.version, percent: 100 }));
-  autoUpdater.on('error', (error) => {
-    if (updateStatus.state !== 'installing') setUpdateStatus({ state: 'error', message: updaterErrorMessage(error), percent: null });
-  });
+  updateStatus = macUpdater.getStatus();
+  void macUpdater.start().catch((error) => console.error('Updater failed to start:', error));
+  if (updatesSupported) {
+    powerMonitor.on('shutdown', () => { systemShuttingDown = true; });
+    // E2E only (loopback feed): install as soon as the update is staged, as if "Restart" had been clicked.
+    if (macUpdater.feed.test && process.env.WLSAPLUS_UPDATE_TEST_AUTOINSTALL === '1') {
+      const poll = setInterval(() => {
+        if (macUpdater.getStatus().state === 'ready') { clearInterval(poll); void macUpdater.install(); }
+      }, 1000);
+    }
+  }
 }
 
 
@@ -1103,6 +1107,8 @@ function createMainWindow(route = '') {
   });
   mainWindow.webContents.on('did-finish-load', () => {
     console.log(`Renderer loaded: ${mainWindow.webContents.getURL()}`);
+    if (mainWindow.webContents.getURL().startsWith('data:')) return; // load-error page: not a healthy start
+    writeUpdateMarker();
   });
   console.log(`Loading UI from ${rendererIndexPath()} (packaged=${app.isPackaged})`);
   void loadRenderer(mainWindow, route).catch((error) => {
@@ -1239,10 +1245,16 @@ ipcMain.handle('vpn:test-latency', async (_event, nodes) => {
 ipcMain.handle('vpn:test-wechat', async () => testWeChatConnectivity());
 ipcMain.handle('vpn:disconnect', () => disconnectVpn());
 ipcMain.handle('vpn:restart-elevated', (_event, mode, sourceId, nodeName) => restartVpnElevated(normalizeVpnMode(mode), sourceId, nodeName));
-ipcMain.handle('updater:status', () => updateStatus);
-ipcMain.handle('updater:check', () => checkForAppUpdate());
-ipcMain.handle('updater:download', () => downloadAppUpdate());
-ipcMain.handle('updater:install', () => installAppUpdate());
+ipcMain.handle('updater:status', () => macUpdater?.getStatus() ?? updateStatus);
+ipcMain.handle('updater:check', () => macUpdater?.check() ?? updateStatus);
+// Downloads start automatically after a successful check; "download" is kept as an alias for older UI code.
+ipcMain.handle('updater:download', () => macUpdater?.check() ?? updateStatus);
+ipcMain.handle('updater:install', () => macUpdater?.install() ?? updateStatus);
+ipcMain.handle('updater:reveal-log', async () => {
+  const file = path.join(app.getPath('userData'), 'updates', 'update.log');
+  try { await fs.access(file); shell.showItemInFolder(file); return true; } catch { return false; }
+});
+ipcMain.handle('updater:set-channel', (_event, channel) => macUpdater?.setChannel(channel === 'beta' ? 'beta' : 'stable') ?? updateStatus);
 ipcMain.handle('translator:translate', (_event, text, source, target) => translateText(text, source, target));
 ipcMain.handle('translator:capture-region', () => Promise.reject(new Error('Screen translation is not available on macOS.')));
 
@@ -1297,6 +1309,13 @@ if (hasSingleInstanceLock) {
 
 app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return;
+  if (updateVerifyOnly) {
+    // Silent post-install check (update installed on quit): prove the new version starts, then exit.
+    app.dock?.hide();
+    writeUpdateMarker();
+    app.exit(0);
+    return;
+  }
   if (prepareUpdateMode) {
     await cleanupBeforeUpdate();
     app.quit();
@@ -1314,10 +1333,6 @@ app.whenReady().then(async () => {
   }
   if (!isAutostart || vpnAutoConnectMode) showMainWindow(vpnAutoConnectMode ? 'tools/vpn' : '');
   if (vpnAutoConnectMode) void connectVpn(vpnAutoConnectMode, vpnAutoConnectSource);
-  if (updatesSupported && !vpnAutoConnectMode) {
-    const updateTimer = setTimeout(() => void checkForAppUpdate(), 8_000);
-    updateTimer.unref();
-  }
   app.on('activate', showMainWindow);
 });
 app.on('before-quit', (event) => {
@@ -1328,6 +1343,12 @@ app.on('before-quit', (event) => {
     void disconnectVpn().finally(() => { quitAfterCleanup = true; app.quit(); });
   }
 });
-app.on('will-quit', () => { classReminderScheduler?.stop(); stopMacCoreWatchdog(); });
+app.on('will-quit', () => {
+  classReminderScheduler?.stop();
+  stopMacCoreWatchdog();
+  macUpdater?.stop();
+  // A downloaded + verified update is installed after the app exits (not during a system shutdown/restart).
+  if (!updateInstallRequested && !systemShuttingDown && !updateVerifyOnly) macUpdater?.installOnQuit();
+});
 // macOS: closing the last window keeps the app (and the class reminder scheduler) running.
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

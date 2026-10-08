@@ -1,10 +1,16 @@
 name: Build and release
 
+# Builds the macOS release assets (per-chip self-update zips, universal zip + DMG, signed update-manifest.json).
+# Safety rules (normal users must never get an untested build):
+#   - a version with a prerelease part (1.1.0-beta.1) is published as a GitHub PRERELEASE and its manifest is
+#     copied to the rolling "channel-beta" prerelease. Prereleases never become /releases/latest, so the official
+#     site's /api/latest and /download/latest (stable) do not move.
+#   - a plain version (1.1.0) is only created as a DRAFT release; a human publishes it after testing.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release version (for example, 1.2.0)
+        description: Release version (for example 1.1.0-beta.2 or 1.1.0)
         required: true
         type: string
   push:
@@ -13,105 +19,100 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.release.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
-      publish: ${{ steps.release.outputs.publish }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
       - id: release
         name: Resolve and validate version
         shell: bash
         env:
           INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            version="${INPUT_VERSION#v}"
-            publish=true
-          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
-            publish=true
-          else
-            version="$(node -p "require('./package.json').version")"
-            publish=false
-          fi
-
-          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
-          if [[ ! "$version" =~ $semver ]]; then
-            echo "Invalid version '$version'. Use a semantic version such as 1.2.0 or 1.2.0-beta.1." >&2
-            exit 1
-          fi
-
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=v$version" >> "$GITHUB_OUTPUT"
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
-          echo "Building WLSAPlus $version (publish: $publish)"
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then version="${INPUT_VERSION#v}"; else version="${GITHUB_REF_NAME#v}"; fi
+          semver='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          [[ "$version" =~ $semver ]] || { echo "Invalid version '$version'" >&2; exit 1; }
+          prerelease=false; [[ "$version" == *-* ]] && prerelease=true
+          { echo "version=$version"; echo "tag=v$version"; echo "prerelease=$prerelease"; } >> "$GITHUB_OUTPUT"
+          echo "WLSAPlus $version (prerelease: $prerelease)"
 
   macos:
     needs: prepare
-    runs-on: macos-latest
+    runs-on: macos-14
+    timeout-minutes: 60
     env:
       WLSAPLUS_VERSION: ${{ needs.prepare.outputs.version }}
-      APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_IDENTITY: ${{ secrets.APPLE_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run version:apply
-      - name: Import Apple signing certificate
-        if: env.APPLE_CERTIFICATE_BASE64 != ''
-        run: |
-          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security create-keychain -p actions "$RUNNER_TEMP/build.keychain"
-          security default-keychain -s "$RUNNER_TEMP/build.keychain"
-          security unlock-keychain -p actions "$RUNNER_TEMP/build.keychain"
-          security import "$RUNNER_TEMP/certificate.p12" -k "$RUNNER_TEMP/build.keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k actions "$RUNNER_TEMP/build.keychain"
-      # electron:make = electron-forge make --platform darwin --arch universal (Intel x64 + Apple arm64)
-      - run: npm run electron:make
-      - name: Verify universal arch
-        run: |
-          set -euo pipefail
-          app_path="$(find out -type d -path '*darwin-universal*' -name 'WLSAPlus.app' -prune | head -n 1)"
-          test -n "$app_path"
-          archs="$(lipo -archs "$app_path/Contents/MacOS/WLSAPlus")"
-          echo "Architectures: $archs"
-          echo "$archs" | grep -qw x86_64 || { echo "missing x86_64 slice (not universal)" >&2; exit 1; }
-          echo "$archs" | grep -qw arm64 || { echo "missing arm64 slice (not universal)" >&2; exit 1; }
-      - name: Stage macOS packages
-        run: |
-          mkdir -p release-assets
-          dmg_path="$(find out/make -type f -name '*.dmg' | head -n 1)"
-          zip_path="$(find out/make -type f -name '*.zip' | head -n 1)"
-          test -n "$dmg_path" && cp "$dmg_path" "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-macOS-universal.dmg"
-          test -n "$zip_path" && cp "$zip_path" "release-assets/WLSAPlus-${WLSAPLUS_VERSION}-macOS-universal.zip"
-          test -n "$dmg_path$zip_path"
+      - run: node --test electron/*.test.cjs
+      - run: npm run vpn:core && npm run build:web
+      - name: Import self-signed code-signing identity
+        env:
+          WLSAPLUS_CODESIGN_P12_BASE64: ${{ secrets.WLSAPLUS_CODESIGN_P12_BASE64 }}
+          WLSAPLUS_CODESIGN_P12_PASSWORD: ${{ secrets.WLSAPLUS_CODESIGN_P12_PASSWORD }}
+        run: bash scripts/ci/import-codesign-identity.sh
+      - name: Package, sign, zip, DMG, signed manifest
+        env:
+          WLSAPLUS_UPDATE_ED25519_KEY: ${{ secrets.WLSAPLUS_UPDATE_ED25519_KEY }}
+        run: bash scripts/ci/build-mac-release.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: macos
+          name: macos-release
           path: release-assets/*
+          if-no-files-found: error
 
   release:
-    if: needs.prepare.outputs.publish == 'true'
     needs: [prepare, macos]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
     steps:
       - uses: actions/download-artifact@v4
-        with: { path: artifacts, merge-multiple: true }
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.prepare.outputs.tag }}
-          name: WLSAPlus ${{ needs.prepare.outputs.version }} (macOS Universal · Intel & Apple)
-          target_commitish: ${{ github.sha }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: artifacts/*
+        with: { name: macos-release, path: artifacts }
+      - name: Create release (prerelease or draft, never "latest")
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -l artifacts
+          notes="WLSAPlus $VERSION for macOS 13+ (Intel and Apple chips).
+          - WLSAPlus-$VERSION-macOS-universal.dmg / .zip: manual install
+          - WLSAPlus-$VERSION-mac-arm64.zip / -mac-x64.zip + update-manifest.json: used by the in-app updater
+          Signed with the WLSAPlus self-signed certificate (not notarized)."
+          if [[ "$PRERELEASE" == true ]]; then
+            flags=(--prerelease --latest=false --title "WLSAPlus $VERSION (test build)")
+          else
+            flags=(--draft --latest=false --title "WLSAPlus $VERSION")
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifacts/* --clobber
+          else
+            gh release create "$TAG" artifacts/* --target "$GITHUB_SHA" --notes "$notes" "${flags[@]}"
+          fi
+      - name: Point the beta channel at this build
+        if: needs.prepare.outputs.prerelease == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view channel-beta >/dev/null 2>&1; then
+            gh release create channel-beta --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Beta update channel (test builds only)" \
+              --notes "Holds only update-manifest.json of the newest test build. Apps with the test channel switched on read it; nobody else does."
+          fi
+          gh release upload channel-beta artifacts/update-manifest.json --clobber
+          gh release view channel-beta --json isPrerelease,assets --jq '{isPrerelease, assets: [.assets[].name]}'
