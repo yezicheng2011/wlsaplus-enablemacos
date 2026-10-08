@@ -99,10 +99,7 @@ PROJECT_DIR=""
 if [ -f "$SCRIPT_DIR/../package.json" ] && [ -f "$SCRIPT_DIR/../electron/main.cjs" ]; then
   PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   echo "    使用仓库内路径（推荐）：$PROJECT_DIR"
-# 2) 脚本与解压出的项目文件夹同级（最终包 wlsaplusmac.zip）
-elif [ -d "$SCRIPT_DIR/wlsaplus1.0.9macos" ] && [ -f "$SCRIPT_DIR/wlsaplus1.0.9macos/package.json" ]; then
-  PROJECT_DIR="$SCRIPT_DIR/wlsaplus1.0.9macos"
-  echo "    使用与脚本同级的项目文件夹：$PROJECT_DIR"
+# 2) 脚本与解压出的项目文件夹同级
 elif [ -d "$SCRIPT_DIR/wlsaplus-enablemacos" ] && [ -f "$SCRIPT_DIR/wlsaplus-enablemacos/package.json" ]; then
   PROJECT_DIR="$SCRIPT_DIR/wlsaplus-enablemacos"
   echo "    使用与脚本同级的项目文件夹：$PROJECT_DIR"
@@ -117,9 +114,8 @@ if [ -z "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR" ]; then
   echo ""
   echo "❌ 错误：找不到项目目录"
   echo "   请任选其一："
-  echo "   A) 解压 wlsaplusmac.zip 后，双击与 wlsaplus1.0.9macos 同级的 构建wlsaplus.command"
-  echo "   B) git clone 后双击仓库内 release-kit/构建wlsaplus.command"
-  echo "   C) 把本脚本与 wlsaplus1.0.9macos（或 wlsaplus-enablemacos）放在同一目录"
+  echo "   A) git clone 后双击仓库内 release-kit/构建wlsaplus.command"
+  echo "   B) 把本脚本与 wlsaplus-enablemacos 文件夹放在同一目录"
   read -n 1 -s -r -p "按任意键关闭..."
   exit 1
 fi
