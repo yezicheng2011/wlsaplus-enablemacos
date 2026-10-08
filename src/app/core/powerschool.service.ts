@@ -8,7 +8,7 @@ import {
   parsePowerSchoolProgress,
   parsePowerSchoolSchedule,
 } from './powerschool-parser';
-import { PlatformService, WEB_POWERSCHOOL_ORIGIN } from './platform.service';
+import { PlatformService } from './platform.service';
 
 @Injectable({ providedIn: 'root' })
 export class PowerSchoolService {
@@ -70,11 +70,9 @@ export class PowerSchoolService {
   async disconnect(): Promise<void> {
     const credentials = await this.vault.get();
     try {
-      if (credentials || this.platform.info.kind === 'web') {
-        await this.platform.clearSession(credentials?.schoolUrl ?? WEB_POWERSCHOOL_ORIGIN);
-      }
+      if (credentials) await this.platform.clearSession(credentials.schoolUrl);
     } catch {
-      // Local data must still be removable while the remote gateway is unavailable.
+      // Local data must still be removable if the PowerSchool session cannot be cleared.
     }
     await this.clearForumSession();
     await this.vault.clear();

@@ -39,9 +39,6 @@ WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, 
 | 🧰 **工具 Tools** | 校园地图、翻译（含 OCR）、待办 | Campus map, translator (with OCR), to-dos |
 | 🎨 **外观 Appearance** | 跟随系统 / 浅色 / 深色，多种主题色 | System / light / dark, multiple accent colours |
 
-PowerSchool 同步只在桌面应用内可用（浏览器版受学校 CORS 限制）。
-PowerSchool sync works in the desktop app only (the browser build is blocked by the school's CORS policy).
-
 ## 安装 · Install
 
 **系统要求 / Requirements:** macOS 13 或更新；**universal（通用）构建**，同一个 WLSAPlus.app 同时支持 **Intel（x86_64）与 Apple 芯片（arm64）** Mac。
@@ -96,14 +93,14 @@ The macOS VPN core is a **universal mihomo (Clash Meta) binary** (arm64 + x86_64
 ```bash
 # Node.js 22（见 .nvmrc）· Node.js 22 (see .nvmrc)
 npm install
-npm start                # 浏览器 UI 开发 · UI dev server at http://localhost:4200
+npm start                # 界面开发服务器 · renderer dev server at http://localhost:4200
 npm test                 # 单元测试 · unit tests (Angular + Electron main)
-npm run build:web        # 生产前端 · production web build
+npm run build:web        # 生产界面构建（打包前必需）· production renderer build (needed before packaging)
 npm run electron:dev     # 开发服务器 + Electron · dev server + Electron
 npm run electron:make    # macOS universal DMG / ZIP（需在 macOS 上）· build universal DMG / ZIP (on macOS)
 ```
 
-- 可安装包在 `out/make`；`dist/` 只是前端产物。· Installers land in `out/make`; `dist/` is only the web build.
+- 可安装包在 `out/make`；`dist/` 只是界面（renderer）构建产物。· Installers land in `out/make`; `dist/` is only the renderer build.
 - asar 只打包主进程运行时依赖与 `dist/` UI（见 `forge.config.cjs` 的 `RUNTIME_NODE_MODULES`）。
   The asar ships only main-process runtime deps plus the `dist/` UI (see `RUNTIME_NODE_MODULES` in `forge.config.cjs`).
 - `package.json` 的 `overrides` 把 `@electron/node-gyp` 固定为 npm 上的 `10.2.0-electron.1`：否则 `@electron/rebuild` 会从 GitHub 拉取 node-gyp（国内常失败），请勿删除。

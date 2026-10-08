@@ -1,4 +1,5 @@
 import type {
+  AppNotice,
   ClassReminderSyncPayload,
   PlatformHttpResponse,
   PowerSchoolCredentials,
@@ -65,6 +66,10 @@ declare global {
       };
       notifications: {
         showClassReminder(options: { title: string; body: string; sessionId: string }): Promise<boolean>;
+      };
+      /** In-app notice from the official site, fetched by the main process (null when unavailable). */
+      notice: {
+        get(): Promise<AppNotice | null>;
       };
       /** Class reminders are scheduled in the main process; the renderer only syncs schedule + switch. */
       reminders: {

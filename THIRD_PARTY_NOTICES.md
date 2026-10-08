@@ -28,9 +28,9 @@ These are installed via npm and are **not** copied into this repository as sourc
 
 For a machine-readable inventory after `npm install`, you can run a license checker such as `npx license-checker --summary` (optional; not required to build).
 
-## Cloudflare Workers (optional deploy)
+## vpn-subscription-worker (optional deploy)
 
-Directories such as `powerschool-worker/` and `vpn-subscription-worker/` are separate deployable workers. Treat them as part of this repository under the same GPL-3.0 terms unless a file in that directory says otherwise. Do not commit upstream VPN subscription secrets into the client; keep them in Worker secrets.
+`vpn-subscription-worker/` is a separately deployable worker. Treat it as part of this repository under the same GPL-3.0 terms unless a file in that directory says otherwise. Do not commit upstream VPN subscription secrets into the client; keep them in Worker secrets.
 
 ## Attribution note
 

@@ -1,27 +1,27 @@
 import { Injectable } from '@angular/core';
 import type { PowerSchoolCredentials } from './models';
 
-const KEY = 'wlsaplus:credentials';
-
+/**
+ * PowerSchool credentials live only in the main process (Electron safeStorage / macOS Keychain).
+ * Without the desktop bridge nothing is stored — never fall back to plain localStorage.
+ */
 @Injectable({ providedIn: 'root' })
 export class CredentialVault {
   async get(): Promise<PowerSchoolCredentials | null> {
-    if (window.wlsaplus) return window.wlsaplus.credentials.get();
-    try {
-      const raw = localStorage.getItem(KEY);
-      return raw ? (JSON.parse(raw) as PowerSchoolCredentials) : null;
-    } catch {
-      return null;
-    }
+    return this.bridge().get();
   }
 
   async set(value: PowerSchoolCredentials): Promise<void> {
-    if (window.wlsaplus) return window.wlsaplus.credentials.set(value);
-    localStorage.setItem(KEY, JSON.stringify(value));
+    return this.bridge().set(value);
   }
 
   async clear(): Promise<void> {
-    if (window.wlsaplus) return window.wlsaplus.credentials.clear();
-    localStorage.removeItem(KEY);
+    return this.bridge().clear();
+  }
+
+  private bridge(): NonNullable<Window['wlsaplus']>['credentials'] {
+    const credentials = window.wlsaplus?.credentials;
+    if (!credentials) throw new Error('Secure credential storage is unavailable outside the WLSAPlus desktop app.');
+    return credentials;
   }
 }

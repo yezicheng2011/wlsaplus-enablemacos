@@ -136,11 +136,4 @@ describe('ForumPage', () => {
     const fixture = await render();
     expect(el(fixture).querySelector('.forum-sso-issue')).toBeNull();
   });
-
-  it('shows an open-in-browser link on the web build', async () => {
-    const fixture = await render();
-    const link = el(fixture).querySelector('a[target="_blank"]');
-    expect(el(fixture).querySelector('webview')).toBeNull();
-    expect(link?.getAttribute('href')).toBe(FORUM_URL);
-  });
 });

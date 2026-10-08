@@ -24,6 +24,7 @@ const { resolveForumEntryUrl, getLastForumSsoStatus } = require('./forum-sso.cjs
 const { applyForumTheme, emulateForumColorScheme, validateForumTheme } = require('./forum-theme.cjs');
 const { getVpnSource, subscriptionUrl } = require('./vpn-sources.cjs');
 const { createClassReminderScheduler } = require('./class-reminders.cjs');
+const { fetchAppNotice } = require('./app-notice.cjs');
 const {
   MAC_CLASH_CONTROLLER_PORT,
   newControllerSecret,
@@ -1276,6 +1277,7 @@ function classReminders() {
   return classReminderScheduler;
 }
 
+ipcMain.handle('notice:get', () => fetchAppNotice());
 ipcMain.handle('notifications:show-class-reminder', (_event, options) => showClassReminderNotification(options));
 ipcMain.handle('reminders:sync', async (_event, payload) => {
   const scheduler = classReminders();

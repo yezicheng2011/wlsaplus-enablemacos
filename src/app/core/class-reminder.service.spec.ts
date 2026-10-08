@@ -2,8 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClassReminderService, LEGACY_NOTIFIED_KEY } from './class-reminder.service';
 import { LocalStore } from './local-store.service';
-import { PlatformService } from './platform.service';
-import type { ClassReminderSyncPayload, PlatformInfo, ScheduleSnapshot } from './models';
+import type { ClassReminderSyncPayload, ScheduleSnapshot } from './models';
 
 const schedule: ScheduleSnapshot = {
   syncedAt: '2026-10-08T00:00:00.000Z',
@@ -13,12 +12,10 @@ const schedule: ScheduleSnapshot = {
   courses: [],
 };
 
-function setup(os: PlatformInfo['os'] = 'macos', kind: PlatformInfo['kind'] = 'electron') {
+function setup(withBridge = true) {
   const sync = vi.fn<(payload: ClassReminderSyncPayload) => Promise<boolean>>().mockResolvedValue(true);
-  (window as unknown as { wlsaplus: unknown }).wlsaplus = { reminders: { sync } };
-  TestBed.configureTestingModule({
-    providers: [{ provide: PlatformService, useValue: { info: { kind, os } } }],
-  });
+  if (withBridge) (window as unknown as { wlsaplus: unknown }).wlsaplus = { reminders: { sync } };
+  TestBed.configureTestingModule({});
   const store = TestBed.inject(LocalStore);
   const service = TestBed.inject(ClassReminderService);
   TestBed.tick();
@@ -71,11 +68,8 @@ describe('ClassReminderService (main-process scheduler sync)', () => {
     expect(store.settings().classRemindersEnabled).toBe(false);
   });
 
-  it('stays off outside the macOS Electron app', () => {
-    const { sync } = setup('windows');
+  it('stays idle when the desktop bridge is missing', () => {
+    const { sync } = setup(false);
     expect(sync).not.toHaveBeenCalled();
-    TestBed.resetTestingModule();
-    const web = setup('web', 'web');
-    expect(web.sync).not.toHaveBeenCalled();
   });
 });

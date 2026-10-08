@@ -1,6 +1,5 @@
 import { Component, DestroyRef, NO_ERRORS_SCHEMA, ElementRef, OnInit, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { MatButtonModule } from '@angular/material/button';
-import { PlatformService } from '../core/platform.service';
 import { LocalStore } from '../core/local-store.service';
 import {
   FORUM_BRAND, FORUM_SSO_REPORTABLE_CODES, FORUM_URL, ForumTheme,
@@ -28,7 +27,7 @@ export const FORUM_SSO_NOTICE_MS = 8000;
   template: `
     <section class="forum" [attr.aria-label]="brand.name">
       @if (!desktop) {
-        <div class="empty-state"><div><span class="material-symbols-rounded big">{{ brand.icon }}</span><p>The forum opens in your browser on the web version.</p><a mat-flat-button [href]="forumUrl" target="_blank" rel="noopener">Open {{ brand.name }}</a></div></div>
+        <div class="empty-state"><div><span class="material-symbols-rounded big">cloud_off</span><p>{{ brand.name }} is unavailable. Restart WLSAPlus and try again.</p></div></div>
       } @else if (failed()) {
         <div class="empty-state"><div><span class="material-symbols-rounded big">cloud_off</span><p>{{ brand.name }} could not be reached. {{ failed() }}</p><button mat-flat-button type="button" (click)="retry()">Try again</button></div></div>
       } @else if (src()) {
@@ -63,12 +62,10 @@ export const FORUM_SSO_NOTICE_MS = 8000;
   `,
 })
 export class ForumPage implements OnInit {
-  private readonly platform = inject(PlatformService);
   private readonly store = inject(LocalStore);
   private readonly view = viewChild<ElementRef<ForumWebview>>('view');
   readonly brand = FORUM_BRAND;
-  readonly forumUrl = FORUM_URL;
-  readonly desktop = this.platform.info.kind === 'electron' && !!window.wlsaplus?.forum;
+  readonly desktop = !!window.wlsaplus?.forum;
   readonly src = signal<string | null>(null);
   readonly loading = signal(false);
   readonly failed = signal<string | null>(null);

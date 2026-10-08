@@ -52,7 +52,6 @@ const IGNORE_PATHS = [
   /^\/src($|\/)/,
   /^\/public($|\/)/,
   /^\/scripts($|\/)/,
-  /^\/powerschool-worker($|\/)/,
   /^\/vpn-subscription-worker($|\/)/,
   /^\/release-kit($|\/)/,
   // build/ holds packaging inputs. Only build/icon.png is read at runtime (window icon);

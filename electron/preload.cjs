@@ -52,6 +52,9 @@ contextBridge.exposeInMainWorld('wlsaplus', {
   notifications: {
     showClassReminder: (options) => ipcRenderer.invoke('notifications:show-class-reminder', options),
   },
+  notice: {
+    get: () => ipcRenderer.invoke('notice:get'),
+  },
   reminders: {
     sync: (payload) => ipcRenderer.invoke('reminders:sync', payload),
   },

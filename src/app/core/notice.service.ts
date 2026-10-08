@@ -1,12 +1,11 @@
 import { Injectable, signal } from '@angular/core';
+import type { AppNotice } from './models';
 
-export interface AppNotice {
-  id: string;
-  title: string;
-  content: string;
-  type?: 'info' | 'success' | 'warning';
-}
+export type { AppNotice } from './models';
 
+export const NOTICE_SEEN_KEY = 'wlsaplus:notice-seen';
+
+/** Shows the notice published on the official site (fetched by the main process, see electron/app-notice.cjs). */
 @Injectable({ providedIn: 'root' })
 export class NoticeService {
   readonly notice = signal<AppNotice | null>(null);
@@ -19,40 +18,21 @@ export class NoticeService {
   dismiss(): void {
     const notice = this.notice();
     if (!notice) return;
-    localStorage.setItem('wlsaplus:notice-seen', notice.id);
+    localStorage.setItem(NOTICE_SEEN_KEY, notice.id);
     this.dismissed.set(true);
   }
 
   private async load(): Promise<void> {
-    const cacheBust = Date.now();
-    const sources = [
-      `https://wlsap.02studio.xyz/notice.json?ts=${cacheBust}`,
-      `/notice.json?ts=${cacheBust}`,
-    ];
-    for (const url of sources) {
-      try {
-        const controller = new AbortController();
-        const timer = window.setTimeout(() => controller.abort(), 8_000);
-        let response: Response;
-        try {
-          response = await fetch(url, {
-            cache: 'no-store',
-            signal: controller.signal,
-            headers: { Accept: 'application/json', 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-          });
-        } finally {
-          window.clearTimeout(timer);
-        }
-        if (!response.ok) continue;
-        const value = await response.json() as Partial<AppNotice>;
-        if (typeof value.id !== 'string' || !value.id || typeof value.title !== 'string' || !value.title
-          || typeof value.content !== 'string' || !value.content) continue;
-        this.notice.set({ id: value.id, title: value.title, content: value.content, type: value.type });
-        this.dismissed.set(localStorage.getItem('wlsaplus:notice-seen') === value.id);
-        return;
-      } catch {
-        // Try the bundled fallback if the shared front page is unavailable.
-      }
+    const bridge = window.wlsaplus?.notice;
+    if (!bridge) return;
+    try {
+      const value = await bridge.get();
+      if (!value || typeof value.id !== 'string' || !value.id || typeof value.title !== 'string' || !value.title
+        || typeof value.content !== 'string' || !value.content) return;
+      this.notice.set({ id: value.id, title: value.title, content: value.content, type: value.type });
+      this.dismissed.set(localStorage.getItem(NOTICE_SEEN_KEY) === value.id);
+    } catch {
+      // No notice when offline or the site is unavailable.
     }
   }
 }

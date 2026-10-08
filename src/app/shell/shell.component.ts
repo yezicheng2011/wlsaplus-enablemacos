@@ -121,11 +121,7 @@ export class ShellComponent implements OnInit {
       return;
     }
     if (this.platform.info.supportsPowerSchool) {
-      const refreshed = await this.refreshSchedule();
-      if (!refreshed && !this.store.hasSchedule() && this.platform.info.kind === 'web') {
-        await this.router.navigateByUrl('/connect');
-        return;
-      }
+      await this.refreshSchedule();
       window.setInterval(() => void this.refreshSchedule(), 15 * 60 * 1000);
     }
   }

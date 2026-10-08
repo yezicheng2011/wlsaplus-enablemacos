@@ -9,7 +9,7 @@ const NODE_KEY = 'wlsaplus:vpn-node';
 @Injectable({ providedIn: 'root' })
 export class VpnService {
   private readonly platform = inject(PlatformService);
-  readonly status = signal<VpnStatus>(this.platform.info.supportsVpn ? IDLE : { ...IDLE, state: 'unavailable', message: 'Available in the desktop app.' });
+  readonly status = signal<VpnStatus>(IDLE);
   readonly mode = signal<VpnConnectionMode>('full-tunnel');
   readonly sources = VPN_SOURCES;
   readonly sourceId = signal<string>(this.readSource());

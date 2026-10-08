@@ -1,6 +1,5 @@
 import { Injectable, effect, inject } from '@angular/core';
 import { LocalStore } from './local-store.service';
-import { PlatformService } from './platform.service';
 import type { ClassReminderSession, ClassReminderSyncPayload } from './models';
 
 /** Minutes before class start when the reminder fires (scheduled in electron/class-reminders.cjs). */
@@ -17,12 +16,11 @@ export const LEGACY_NOTIFIED_KEY = 'wlsaplus:class-reminders-notified';
 @Injectable({ providedIn: 'root' })
 export class ClassReminderService {
   private readonly store = inject(LocalStore);
-  private readonly platform = inject(PlatformService);
   private lastSynced: string | null = null;
   private legacyNotified: string[] | null = this.readLegacyNotified();
 
   constructor() {
-    if (this.platform.info.kind !== 'electron' || this.platform.info.os !== 'macos') return;
+    if (!window.wlsaplus?.reminders) return;
     effect(() => {
       const payload: ClassReminderSyncPayload = {
         enabled: this.store.settings().classRemindersEnabled,

@@ -35,9 +35,7 @@ import { BUILD_VERSION } from '../build-info';
       <section><h2 class="section-title">Schedule</h2><div class="settings-list surface">
         <div class="setting"><div><strong>PowerSchool</strong><span>@if (store.schedule().syncedAt) { Last updated {{ store.schedule().syncedAt | date:'MMM d, HH:mm' }} } @else { Not connected }</span></div><button mat-stroked-button (click)="sync()" [disabled]="syncing() || !platform.info.supportsPowerSchool"><span class="material-symbols-rounded">sync</span>{{ syncing() ? 'Syncing' : 'Sync now' }}</button></div>
         <div class="setting"><div><strong>Account</strong><span>Change your PowerSchool login.</span></div><button mat-button (click)="changeAccount()">Change account</button></div>
-        @if (platform.info.kind === 'electron' && platform.info.os === 'macos') {
-          <div class="setting"><div><strong>Class reminders</strong><span>Notify {{ leadMinutes }} minutes before each class starts (macOS Notification Center).</span></div><mat-slide-toggle [checked]="store.settings().classRemindersEnabled" (change)="setClassReminders($event.checked)"></mat-slide-toggle></div>
-        }
+        <div class="setting"><div><strong>Class reminders</strong><span>Notify {{ leadMinutes }} minutes before each class starts (macOS Notification Center).</span></div><mat-slide-toggle [checked]="store.settings().classRemindersEnabled" (change)="setClassReminders($event.checked)"></mat-slide-toggle></div>
       </div></section>
 
       <section><h2 class="section-title">Tuning</h2><div class="settings-list surface">

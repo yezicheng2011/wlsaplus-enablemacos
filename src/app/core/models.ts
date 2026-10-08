@@ -27,6 +27,14 @@ export interface ClassSession {
   endsAt: string;
 }
 
+/** In-app notice served at https://wlsaplus.spacehubxyz.hk/notice.json. */
+export interface AppNotice {
+  id: string;
+  title: string;
+  content: string;
+  type?: 'info' | 'success' | 'warning';
+}
+
 /** Minimal session fields the main process needs to schedule a class reminder. */
 export type ClassReminderSession = Pick<ClassSession, 'id' | 'startsAt' | 'courseName' | 'room' | 'teacher'>;
 
@@ -184,8 +192,8 @@ export interface AppSettings {
 }
 
 export interface PlatformInfo {
-  kind: 'web' | 'android' | 'electron';
-  os: 'web' | 'android' | 'windows' | 'macos' | 'linux';
+  kind: 'electron';
+  os: 'macos';
   supportsPowerSchool: boolean;
   supportsDesktopCards: boolean;
   supportsVpn: boolean;

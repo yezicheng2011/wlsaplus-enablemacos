@@ -67,7 +67,6 @@ import { VpnService } from '../core/vpn.service';
       }
 
       <div class="facts"><span><span class="material-symbols-rounded">shield</span>Encrypted connection</span><span><span class="material-symbols-rounded">public</span>Selectable nodes</span><span><span class="material-symbols-rounded">chat</span>WeChat probe</span></div>
-      @if (platform.info.kind === 'web') { <p class="platform-note">Install the macOS app to use VPN.</p> }
     </div>
   `,
   styles: `
