@@ -51,13 +51,16 @@ await evaluate(`(() => {
   u.onStatus((s) => window.__probe.push({ t: Date.now(), via: 'event', s }));
   return 'hooked';
 })()`).then((r) => log('hook', r));
-await evaluate(`location.hash = '#/settings'; 1`);
-await sleep(2000);
+// Without a saved schedule the shell redirects to /connect; offline mode lets Settings open like for a signed-in user.
+await evaluate(`sessionStorage.setItem('wlsaplus:offline', 'true'); location.hash = '#/settings'; 1`);
+for (let i = 0; i < 20 && !/settings/u.test(await evaluate('location.hash')); i += 1) { await sleep(500); await evaluate(`location.hash = '#/settings'; 1`); }
+await sleep(1000);
+log('route', await evaluate('location.hash'));
 const rowExpr = `(() => { const s=[...document.querySelectorAll('.setting')].find(e=>/^\\s*WLSAPlus \\d/.test(e.querySelector('strong')?.textContent||'')); if(!s) return 'NO-UPDATES-ROW'; const span=s.querySelector(':scope > div > span'); const b=s.querySelector(':scope > button'); return JSON.stringify({ text: span ? span.textContent : null, button: b ? b.textContent.trim() : null, disabled: b ? b.disabled : null }); })()`;
 log('row before click', await evaluate(rowExpr));
 log('status() IPC', JSON.stringify(await evaluate('window.wlsaplus.updater.status()')));
 // Click like the user (after the 8 s automatic check has had a chance to start, as on a real Mac).
-await sleep(Number(process.env.PROBE_CLICK_DELAY_MS || 1000));
+await sleep(Number(process.env.PROBE_CLICK_DELAY_MS || 0));
 log('click', await evaluate(`(() => { const s=[...document.querySelectorAll('.setting')].find(e=>/^\\s*WLSAPlus \\d/.test(e.querySelector('strong')?.textContent||'')); const b=s && s.querySelector(':scope > button'); if(!b) return 'no button'; b.click(); return 'clicked disabled=' + b.disabled; })()`));
 let prev = ''; let seen = 0;
 const end = Date.now() + Number(seconds) * 1000;
