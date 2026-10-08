@@ -88,7 +88,7 @@ import { VpnService } from '../core/vpn.service';
 })
 export class VpnPage {
   readonly vpn = inject(VpnService); readonly platform = inject(PlatformService); readonly status = this.vpn.status;
-  readonly guideUrl = 'https://wlsaplus.02studio.xyz/blog/use-wechat-on-restricted-networks/';
+  readonly guideUrl = 'https://wlsaplus.spacehubxyz.hk/guide/wechat/';
   readonly busy = computed(() => this.status().state === 'connecting' || this.status().state === 'disconnecting');
   readonly statusLabel = computed(() => ({
     connected: 'Connected',

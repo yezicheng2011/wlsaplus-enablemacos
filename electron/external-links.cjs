@@ -1,7 +1,7 @@
 const { isForumUrl } = require('./forum-config.cjs');
 
 const EXTERNAL_HELP_URLS = new Set([
-  'https://wlsaplus.02studio.xyz/blog/use-wechat-on-restricted-networks/',
+  'https://wlsaplus.spacehubxyz.hk/guide/wechat/',
 ]);
 
 function validateExternalHelpUrl(value) {
