@@ -11,6 +11,7 @@ on:
       tag: { description: 'Release tag to install (for example v1.1.0-beta.2)', required: true }
       channel: { description: 'Pre-set channel in updates/settings.json (beta, stable or none)', required: false, default: 'beta' }
       seconds: { description: 'How long to watch after the click', required: false, default: '420' }
+      install: { description: 'Click Restart to update once ready (1) or only check (0)', required: false, default: '1' }
 
 permissions:
   contents: read
@@ -24,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Install the published DMG into /Applications
-        env: { TAG: "${{ inputs.tag || 'v1.1.0-beta.2' }}" }
+        env: { TAG: "${{ inputs.tag || 'v1.1.0-beta.3' }}" }
         run: |
           set -euo pipefail
           v="${TAG#v}"
@@ -40,6 +41,7 @@ jobs:
           d="$HOME/Library/Application Support/WLSAPlus/updates"; mkdir -p "$d"
           if [ "$CHANNEL" != none ]; then printf '{"channel":"%s","failedVersions":[]}\n' "$CHANNEL" > "$d/settings.json"; fi
       - name: Probe
+        env: { PROBE_INSTALL: "${{ inputs.install || '1' }}" }
         run: node scripts/ci/mac-live-check-probe.mjs /Applications/WLSAPlus.app "${{ inputs.seconds || '420' }}" e2e-logs
       - uses: actions/upload-artifact@v4
         if: always()

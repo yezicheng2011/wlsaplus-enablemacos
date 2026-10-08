@@ -3,7 +3,7 @@
 // WLSAPlus.app with Chromium remote debugging, opens Settings, clicks "Check now" like a user and records every
 // change of the Updates row (message text, button) plus the main-process log. Used to reproduce bug reports.
 // Usage: node scripts/ci/mac-live-check-probe.mjs /Applications/WLSAPlus.app <seconds> <logdir>
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -40,7 +40,9 @@ ws.addEventListener('message', (event) => {
   if (msg.method === 'Runtime.consoleAPICalled') log('RENDERER console', msg.params.type, msg.params.args.map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 400));
   if (msg.method === 'Runtime.exceptionThrown') log('RENDERER exception', JSON.stringify(msg.params.exceptionDetails).slice(0, 600));
 });
-const send = (method, params = {}) => new Promise((resolve) => { id += 1; pending.set(id, resolve); ws.send(JSON.stringify({ id, method, params })); });
+let closed = false;
+ws.addEventListener('close', () => { closed = true; for (const resolve of pending.values()) resolve({}); pending.clear(); });
+const send = (method, params = {}) => new Promise((resolve) => { if (closed) { resolve({}); return; } id += 1; pending.set(id, resolve); ws.send(JSON.stringify({ id, method, params })); });
 const evaluate = async (expression) => (await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result?.result?.value;
 await send('Runtime.enable');
 
@@ -62,20 +64,38 @@ log('status() IPC', JSON.stringify(await evaluate('window.wlsaplus.updater.statu
 // Click like the user (after the 8 s automatic check has had a chance to start, as on a real Mac).
 await sleep(Number(process.env.PROBE_CLICK_DELAY_MS || 0));
 log('click', await evaluate(`(() => { const s=[...document.querySelectorAll('.setting')].find(e=>/^\\s*WLSAPlus \\d/.test(e.querySelector('strong')?.textContent||'')); const b=s && s.querySelector(':scope > button'); if(!b) return 'no button'; b.click(); return 'clicked disabled=' + b.disabled; })()`));
-let prev = ''; let seen = 0;
+let prev = ''; let seen = 0; let restarted = false;
 const end = Date.now() + Number(seconds) * 1000;
 while (Date.now() < end) {
-  const row = await evaluate(rowExpr);
+  const row = await evaluate(rowExpr).catch(() => null);
+  if (row === null || row === undefined) { log('renderer gone (app quit)'); break; }
   if (row !== prev) { prev = row; log('ROW', row); }
+  // PROBE_INSTALL=1: click "Restart to update" like the user once the update is ready.
+  if (process.env.PROBE_INSTALL === '1' && !restarted && /Restart to update/u.test(row)) {
+    restarted = true;
+    log('click restart', await evaluate(`(() => { const s=[...document.querySelectorAll('.setting')].find(e=>/^\\s*WLSAPlus \\d/.test(e.querySelector('strong')?.textContent||'')); const b=s && s.querySelector(':scope > button'); if(!b) return 'no button'; b.click(); return 'clicked'; })()`).catch((e) => 'eval failed: ' + e.message));
+  }
   const events = await evaluate(`JSON.stringify((window.__probe||[]).slice(${seen}))`);
   for (const e of JSON.parse(events || '[]')) { seen += 1; log('STATUS', e.via, JSON.stringify(e.s)); }
   await sleep(500);
 }
 const updatesDir = path.join(os.homedir(), 'Library/Application Support/WLSAPlus/updates');
+if (restarted) {
+  // The helper swaps the app and relaunches it; wait for its result line.
+  for (let i = 0; i < 240; i += 1) {
+    const text = fs.existsSync(path.join(updatesDir, 'update.log')) ? fs.readFileSync(path.join(updatesDir, 'update.log'), 'utf8') : '';
+    if (/ result \{/u.test(text)) break;
+    await sleep(1000);
+  }
+  const { execFileSync } = await import('node:child_process');
+  log('installed version now:', execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', path.join(appPath, 'Contents/Info.plist')]).toString().trim());
+  try { log('codesign:', execFileSync('codesign', ['-dv', '--verbose=2', appPath], { stdio: ['ignore', 'pipe', 'pipe'] }).toString()); } catch (e) { log('codesign -dv:', String(e.stderr || e.message).split('\n').filter((l) => /Identifier|Authority|TeamIdentifier/u.test(l)).join(' | ')); }
+}
 log('updates dir:', fs.existsSync(updatesDir) ? fs.readdirSync(updatesDir, { recursive: true }).join(', ') : '(missing)');
 try { log('update.log:\n' + fs.readFileSync(path.join(updatesDir, 'update.log'), 'utf8')); } catch { log('no update.log'); }
-ws.close();
+try { ws.close(); } catch {}
 child.kill('SIGTERM');
+spawnSync('pkill', ['-f', 'WLSAPlus.app/Contents/MacOS/WLSAPlus']);
 await sleep(3000);
 try { child.kill('SIGKILL'); } catch {}
 process.exit(0);
