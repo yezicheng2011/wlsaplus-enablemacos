@@ -22,8 +22,9 @@ rm -rf "$WORK" "$LOGS"; mkdir -p "$FEED" "$LOGS"
 step() { echo; echo "=== $* ==="; }
 fail() { echo "::error::E2E: $*"; exit 1; }
 plist_version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$TARGET/Contents/Info.plist"; }
-result_field() { node -e "try{const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(r[process.argv[2]]??'')}catch{console.log('')}" "$UPD/last-result.json" "$1"; }
-result_is() { [ "$(result_field state)" = "$1" ]; }
+# The next app start consumes last-result.json, so checks read a snapshot taken when the state first matched.
+result_field() { node -e "try{const r=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log(r[process.argv[2]]??'')}catch{console.log('')}" "$WORK/result.json" "$1"; }
+result_is() { rm -f "$WORK/result.json"; cp "$UPD/last-result.json" "$WORK/result.json" 2>/dev/null || return 1; [ "$(result_field state)" = "$1" ]; }
 app_running() { pgrep -f "$TARGET/Contents/MacOS/WLSAPlus" >/dev/null 2>&1; }
 stop_apps() {
   pkill -f "$TARGET/Contents/MacOS/" 2>/dev/null || true
@@ -105,7 +106,7 @@ publish 1.1.1 stable
 launch_with_feed 1
 wait_until 240 "R1 result" result_is updated
 [ "$(plist_version)" = 1.1.1 ] || fail "R1: installed version is $(plist_version)"
-[ "$(result_field to)" = 1.1.1 ] && [ "$(result_field from)" = 1.1.0 ] || fail "R1: wrong result $(cat "$UPD/last-result.json")"
+[ "$(result_field to)" = 1.1.1 ] && [ "$(result_field from)" = 1.1.0 ] || fail "R1: wrong result $(cat "$WORK/result.json")"
 codesign --verify --deep --strict "$TARGET" || fail "R1: installed app fails codesign --verify"
 codesign --verify -R="$(node -p "require('./electron/update-config.cjs').CODESIGN_REQUIREMENT")" "$TARGET" || fail "R1: designated requirement changed"
 [ ! -e "$UPD/backup/WLSAPlus.app" ] || fail "R1: backup not removed"
@@ -119,7 +120,7 @@ publish 1.1.2 stable
 launch_with_feed 1
 wait_until 300 "R2 rollback" result_is rolled_back
 [ "$(plist_version)" = 1.1.1 ] || fail "R2: version after rollback is $(plist_version)"
-[ "$(result_field to)" = 1.1.2 ] || fail "R2: wrong result $(cat "$UPD/last-result.json")"
+[ "$(result_field to)" = 1.1.2 ] || fail "R2: wrong result $(cat "$WORK/result.json")"
 codesign --verify --deep --strict "$TARGET" || fail "R2: restored app fails codesign --verify"
 wait_until 30 "1.1.1 reopened after rollback" app_running
 # The reopened 1.1.1 records 1.1.2 as failed so it is not offered again.
