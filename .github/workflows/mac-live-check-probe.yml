@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Install the published DMG into /Applications
-        env: { TAG: '${{ inputs.tag || 'v1.1.0-beta.2' }}' }
+        env: { TAG: "${{ inputs.tag || 'v1.1.0-beta.2' }}" }
         run: |
           set -euo pipefail
           v="${TAG#v}"
@@ -35,7 +35,7 @@ jobs:
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/WLSAPlus.app/Contents/Info.plist
           sw_vers; uname -m
       - name: Pre-set channel
-        env: { CHANNEL: '${{ inputs.channel || 'beta' }}' }
+        env: { CHANNEL: "${{ inputs.channel || 'beta' }}" }
         run: |
           d="$HOME/Library/Application Support/WLSAPlus/updates"; mkdir -p "$d"
           if [ "$CHANNEL" != none ]; then printf '{"channel":"%s","failedVersions":[]}\n' "$CHANNEL" > "$d/settings.json"; fi
