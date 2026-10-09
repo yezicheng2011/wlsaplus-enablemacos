@@ -38,6 +38,8 @@ const {
   connectedStatusFor,
   tailLines,
   createWatchdog,
+  isOsascriptAuthCancelled,
+  appleScriptElevatedRun,
 } = require('./mac-clash-controller.cjs');
 const yaml = require('js-yaml');
 
@@ -610,12 +612,10 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
     requiresElevation: true,
   });
 
-  const escapedScript = scriptPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   return new Promise((resolve, reject) => {
-    execFile('osascript', ['-e', `do shell script "${escapedScript}" with administrator privileges`], (error, stdout) => {
+    execFile('osascript', ['-e', appleScriptElevatedRun(scriptPath)], (error, stdout) => {
       if (error) {
-        const detail = String(error.message || error.stderr || '');
-        if (/User canceled|user cancelled|-128|authorization canceled/i.test(detail) || error.code === 1 || error.code === 128) {
+        if (isOsascriptAuthCancelled(error)) {
           resolve(setVpnStatus({
             state: 'idle',
             message: 'Administrator approval was cancelled. Tap Connect to try again.',
@@ -625,9 +625,12 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
           }));
           return;
         }
+        const detail = String(error.stderr || error.message || '').trim().split(/\r?\n/).filter(Boolean).slice(-2).join(' ');
         setVpnStatus({
           state: 'error',
-          message: 'Could not start the macOS VPN after authorization.',
+          message: detail
+            ? `Could not start the macOS VPN after authorization. ${detail}`.slice(0, 280)
+            : 'Could not start the macOS VPN after authorization.',
           connectedAt: null,
           mode,
           requiresElevation: true,
@@ -640,8 +643,6 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
   });
 }
 
-// osascript returns as soon as run.sh has backgrounded the core, so only the core's own controller
-// can tell whether it really started and which node it uses.
 async function verifyMacCoreStarted({ attempt, controller, logPath, mode, sourceId, nodeName, selectedGroups }) {
   const source = getVpnSource(sourceId).id;
   const superseded = () => attempt !== macConnectAttempt || vpnDisconnecting;
@@ -861,8 +862,7 @@ async function stopMacClashHelper({ elevated = true } = {}) {
       'osascript',
       ['-e', `do shell script "/usr/bin/pkill -f \"${escaped}\" || true" with administrator privileges`],
       (error) => {
-        const detail = String(error?.message || error?.stderr || '');
-        if (error && /User canceled|user cancelled|-128|authorization canceled/i.test(detail)) {
+        if (error && isOsascriptAuthCancelled(error)) {
           resolve({ stopped: false, cancelled: true });
           return;
         }
