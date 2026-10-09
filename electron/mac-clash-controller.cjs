@@ -213,6 +213,33 @@ function createWatchdog({ check, onDead, intervalMs = WATCHDOG_INTERVAL_MS, maxF
   return { stop, isStopped: () => stopped };
 }
 
+
+/**
+ * True only when the user dismissed the macOS admin password dialog.
+ * Bare exit code 1 is NOT cancel: after a successful grant, `do shell script` still exits 1 when
+ * the shell command fails (classic trap: an unquoted path under "Application Support").
+ */
+function isOsascriptAuthCancelled(error) {
+  if (!error) return false;
+  const detail = [error.message, error.stderr, error.stdout].map((value) => String(value || '')).join('\n');
+  if (/User canceled\.?|user cancelled|authorization canceled|(?:^|[^0-9-])-128(?:\b|[^0-9])/i.test(detail)) {
+    return true;
+  }
+  const code = error.code ?? error.status;
+  return code === -128 || code === 128;
+}
+
+/**
+ * AppleScript that runs a script file as root. `do shell script <string>` feeds the string to
+ * `sh -c`, so paths with spaces (userData lives under Application Support) must be shell-quoted
+ * via AppleScript `quoted form of` — not pasted raw into the -e string.
+ */
+function appleScriptElevatedRun(scriptPath) {
+  if (typeof scriptPath !== 'string' || !scriptPath.trim()) throw new Error('Invalid elevate script path.');
+  const escaped = scriptPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `do shell script quoted form of "${escaped}" with administrator privileges`;
+}
+
 module.exports = {
   MAC_CLASH_CONTROLLER_HOST,
   MAC_CLASH_CONTROLLER_PORT,
@@ -231,4 +258,6 @@ module.exports = {
   connectedStatusFor,
   tailLines,
   createWatchdog,
+  isOsascriptAuthCancelled,
+  appleScriptElevatedRun,
 };
