@@ -17,6 +17,8 @@ const {
   connectedStatusFor,
   tailLines,
   createWatchdog,
+  isOsascriptAuthCancelled,
+  appleScriptElevatedRun,
 } = require('./mac-clash-controller.cjs');
 
 const SUBSCRIPTION = yaml.load(`
@@ -211,11 +213,41 @@ test('a stopped watchdog (intentional disconnect) never reports an error', async
   assert.equal(dead, 0);
 });
 
+
+test('isOsascriptAuthCancelled only matches real dismissals, not bare exit code 1', () => {
+  assert.equal(isOsascriptAuthCancelled(null), false);
+  assert.equal(isOsascriptAuthCancelled({ code: 1, message: 'Command failed: osascript' }), false);
+  assert.equal(isOsascriptAuthCancelled({
+    code: 1,
+    message: 'Command failed: osascript',
+    stderr: 'sh: /Users/x/Library/Application: No such file or directory',
+  }), false, 'unquoted Application Support failure must not look like cancel');
+  assert.equal(isOsascriptAuthCancelled({ message: 'User canceled.' }), true);
+  assert.equal(isOsascriptAuthCancelled({ stderr: 'execution error: User canceled. (-128)' }), true);
+  assert.equal(isOsascriptAuthCancelled({ code: -128 }), true);
+  assert.equal(isOsascriptAuthCancelled({ code: 128 }), true);
+  assert.equal(isOsascriptAuthCancelled({ message: 'Could not start after authorization' }), false);
+});
+
+test('appleScriptElevatedRun shell-quotes paths that contain Application Support', () => {
+  const script = '/Users/demo/Library/Application Support/WLSAPlus/vpn-bin/run.sh';
+  const source = appleScriptElevatedRun(script);
+  assert.match(source, /quoted form of "/);
+  assert.match(source, /Application Support\/WLSAPlus\/vpn-bin\/run\.sh"/);
+  assert.match(source, /with administrator privileges$/);
+  assert.ok(!source.includes(`do shell script "${script}"`), 'must not paste the raw path into sh -c');
+  assert.throws(() => appleScriptElevatedRun(''), /script path/);
+});
+
 test('main.cjs wires verification, watchdog and core.log for the mac helper', () => {
   const main = fs.readFileSync(path.join(__dirname, 'main.cjs'), 'utf8');
   assert.match(main, /> "\$\{logPath\}" 2>&1 &/);
   assert.ok(!/clashPkgDir\}" > \/dev\/null/.test(main), 'core output is no longer discarded');
   assert.match(main, /resolve\(verifyMacCoreStarted\(/);
+  assert.match(main, /appleScriptElevatedRun\(scriptPath\)/);
+  assert.match(main, /isOsascriptAuthCancelled\(error\)/);
+  assert.ok(!/error\.code === 1/.test(main), 'bare exit code 1 must not mean cancel');
+  assert.ok(!/do shell script "\$\{escapedScript\}"/.test(main), 'raw unquoted script path removed');
   assert.match(main, /'The VPN core did not start'/);
   assert.match(main, /'VPN core exited unexpectedly'/);
   const disconnect = main.slice(main.indexOf('async function disconnectVpn()'));

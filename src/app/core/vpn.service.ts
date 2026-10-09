@@ -156,7 +156,7 @@ export class VpnService {
         this.status.set({
           ...this.status(),
           state: 'idle',
-          message: 'Administrator approval was cancelled. Tap Connect to try again.',
+          message: 'Could not confirm administrator approval. Tap Connect to try again.',
           requiresElevation: true,
         });
       }
