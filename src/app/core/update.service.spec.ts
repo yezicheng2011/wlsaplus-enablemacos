@@ -11,7 +11,6 @@ function installBridge(initial: UpdateStatus) {
   const bridge = {
     status: vi.fn(async () => initial),
     check: vi.fn(async () => status({ state: 'checking' })),
-    download: vi.fn(async () => status({ state: 'checking' })),
     install: vi.fn(async () => status({ state: 'installing' })),
     setChannel: vi.fn(async (channel: 'stable' | 'beta') => status({ channel })),
     onStatus: vi.fn((callback: (s: UpdateStatus) => void) => { listener = callback; return () => { listener = null; }; }),

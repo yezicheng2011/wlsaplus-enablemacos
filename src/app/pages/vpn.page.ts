@@ -1,50 +1,46 @@
 import { Component, computed, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DatePipe } from '@angular/common';
-import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
-import { PlatformService } from '../core/platform.service';
 import { VpnService } from '../core/vpn.service';
 
 @Component({
   selector: 'app-vpn-page',
-  imports: [DatePipe, FormsModule, RouterLink, MatButtonModule, MatProgressSpinnerModule, MatSelectModule],
+  imports: [DatePipe, RouterLink, MatButtonModule, MatProgressSpinnerModule, MatSelectModule],
   template: `
     <div class="page tool-page">
       <header class="page-header"><a class="back icon-button" routerLink="/tools" aria-label="Back to tools"><span class="material-symbols-rounded">arrow_back</span></a><div><h1 class="page-title">VPN</h1><span>WLSAPlus relay</span></div><span class="spacer"></span><a mat-stroked-button class="guide-link" [href]="guideUrl" target="_blank" rel="noopener noreferrer" (click)="openGuide($event)"><span class="material-symbols-rounded">help</span>How to use</a></header>
 
-      @if (platform.info.supportsVpn) {
-        <section class="node-panel surface">
-          <div class="node-heading">
-            <div><strong>Node</strong><span>Choose a relay node before connecting.</span></div>
-            <div class="node-actions">
-              <button mat-stroked-button type="button" (click)="vpn.refreshNodes()" [disabled]="vpn.nodesLoading() || busy()">Refresh</button>
-              <button mat-stroked-button type="button" (click)="vpn.testLatency()" [disabled]="vpn.latencyTesting() || !vpn.nodes().length || busy()">{{ vpn.latencyTesting() ? 'Testing…' : 'Test latency' }}</button>
-            </div>
+      <section class="node-panel surface">
+        <div class="node-heading">
+          <div><strong>Node</strong><span>Choose a relay node before connecting.</span></div>
+          <div class="node-actions">
+            <button mat-stroked-button type="button" (click)="vpn.refreshNodes()" [disabled]="vpn.nodesLoading() || busy()">Refresh</button>
+            <button mat-stroked-button type="button" (click)="vpn.testLatency()" [disabled]="vpn.latencyTesting() || !vpn.nodes().length || busy()">{{ vpn.latencyTesting() ? 'Testing…' : 'Test latency' }}</button>
           </div>
-          @if (vpn.nodesLoading() && !vpn.nodes().length) {
-            <div class="node-loading"><mat-spinner diameter="28"></mat-spinner><span>Loading nodes…</span></div>
-          } @else if (!vpn.nodes().length) {
-            <p class="node-empty">No nodes yet. Tap Refresh after you are online.</p>
-          } @else {
-            <mat-select [value]="vpn.selectedNodeId()" (selectionChange)="vpn.setNode($event.value)" [disabled]="busy()" aria-label="VPN node">
-              @for (node of vpn.nodes(); track node.id) {
-                <mat-option [value]="node.id">{{ nodeLabel(node) }}</mat-option>
-              }
-            </mat-select>
-            <div class="node-list" role="list">
-              @for (node of vpn.nodes(); track node.id) {
-                <button type="button" class="node-row" role="listitem" [class.selected]="vpn.selectedNodeId() === node.id" (click)="vpn.setNode(node.id)" [disabled]="busy()">
-                  <span class="node-name">{{ node.name }}</span>
-                  <span class="node-meta">{{ node.type }}@if (node.latencyMs != null) { · {{ node.latencyMs }} ms } @else if (vpn.latencyTesting()) { · … }</span>
-                </button>
-              }
-            </div>
-          }
-        </section>
-      }
+        </div>
+        @if (vpn.nodesLoading() && !vpn.nodes().length) {
+          <div class="node-loading"><mat-spinner diameter="28"></mat-spinner><span>Loading nodes…</span></div>
+        } @else if (!vpn.nodes().length) {
+          <p class="node-empty">No nodes yet. Tap Refresh after you are online.</p>
+        } @else {
+          <mat-select [value]="vpn.selectedNodeId()" (selectionChange)="vpn.setNode($event.value)" [disabled]="busy()" aria-label="VPN node">
+            @for (node of vpn.nodes(); track node.id) {
+              <mat-option [value]="node.id">{{ nodeLabel(node) }}</mat-option>
+            }
+          </mat-select>
+          <div class="node-list" role="list">
+            @for (node of vpn.nodes(); track node.id) {
+              <button type="button" class="node-row" role="listitem" [class.selected]="vpn.selectedNodeId() === node.id" (click)="vpn.setNode(node.id)" [disabled]="busy()">
+                <span class="node-name">{{ node.name }}</span>
+                <span class="node-meta">{{ node.type }}@if (node.latencyMs != null) { · {{ node.latencyMs }} ms } @else if (vpn.latencyTesting()) { · … }</span>
+              </button>
+            }
+          </div>
+        }
+      </section>
 
       <section class="vpn-panel surface" [class.connected]="status().state === 'connected'" [class.pending]="status().state === 'connecting' && status().requiresElevation">
         <div class="status-mark"><span class="material-symbols-rounded">{{ statusIcon() }}</span></div>
@@ -52,19 +48,17 @@ import { VpnService } from '../core/vpn.service';
         @if (busy()) { <mat-spinner diameter="42"></mat-spinner> }
         @else if (status().state === 'connected') { <button mat-stroked-button (click)="vpn.disconnect()">Disconnect</button> }
         @else if (status().requiresElevation && status().state !== 'error') { <button mat-flat-button (click)="vpn.restartElevated()">Approve & connect</button> }
-        @else { <button mat-flat-button (click)="vpn.connect()" [disabled]="status().state === 'unavailable' || (platform.info.supportsVpn && !vpn.selectedNodeId())">Connect</button> }
+        @else { <button mat-flat-button (click)="vpn.connect()" [disabled]="status().state === 'unavailable' || !vpn.selectedNodeId()">Connect</button> }
       </section>
-      @if (platform.info.supportsVpn) {
-        <section class="wechat-panel surface" [class.ok]="vpn.wechatResult()?.reachable === true" [class.bad]="vpn.wechatResult()?.reachable === false">
-          <div class="wechat-copy">
-            <strong>WeChat check</strong>
-            <span>@if (vpn.wechatTesting()) { Testing https://weixin.qq.com/… } @else if (vpn.wechatResult(); as result) { {{ result.message }} } @else { Probe WeChat reachability with VPN on or off (no WeChat app required). }</span>
-          </div>
-          <button mat-stroked-button type="button" (click)="vpn.testWeChat()" [disabled]="vpn.wechatTesting() || busy()">
-            @if (vpn.wechatTesting()) { Testing… } @else { Test WeChat }
-          </button>
-        </section>
-      }
+      <section class="wechat-panel surface" [class.ok]="vpn.wechatResult()?.reachable === true" [class.bad]="vpn.wechatResult()?.reachable === false">
+        <div class="wechat-copy">
+          <strong>WeChat check</strong>
+          <span>@if (vpn.wechatTesting()) { Testing https://weixin.qq.com/… } @else if (vpn.wechatResult(); as result) { {{ result.message }} } @else { Probe WeChat reachability with VPN on or off (no WeChat app required). }</span>
+        </div>
+        <button mat-stroked-button type="button" (click)="vpn.testWeChat()" [disabled]="vpn.wechatTesting() || busy()">
+          @if (vpn.wechatTesting()) { Testing… } @else { Test WeChat }
+        </button>
+      </section>
 
       <div class="facts"><span><span class="material-symbols-rounded">shield</span>Encrypted connection</span><span><span class="material-symbols-rounded">public</span>Selectable nodes</span><span><span class="material-symbols-rounded">chat</span>WeChat probe</span></div>
     </div>
@@ -82,19 +76,18 @@ import { VpnService } from '../core/vpn.service';
     .wechat-copy { min-width: 0; display: grid; gap: 4px; } .wechat-copy strong { font-size: 15px; } .wechat-copy span { color: var(--app-muted); font-size: 13px; line-height: 1.4; }
     .wechat-panel.ok { border-color: color-mix(in srgb, var(--app-success) 45%, var(--app-border)); } .wechat-panel.ok .wechat-copy strong { color: var(--app-success); }
     .wechat-panel.bad { border-color: color-mix(in srgb, #ba1a1a 40%, var(--app-border)); } .wechat-panel.bad .wechat-copy strong { color: #ba1a1a; }
-    .facts { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 14px; color: var(--app-muted); font-size: 12px; } .facts > span { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 7px; border-right: 1px solid var(--app-border); } .facts > span:last-child { border: 0; } .facts .material-symbols-rounded { font-size: 18px; } .platform-note { margin: 20px 0 0; color: var(--app-muted); font-size: 13px; text-align: center; }
+    .facts { display: grid; grid-template-columns: repeat(3,1fr); margin-top: 14px; color: var(--app-muted); font-size: 12px; } .facts > span { min-height: 46px; display: flex; align-items: center; justify-content: center; gap: 7px; border-right: 1px solid var(--app-border); } .facts > span:last-child { border: 0; } .facts .material-symbols-rounded { font-size: 18px; }
     @media (max-width: 600px) { .vpn-panel { min-height: 280px; padding: 25px 20px; grid-template-columns: 1fr; justify-items: center; gap: 18px; text-align: center; } .facts { grid-template-columns: 1fr; } .facts > span { border-right: 0; border-bottom: 1px solid var(--app-border); } }
   `,
 })
 export class VpnPage {
-  readonly vpn = inject(VpnService); readonly platform = inject(PlatformService); readonly status = this.vpn.status;
+  readonly vpn = inject(VpnService); readonly status = this.vpn.status;
   readonly guideUrl = 'https://wlsaplus.spacehubxyz.hk/guide/wechat/';
   readonly busy = computed(() => this.status().state === 'connecting' || this.status().state === 'disconnecting');
   readonly statusLabel = computed(() => ({
     connected: 'Connected',
     connecting: this.status().requiresElevation ? 'Waiting for approval' : 'Connecting',
     disconnecting: 'Disconnecting',
-    delegated: 'Opened',
     error: 'Connection error',
     unavailable: 'Unavailable',
     idle: 'Disconnected',

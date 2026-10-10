@@ -17,9 +17,9 @@ function setup(withBridge = true) {
   if (withBridge) (window as unknown as { wlsaplus: unknown }).wlsaplus = { reminders: { sync } };
   TestBed.configureTestingModule({});
   const store = TestBed.inject(LocalStore);
-  const service = TestBed.inject(ClassReminderService);
+  TestBed.inject(ClassReminderService);
   TestBed.tick();
-  return { sync, store, service };
+  return { sync, store };
 }
 
 describe('ClassReminderService (main-process scheduler sync)', () => {
@@ -60,12 +60,6 @@ describe('ClassReminderService (main-process scheduler sync)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(localStorage.getItem(LEGACY_NOTIFIED_KEY)).toBeNull();
-  });
-
-  it('keeps setEnabled writing the setting', () => {
-    const { service, store } = setup();
-    service.setEnabled(false);
-    expect(store.settings().classRemindersEnabled).toBe(false);
   });
 
   it('stays idle when the desktop bridge is missing', () => {

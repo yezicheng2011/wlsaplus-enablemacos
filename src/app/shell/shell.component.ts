@@ -4,7 +4,6 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { CredentialVault } from '../core/credential-vault.service';
 import { LocalStore } from '../core/local-store.service';
-import { PlatformService } from '../core/platform.service';
 import { PowerSchoolService } from '../core/powerschool.service';
 import { UpdateService } from '../core/update.service';
 import { NoticeService } from '../core/notice.service';
@@ -94,12 +93,9 @@ export class ShellComponent implements OnInit {
   private readonly store = inject(LocalStore);
   private readonly vault = inject(CredentialVault);
   private readonly router = inject(Router);
-  private readonly platform = inject(PlatformService);
   private readonly powerSchool = inject(PowerSchoolService);
   readonly updater = inject(UpdateService);
   readonly notice = inject(NoticeService);
-  // Starts macOS class reminders when schedule data is available.
-  private readonly classReminders = inject(ClassReminderService);
   readonly nav: NavItem[] = [
     { path: '/', label: 'Home', icon: 'home' },
     { path: '/schedule', label: 'Schedule', icon: 'calendar_month' },
@@ -109,16 +105,19 @@ export class ShellComponent implements OnInit {
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
 
+  constructor() {
+    // Start syncing the schedule to the macOS class reminder scheduler.
+    inject(ClassReminderService);
+  }
+
   async ngOnInit(): Promise<void> {
     const credentials = await this.vault.get();
     if (!credentials) {
       if (!this.store.hasSchedule() && sessionStorage.getItem('wlsaplus:offline') !== 'true') await this.router.navigateByUrl('/connect');
       return;
     }
-    if (this.platform.info.supportsPowerSchool) {
-      await this.refreshSchedule();
-      window.setInterval(() => void this.refreshSchedule(), 15 * 60 * 1000);
-    }
+    await this.refreshSchedule();
+    window.setInterval(() => void this.refreshSchedule(), 15 * 60 * 1000);
   }
 
   private async refreshSchedule(): Promise<boolean> {

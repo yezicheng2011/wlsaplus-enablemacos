@@ -10,11 +10,6 @@ out/
 out-builder/
 .tmp-angular/
 .env
-*.keystore
-*.jks
 .DS_Store
-# Legacy sing-box / v2ray-plugin binaries (opt-in download, never packaged; macOS uses mihomo in electron/bin)
-build/vpn-core/*
-!build/vpn-core/LICENSE-*.txt
 release-assets/
 e2e-logs/

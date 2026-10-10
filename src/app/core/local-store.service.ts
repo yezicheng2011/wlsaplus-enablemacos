@@ -41,7 +41,6 @@ export class LocalStore {
   /** Theme actually shown (settings.theme resolved against the OS preference); the forum follows this. */
   readonly resolvedTheme = signal<'light' | 'dark'>(this.resolveTheme(this.settings().theme));
   readonly hasSchedule = computed(() => this.schedule().sessions.length > 0);
-  readonly hasProgress = computed(() => this.progress().courses.length > 0 || this.progress().syncedAt !== '');
 
   constructor() {
     window.addEventListener('storage', (event) => {
@@ -83,7 +82,9 @@ export class LocalStore {
   }
 
   saveProgress(value: ProgressSnapshot): void {
-    const previous = new Map(this.progress().courses.map((course) => [course.id, course]));
+    const cachedProgress = this.progress();
+    const previous = new Map((cachedProgress.accountKey === value.accountKey ? cachedProgress.courses : [])
+      .map((course) => [course.id, course]));
     const merged = {
       ...value,
       courses: value.courses.map((course) => {

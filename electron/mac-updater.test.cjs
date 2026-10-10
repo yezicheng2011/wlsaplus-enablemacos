@@ -65,7 +65,7 @@ function fakeMac({ plistVersion, archs = 'x86_64 arm64', codesignFails = false }
   return { run, calls };
 }
 
-function setup(t, { currentVersion = '1.1.0', routes, mac, argv = [], exePath = '/Applications/WLSAPlus.app/Contents/MacOS/WLSAPlus', fetchImpl = undefined, writable = true, supported = true, arch = 'arm64', launchedByUpdater = false }) {
+function setup(t, { currentVersion = '1.1.0', routes, mac, argv = [], exePath = '/Applications/WLSAPlus.app/Contents/MacOS/WLSAPlus', fetchImpl = undefined, writable = true, supported = true, arch = 'arm64', launchedByUpdater = false, beforeInstall = async () => {}, accessImpl }) {
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'wlsa-upd-'));
   t.after(() => fs.rmSync(userData, { recursive: true, force: true }));
   const spawned = [];
@@ -87,10 +87,10 @@ function setup(t, { currentVersion = '1.1.0', routes, mac, argv = [], exePath = 
       run: mac.run,
       spawnDetached: (command, args) => spawned.push([command, ...args]),
       helperSource,
-      beforeInstall: async () => { cleanups += 1; },
+      beforeInstall: async () => { cleanups += 1; await beforeInstall(); },
       quit: () => { quits += 1; },
       onStatus: (status) => { statuses.push(status.state); full.push(status); },
-      accessImpl: async () => { if (!writable) throw new Error('EACCES'); },
+      accessImpl: accessImpl || (async () => { if (!writable) throw new Error('EACCES'); }),
       publicKeyPem,
       launchedByUpdater,
       ...(fetchImpl ? { fetchImpl } : {}),
@@ -456,4 +456,177 @@ test('a check error from an unexpected exception is logged with its stack', asyn
   assert.equal(final.state, 'error');
   await ctx.updater.log('flush');
   assert.match(readLog(ctx), /check: unexpected error: TypeError/u);
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+const readyBetaRoutes = (zip) => betaRoutes(zip, {
+  '/download/v1.1.1-beta.3/WLSAPlus-1.1.1-beta.3-mac-arm64.zip': zip,
+});
+
+test('turning off beta synchronously revokes a staged beta and deletes it before resolving', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const ctx = await setup(t, { currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), routes: readyBetaRoutes(zip) });
+  await ctx.updater.loadSettings();
+  assert.equal((await settled(ctx.updater)).state, 'ready');
+  const stagedDir = path.dirname(ctx.updater.staged.marker);
+  const switching = ctx.updater.setChannel('stable');
+  assert.equal(ctx.updater.staged, null);
+  assert.equal(ctx.updater.installOnQuit(), false, 'revoked even before settings finish saving');
+  await ctx.updater.install();
+  await switching;
+  assert.equal(ctx.updater.getStatus().state, 'idle');
+  assert.equal(ctx.updater.getStatus().version, null);
+  assert.equal(fs.existsSync(stagedDir), false);
+  assert.equal(ctx.spawned.length, 0);
+  assert.equal((await settled(ctx.updater)).state, 'up-to-date', 'stable can be checked immediately');
+});
+
+test('turning off beta preserves an already staged stable release', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const ctx = await setup(t, {
+    currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1' }),
+    routes: {
+      '/api/latest': JSON.stringify({ tag: 'v1.1.1', assets: [{ name: 'update-manifest.json' }] }),
+      '/download/v1.1.1/update-manifest.json': manifestFor('1.1.1', zip),
+      '/download/v1.1.1/WLSAPlus-1.1.1-mac-arm64.zip': zip,
+    },
+  });
+  await ctx.updater.loadSettings();
+  assert.equal((await settled(ctx.updater)).state, 'ready');
+  await ctx.updater.setChannel('stable');
+  assert.equal(ctx.updater.getStatus().state, 'ready');
+  assert.equal(ctx.updater.installOnQuit(), true);
+  assert.equal(ctx.spawned.length, 1);
+});
+
+test('a beta manifest that finishes after a channel change cannot overwrite a fresh stable check', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const requested = deferred();
+  const response = deferred();
+  t.after(() => response.resolve());
+  const ctx = await setup(t, {
+    currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), routes: readyBetaRoutes(zip),
+    fetchImpl: async (url, options) => {
+      if (url.includes('/channel-beta/')) {
+        requested.resolve();
+        // A completed response can race with cancellation; deliberately ignore the signal here.
+        await response.promise;
+        return new Response(manifestFor('1.1.1-beta.3', zip, { channel: 'beta' }));
+      }
+      return fetch(url, options);
+    },
+  });
+  await ctx.updater.loadSettings();
+  const oldCheck = ctx.updater.check();
+  await requested.promise;
+  await ctx.updater.setChannel('stable');
+  assert.equal((await settled(ctx.updater)).state, 'up-to-date');
+  response.resolve();
+  await oldCheck;
+  assert.equal(ctx.updater.getStatus().state, 'up-to-date');
+  assert.equal(ctx.updater.staged, null);
+  assert.equal(ctx.hits.some((url) => url.endsWith('.zip')), false);
+});
+
+test('turning off beta aborts an in-flight download without retrying or staging it', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const requested = deferred();
+  let aborted = false;
+  let zipRequests = 0;
+  const ctx = await setup(t, {
+    currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), routes: readyBetaRoutes(zip),
+    fetchImpl: async (url, options) => {
+      if (url.endsWith('.zip')) {
+        zipRequests += 1;
+        return new Promise((resolve, reject) => {
+          options.signal.addEventListener('abort', () => { aborted = true; reject(options.signal.reason); }, { once: true });
+          requested.resolve();
+        });
+      }
+      return fetch(url, options);
+    },
+  });
+  await ctx.updater.loadSettings();
+  await ctx.updater.check();
+  await requested.promise;
+  await ctx.updater.setChannel('stable');
+  await ctx.updater.idle();
+  assert.equal(aborted, true);
+  assert.equal(zipRequests, 1);
+  assert.equal(ctx.updater.getStatus().state, 'idle');
+  assert.equal(ctx.updater.staged, null);
+  assert.equal(fs.existsSync(path.join(ctx.userData, 'updates', 'staging', '1.1.1-beta.3')), false);
+  assert.equal(ctx.statuses.includes('ready'), false);
+});
+
+test('a channel change during app verification waits for staging cleanup before another check', async (t) => {
+  const zip = crypto.randomBytes(1000);
+  const verifying = deferred();
+  const release = deferred();
+  t.after(() => release.resolve());
+  const mac = fakeMac({ plistVersion: '1.1.1-beta.3' });
+  const run = mac.run;
+  mac.run = async (command, args) => {
+    if (command === 'codesign') { verifying.resolve(); await release.promise; }
+    return run(command, args);
+  };
+  const ctx = await setup(t, { currentVersion: '1.1.0-beta.3', mac, routes: readyBetaRoutes(zip) });
+  await ctx.updater.loadSettings();
+  await ctx.updater.check();
+  await verifying.promise;
+  // Start a check just before the switch, so it initially awaits the previous cleanup promise.
+  const nextCheck = ctx.updater.check();
+  const switching = ctx.updater.setChannel('stable');
+  await new Promise(setImmediate);
+  assert.equal(ctx.updater.getStatus().state, 'idle');
+  release.resolve();
+  await switching;
+  await nextCheck;
+  assert.equal(ctx.updater.getStatus().state, 'up-to-date');
+  assert.equal(ctx.updater.staged, null);
+  assert.equal(ctx.statuses.includes('ready'), false);
+  assert.equal(fs.existsSync(path.join(ctx.userData, 'updates', 'staging', '1.1.1-beta.3')), false);
+});
+
+test('restart rechecks the channel after asynchronous location and cleanup steps', async (t) => {
+  for (const phase of ['location', 'cleanup']) {
+    await t.test(phase, async (t) => {
+      const zip = crypto.randomBytes(1000);
+      const entered = deferred();
+      const release = deferred();
+      t.after(() => release.resolve());
+      let block = false;
+      const pause = async () => { if (block) { entered.resolve(); await release.promise; } };
+      const ctx = await setup(t, {
+        currentVersion: '1.1.0-beta.3', mac: fakeMac({ plistVersion: '1.1.1-beta.3' }), routes: readyBetaRoutes(zip),
+        ...(phase === 'location' ? { accessImpl: pause } : { beforeInstall: pause }),
+      });
+      await ctx.updater.loadSettings();
+      assert.equal((await settled(ctx.updater)).state, 'ready');
+      block = true;
+      const installing = ctx.updater.install();
+      await entered.promise;
+      await ctx.updater.setChannel('stable');
+      if (phase === 'cleanup') {
+        // Re-enabling beta and staging the same version must not resurrect the older install request.
+        await ctx.updater.setChannel('beta');
+        assert.equal((await settled(ctx.updater)).state, 'ready');
+      }
+      block = false;
+      release.resolve();
+      await installing;
+      assert.equal(ctx.spawned.length, 0);
+      assert.equal(ctx.counts().quits, 0);
+      assert.equal(ctx.updater.getStatus().state, phase === 'cleanup' ? 'ready' : 'idle');
+      if (phase === 'cleanup') {
+        await ctx.updater.install();
+        assert.equal(ctx.spawned.length, 1, 'a fresh install still works');
+      }
+    });
+  }
 });

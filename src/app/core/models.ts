@@ -1,6 +1,5 @@
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type AppColor = 'default' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'rose';
-export type DesktopCardType = 'current-class' | 'next-class' | 'today' | 'todo';
 
 export interface PowerSchoolCredentials {
   schoolUrl: string;
@@ -105,6 +104,8 @@ export interface AttendanceEvent {
 }
 
 export interface ProgressSnapshot {
+  /** Normalized school origin and username; absent on caches from older builds. */
+  accountKey?: string;
   syncedAt: string;
   term: string;
   absenceTotal: number | null;
@@ -191,18 +192,7 @@ export interface AppSettings {
   classRemindersEnabled: boolean;
 }
 
-export interface PlatformInfo {
-  kind: 'electron';
-  os: 'macos';
-  supportsPowerSchool: boolean;
-  supportsDesktopCards: boolean;
-  supportsVpn: boolean;
-  supportsScreenTranslation: boolean;
-  supportsPhoneControl: boolean;
-}
-
-
-export type VpnConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'delegated' | 'error' | 'unavailable';
+export type VpnConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnecting' | 'error' | 'unavailable';
 export type VpnConnectionMode = 'full-tunnel';
 
 export interface WeChatProbeResult {
@@ -227,7 +217,7 @@ export interface VpnStatus {
   state: VpnConnectionState;
   message: string;
   connectedAt: string | null;
-  mode: VpnConnectionMode | 'external-client' | 'unavailable';
+  mode: VpnConnectionMode | 'unavailable';
   sourceId?: string;
   nodeName?: string;
   requiresElevation?: boolean;
@@ -258,13 +248,4 @@ export interface PlatformHttpResponse {
   status: number;
   url: string;
   text: string;
-}
-
-export interface DesktopCardInfo {
-  id: number;
-  type: DesktopCardType;
-}
-
-export interface DesktopCardSettings {
-  launchAtStartup: boolean;
 }

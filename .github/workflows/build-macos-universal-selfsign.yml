@@ -10,7 +10,6 @@ jobs:
   build:
     runs-on: macos-14
     env:
-      WLSAPLUS_SELF_SIGN: '1'
       APPLE_IDENTITY: '-'
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
@@ -28,17 +27,10 @@ jobs:
           set -euo pipefail
           npm run vpn:core
           npm run build:web
-          # Prefer forge osxSign (identity '-'); continue even if only linker-signed
-          if ! npx electron-forge make --platform darwin --arch universal; then
-            echo "forge make with osxSign failed; retrying without forge sign"
-            unset WLSAPLUS_SELF_SIGN APPLE_IDENTITY
-            export WLSAPLUS_SELF_SIGN=0
-            export APPLE_IDENTITY=
-            rm -rf out
-            npx electron-forge make --platform darwin --arch universal
-          fi
+          # Sign the packaged app below before creating release archives.
+          npx electron-forge package --platform darwin --arch universal
 
-      - name: Ad-hoc codesign .app and remake DMG
+      - name: Ad-hoc codesign .app and create archives
         run: |
           set -euo pipefail
           app_path="$(find out -type d -path '*darwin-universal*' -name 'WLSAPlus.app' -prune | head -n 1)"
@@ -50,20 +42,14 @@ jobs:
           codesign -dv --verbose=2 "$app_path"
 
           version="$(node -p "require('./package.json').version")"
-          # Remake DMG so the deep-signed .app is inside
-          find out/make -type f -name '*.dmg' -delete || true
           stage="$(mktemp -d)"
           cp -R "$app_path" "$stage/WLSAPlus.app"
           mkdir -p out/make/darwin/universal
           hdiutil create -volname WLSAPlus -srcfolder "$stage" -ov -format UDZO \
             "out/make/darwin/universal/WLSAPlus-${version}-universal.dmg"
-          # Refresh zip from signed app if present
-          zip_dir="$(find out/make -type d -path '*/zip/darwin/universal' | head -n 1 || true)"
-          if [[ -z "$zip_dir" ]]; then
-            zip_dir="out/make/zip/darwin/universal"
-            mkdir -p "$zip_dir"
-          fi
-          find "$zip_dir" -type f -name '*.zip' -delete || true
+          rm -rf "$stage"
+          zip_dir="out/make/zip/darwin/universal"
+          mkdir -p "$zip_dir"
           (
             cd "$(dirname "$app_path")"
             ditto -c -k --sequesterRsrc --keepParent "$(basename "$app_path")" \

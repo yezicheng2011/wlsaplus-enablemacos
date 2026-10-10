@@ -30,10 +30,6 @@ export class ClassReminderService {
     });
   }
 
-  setEnabled(enabled: boolean): void {
-    this.store.updateSettings({ classRemindersEnabled: enabled });
-  }
-
   private async sync(payload: ClassReminderSyncPayload): Promise<void> {
     const reminders = window.wlsaplus?.reminders;
     if (!reminders) return;

@@ -24,8 +24,8 @@ WLSAPlus 把 PowerSchool 课表、成绩、考勤、开课提醒、校园工具�
 
 WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, campus tools and the WLSAPlus forum into one native Mac app. Data stays on your Mac, and the last sync is available offline.
 
-> 本仓库是 **仅 macOS** 的分支：已移除 Android / Windows 打包与手机中继。
-> This fork targets **macOS only**; Android / Windows packaging and the phone relay were removed.
+> 本仓库仅支持 **macOS**。
+> This fork supports **macOS only**.
 
 ## 功能 · Features
 
@@ -36,7 +36,7 @@ WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, 
 | 📈 **成绩 Progress** | 课程等级、作业分数、考勤 | Course grades, assignment scores, attendance |
 | 🔔 **开课提醒 Reminders** | 开课前约 5 分钟 macOS 通知（可关） | macOS notification ~5 min before class (optional) |
 | 🛡️ **VPN** | 订阅节点选择、延迟测速、全设备隧道、微信连通检测 | Subscription nodes, latency test, full-device tunnel, WeChat reachability check |
-| 🧰 **工具 Tools** | 校园地图、翻译（含 OCR）、待办 | Campus map, translator (with OCR), to-dos |
+| 🧰 **工具 Tools** | 校园地图、翻译、待办 | Campus map, translator, to-dos |
 | 🎨 **外观 Appearance** | 跟随系统 / 浅色 / 深色，多种主题色 | System / light / dark, multiple accent colours |
 
 ## 安装 · Install
@@ -101,8 +101,10 @@ npm run electron:make    # macOS universal DMG / ZIP（需在 macOS 上）· bui
 ```
 
 - 可安装包在 `out/make`；`dist/` 只是界面（renderer）构建产物。· Installers land in `out/make`; `dist/` is only the renderer build.
-- asar 只打包主进程运行时依赖与 `dist/` UI（见 `forge.config.cjs` 的 `RUNTIME_NODE_MODULES`）。
-  The asar ships only main-process runtime deps plus the `dist/` UI (see `RUNTIME_NODE_MODULES` in `forge.config.cjs`).
+- 图标字体只保留源码使用的字形，普通构建会自动检查覆盖。新增图标后安装 `python3 -m pip install 'fonttools[woff]'`，运行 `npm run symbols:generate` 并提交 `build/fonts/`；普通构建无需 Python。
+  The icon font contains the source icons and is checked during builds. After adding icons, install `fonttools[woff]`, run `npm run symbols:generate`, and commit `build/fonts/`; normal builds do not need Python.
+- asar 只打包主进程代码与运行时依赖、生产界面及许可证；测试、构建工具和源码映射不随应用分发（见 `forge.config.cjs` 的运行文件白名单）。
+  The asar ships main-process code and runtime dependencies, the production UI and licenses; tests, build tools and source maps are excluded (see the runtime file allow-list in `forge.config.cjs`).
 - `package.json` 的 `overrides` 把 `@electron/node-gyp` 固定为 npm 上的 `10.2.0-electron.1`：否则 `@electron/rebuild` 会从 GitHub 拉取 node-gyp（国内常失败），请勿删除。
   The `overrides` entry in `package.json` pins `@electron/node-gyp` to the npm-published `10.2.0-electron.1`, so `@electron/rebuild` does not fetch node-gyp from GitHub (often unreachable in China). Do not remove it.
 - 论坛配置集中在 `src/app/core/forum.config.ts`（与 `electron/forum-config.cjs` 同步，有测试校验）。

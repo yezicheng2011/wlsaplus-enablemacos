@@ -24,17 +24,13 @@
             "inlineStyleLanguage": "scss",
             "assets": [
               { "glob": "**/*", "input": "public" },
-              { "glob": "eng.traineddata.gz", "input": "node_modules/@tesseract.js-data/eng/4.0.0", "output": "ocr" },
-              { "glob": "chi_sim.traineddata.gz", "input": "node_modules/@tesseract.js-data/chi_sim/4.0.0", "output": "ocr" },
-              { "glob": "worker.min.js", "input": "node_modules/tesseract.js/dist", "output": "ocr" },
-              { "glob": "tesseract-core-lstm.wasm.js", "input": "node_modules/tesseract.js-core", "output": "ocr" },
-              { "glob": "tesseract-core-*-lstm.wasm.js", "input": "node_modules/tesseract.js-core", "output": "ocr" }
+              { "glob": "LICENSE-material-symbols.txt", "input": "build/fonts", "output": "licenses" }
             ],
             "styles": [
               "@fontsource/roboto/400.css",
               "@fontsource/roboto/500.css",
               "@fontsource/roboto/700.css",
-              "material-symbols/rounded.css",
+              "build/fonts/material-symbols.css",
               "src/styles.scss"
             ]
           },

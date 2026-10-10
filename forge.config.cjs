@@ -23,55 +23,41 @@ const osxNotarize = osxSign && process.env.APPLE_ID && process.env.APPLE_APP_PAS
   ? { appleId: process.env.APPLE_ID, appleIdPassword: process.env.APPLE_APP_PASSWORD, teamId: process.env.APPLE_TEAM_ID }
   : undefined;
 
-// Main-process runtime packages (and their transitive deps). Angular/web deps live in dist/,
-// so the rest of node_modules must stay out of the asar. electron-updater is gone (the macOS self-updater
-// in electron/mac-updater.cjs uses only Node built-ins); js-yaml (VPN profiles) needs argparse.
-const RUNTIME_NODE_MODULES = new Set([
-  'argparse',
-  'js-yaml',
+// The renderer is already bundled in dist. Ship only the main-process runtime,
+// the production renderer, and license notices; new build outputs stay excluded.
+const RUNTIME_FILES = new Set([
+  '/package.json',
+  '/LICENSE',
+  '/THIRD_PARTY_NOTICES.md',
+  '/build/icon.png',
+  '/dist/wlsaplus/3rdpartylicenses.txt',
+  '/electron/update-helper.sh',
+  '/node_modules/js-yaml/package.json',
+  '/node_modules/js-yaml/index.js',
+  '/node_modules/js-yaml/LICENSE',
+]);
+const RUNTIME_DIRECTORIES = new Set([
+  '/', '/build', '/dist', '/dist/wlsaplus', '/electron',
+  '/node_modules', '/node_modules/js-yaml',
 ]);
 
-const IGNORE_PATHS = [
-  /^\/captures($|\/)/,
-  /^\/src($|\/)/,
-  /^\/public($|\/)/,
-  /^\/scripts($|\/)/,
-  /^\/vpn-subscription-worker($|\/)/,
-  /^\/release-kit($|\/)/,
-  // build/ holds packaging inputs. Only build/icon.png is read at runtime (window icon);
-  // build/vpn-core (legacy sing-box/v2ray-plugin, unused on macOS) and icon.icns stay out of app.asar.
-  /^\/build\/(?!icon\.png$).+/,
-  /^\/electron\/.*\.test\.cjs$/,
-  /^\/electron\/bin($|\/)/,
-  /^\/output($|\/)/,
-  /^\/out($|\/)/,
-  // CI outputs: build-mac-release.sh packages several arches in a row, so earlier zips must never end up in app.asar.
-  /^\/release-assets($|\/)/,
-  /^\/e2e-logs($|\/)/,
-  /^\/\.git($|\/)/,
-  /^\/\.github($|\/)/,
-  /^\/\.angular($|\/)/,
-  /^\/\.playwright-cli($|\/)/,
-  /^\/\.tmp-angular($|\/)/,
-  // dist/wlsaplus/browser/ocr (tesseract worker/core/lang data) MUST ship: translator.page.ts
-  // loads OCR assets from new URL('ocr/', document.baseURI).
-  /^\/(angular|ngsw|tsconfig).*\.(json|ts)$/,
-  /^\/README\.md$/,
-];
-
-function isKeptNodeModule(file) {
-  if (file === '/node_modules') return true;
-  const match = file.match(/^\/node_modules\/((?:@[^/]+\/)?[^/]+)(\/|$)/);
-  if (!match) return false;
-  return RUNTIME_NODE_MODULES.has(match[1]);
+function isRuntimeFile(file) {
+  if (RUNTIME_FILES.has(file) || RUNTIME_DIRECTORIES.has(file)) return true;
+  if (/^\/electron\/[^/]+\.cjs$/.test(file)) return !file.endsWith('.test.cjs');
+  if (/^\/dist\/wlsaplus\/browser(?:$|\/)/.test(file)) {
+    return !/\.map$/.test(file) && !/^\/dist\/wlsaplus\/browser\/ocr(?:$|\/)/.test(file);
+  }
+  // js-yaml's CJS entry uses only lib/. Its argparse dependency belongs to the
+  // command-line executable, which the app never invokes.
+  return /^\/node_modules\/js-yaml\/lib(?:$|\/)/.test(file);
 }
 
 module.exports = {
   packagerConfig: {
     asar: true,
     // prune:true walks package.json production deps and bypasses our ignore() for
-    // module roots — that pulled Angular/tesseract into asar. With prune:false the
-    // RUNTIME_NODE_MODULES allow-list fully controls what ships for the main process.
+    // module roots — that pulled renderer build dependencies into asar. With prune:false the
+    // runtime allow-list fully controls what ships for the main process.
     prune: false,
     electronZipDir: process.env.ELECTRON_ZIP_DIR || undefined,
     executableName: 'WLSAPlus',
@@ -85,15 +71,14 @@ module.exports = {
     // arches (no native modules ship), and the universal mihomo core sits inside mac-vpn.tar.gz,
     // so it is copied as-is rather than lipo-merged. osxSign (Developer ID only) runs on the merged app.
     // electron/bin -> Resources/bin (mac-vpn.tar.gz = mihomo, the only macOS VPN core,
-    // plus LICENSE-mihomo.txt). sing-box/v2ray-plugin are not shipped.
+    // plus LICENSE-mihomo.txt).
     extraResource: [
       path.join(__dirname, 'electron', 'bin'),
     ],
     ignore: (file) => {
       // Packager usually prefixes '/', but normalize either form.
-      const normalized = !file ? file : (file.startsWith('/') ? file : `/${file}`);
-      if (normalized.startsWith('/node_modules')) return !isKeptNodeModule(normalized);
-      return IGNORE_PATHS.some((pattern) => pattern.test(normalized));
+      const normalized = !file ? '/' : (file.startsWith('/') ? file : `/${file}`);
+      return !isRuntimeFile(normalized);
     },
   },
   rebuildConfig: {},

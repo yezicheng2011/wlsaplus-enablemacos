@@ -5,7 +5,6 @@ import { SchedulePage } from './pages/schedule.page';
 import { ProgressPage } from './pages/progress.page';
 import { SettingsPage } from './pages/settings.page';
 import { ShellComponent } from './shell/shell.component';
-import { WidgetPage } from './pages/widget.page';
 import { ToolsPage } from './pages/tools.page';
 import { TranslatorPage } from './pages/translator.page';
 import { VpnPage } from './pages/vpn.page';
@@ -14,7 +13,6 @@ import { ForumPage } from './pages/forum.page';
 
 export const routes: Routes = [
   { path: 'connect', component: ConnectPage },
-  { path: 'widget/:type', component: WidgetPage },
   {
     path: '', component: ShellComponent, children: [
       { path: '', component: HomePage },

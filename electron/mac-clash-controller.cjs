@@ -240,6 +240,55 @@ function appleScriptElevatedRun(scriptPath) {
   return `do shell script quoted form of "${escaped}" with administrator privileges`;
 }
 
+function appleScriptElevatedCommand(command) {
+  const escaped = command.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\r/g, '\\r').replace(/\n/g, '\\n');
+  return `do shell script "${escaped}" with administrator privileges`;
+}
+
+function macClashProcessPattern(execPath) {
+  // pgrep/pkill use an extended regex against the complete command line. Anchor the executable
+  // so the osascript/pkill commands containing this path cannot match themselves or another app.
+  return `^${execPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`;
+}
+
+function shellQuote(value) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/** Terminating a process is not proof that it exited. Keep checking even after a successful kill. */
+async function stopMacClashProcess({ execPath, run, elevated = true, wait = sleep }) {
+  const pattern = macClashProcessPattern(execPath);
+  const running = async () => {
+    try {
+      await run('/usr/bin/pgrep', ['-f', pattern]);
+      return true;
+    } catch (error) {
+      if (error.code === 1) return false; // no matching process; other errors are not proof of exit
+      throw error;
+    }
+  };
+  const stopped = async () => {
+    for (let attempt = 0; attempt < 21; attempt += 1) {
+      if (!await running()) return true;
+      if (attempt < 20) await wait(100);
+    }
+    return false;
+  };
+  if (!await running()) return { stopped: true, cancelled: false };
+  try { await run('/usr/bin/pkill', ['-TERM', '-f', pattern]); } catch { /* try elevation below */ }
+  if (await stopped()) return { stopped: true, cancelled: false };
+  if (!elevated) return { stopped: false, cancelled: false };
+  let cancelled = false;
+  try {
+    const command = `/usr/bin/pkill -TERM -f ${shellQuote(pattern)}`;
+    await run('osascript', ['-e', appleScriptElevatedCommand(command)]);
+  } catch (error) {
+    cancelled = isOsascriptAuthCancelled(error);
+  }
+  const exited = await stopped();
+  return { stopped: exited, cancelled: !exited && cancelled };
+}
+
 module.exports = {
   MAC_CLASH_CONTROLLER_HOST,
   MAC_CLASH_CONTROLLER_PORT,
@@ -260,4 +309,7 @@ module.exports = {
   createWatchdog,
   isOsascriptAuthCancelled,
   appleScriptElevatedRun,
+  appleScriptElevatedCommand,
+  macClashProcessPattern,
+  stopMacClashProcess,
 };

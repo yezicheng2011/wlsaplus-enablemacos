@@ -6,7 +6,6 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { CredentialVault } from '../core/credential-vault.service';
-import { PlatformService } from '../core/platform.service';
 import { PowerSchoolService } from '../core/powerschool.service';
 
 @Component({
@@ -23,7 +22,7 @@ import { PowerSchoolService } from '../core/powerschool.service';
           <mat-form-field appearance="outline"><mat-label>Username</mat-label><input matInput formControlName="username" autocomplete="username"><span class="material-symbols-rounded field-icon" matSuffix>person</span></mat-form-field>
           <mat-form-field appearance="outline"><mat-label>Password</mat-label><input matInput formControlName="password" [type]="showPassword() ? 'text' : 'password'" autocomplete="current-password"><button mat-icon-button matSuffix type="button" (click)="showPassword.set(!showPassword())" aria-label="Toggle password visibility"><span class="material-symbols-rounded field-icon">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span></button></mat-form-field>
           @if (error()) { <div class="error" role="alert">{{ error() }}</div> }
-          <button mat-flat-button class="connect-button" type="submit" [disabled]="form.invalid || loading() || !platform.info.supportsPowerSchool">
+          <button mat-flat-button class="connect-button" type="submit" [disabled]="form.invalid || loading()">
             @if (loading()) { <mat-spinner diameter="22" /> } @else { <span>Connect</span><span class="material-symbols-rounded button-icon">arrow_forward</span> }
           </button>
           @if (hasSaved()) { <button mat-button type="button" (click)="openCached()">Open cached schedule</button> }
@@ -38,8 +37,7 @@ import { PowerSchoolService } from '../core/powerschool.service';
     h1 { margin: 28px 0 8px; font-size: 32px; } p { margin: 0 0 28px; }
     form, mat-form-field { width: 100%; } form { display: grid; gap: 4px; }
     .connect-button { height: 52px; margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; } .connect-button mat-spinner { margin: auto; } .button-icon, .field-icon { line-height: 1; } .button-icon { font-size: 20px; } .field-icon { font-size: 20px; }
-    .notice, .error { border-radius: 8px; padding: 14px; margin-bottom: 20px; }
-    .notice { display: flex; gap: 12px; background: var(--app-accent-soft); color: var(--app-text); font-size: 13px; line-height: 1.5; }
+    .error { border-radius: 8px; padding: 14px; margin-bottom: 20px; }
     .error { background: color-mix(in srgb, #ba1a1a 14%, transparent); color: #ba1a1a; font-size: 14px; }
   `,
 })
@@ -48,7 +46,7 @@ export class ConnectPage implements OnInit {
   private readonly service = inject(PowerSchoolService);
   private readonly vault = inject(CredentialVault);
   private readonly router = inject(Router);
-  readonly platform = inject(PlatformService);
+
   readonly loading = signal(false);
   readonly error = signal('');
   readonly showPassword = signal(false);

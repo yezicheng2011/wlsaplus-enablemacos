@@ -1,13 +1,10 @@
 const { app, BrowserWindow, Notification, ipcMain, net, powerMonitor, safeStorage, session, shell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
-const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const nodeHttps = require('node:https');
 const nodeNet = require('node:net');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 const { promisify } = require('node:util');
-const { VPN_CONNECTION_MODES, buildVpnConfig } = require('./vpn-config.cjs');
 const { createMacUpdater, validMarkerPath, argValue } = require('./mac-updater.cjs');
 const { validateExternalHelpUrl } = require('./external-links.cjs');
 const {
@@ -40,6 +37,7 @@ const {
   createWatchdog,
   isOsascriptAuthCancelled,
   appleScriptElevatedRun,
+  stopMacClashProcess,
 } = require('./mac-clash-controller.cjs');
 const yaml = require('js-yaml');
 
@@ -55,16 +53,16 @@ const isAutostart = process.argv.includes('--autostart');
 const prepareUpdateMode = process.argv.includes('--prepare-update');
 const vpnAutoConnectMode = process.argv.includes('--vpn-autoconnect=full-tunnel') ? 'full-tunnel' : null;
 const vpnAutoConnectSource = getVpnSource((process.argv.find((argument) => argument.startsWith('--vpn-source=')) || '').slice('--vpn-source='.length)).id;
-const VPN_PORT = 17890;
-let vpnProcess = null;
 let vpnDisconnecting = false;
 let vpnStatus = { state: 'idle', message: 'Ready', connectedAt: null, mode: 'full-tunnel' };
-let vpnProcessError = '';
 // macOS elevated mihomo core: per-connect controller secret (main memory only), watchdog, attempt id.
 let macCoreController = null;
 let macCoreWatchdog = null;
 let macConnectAttempt = 0;
+let macConnectOperation = null;
+let vpnDisconnectOperation = null;
 let quitAfterCleanup = false;
+let quitCleanupPending = false;
 let updateInstallRequested = false;
 const vpnDnsCache = new Map();
 // macOS self-update (electron/mac-updater.cjs). The CI end-to-end test also runs it against a loopback feed.
@@ -88,7 +86,6 @@ let updateStatus = {
 const preload = path.join(__dirname, 'preload.cjs');
 const credentialFile = () => path.join(app.getPath('userData'), 'credentials.bin');
 const vpnDirectory = () => path.join(app.getPath('userData'), 'vpn');
-const vpnConfigFile = () => path.join(vpnDirectory(), 'config.json');
 const vpnProxyStateFile = () => path.join(vpnDirectory(), 'proxy-state.json');
 const classRemindersFile = () => path.join(app.getPath('userData'), 'class-reminders.json');
 const powerSchoolSession = () => session.fromPartition('persist:powerschool');
@@ -103,18 +100,10 @@ function rendererIndexPath() {
   return path.resolve(__dirname, '..', 'dist', 'wlsaplus', 'browser', 'index.html');
 }
 
-function appUrl(route = '') {
-  const dev = process.env.WLSAPLUS_DEV_URL;
-  const hash = route ? `#/${route}` : '#/';
-  if (dev) return `${dev.replace(/\/$/, '')}/${hash}`;
-  // Prefer a resolved file URL so asar paths never keep unexpanded "..".
-  return `${pathToFileURL(rendererIndexPath()).href}${hash}`;
-}
-
 async function loadRenderer(win, route = '') {
   const dev = process.env.WLSAPLUS_DEV_URL;
   if (dev) {
-    await win.loadURL(appUrl(route));
+    await win.loadURL(`${dev.replace(/\/$/, '')}/#/${route}`);
     return;
   }
   const indexFile = rendererIndexPath();
@@ -174,8 +163,6 @@ function configureForumSession() {
   forum.setPermissionCheckHandler((_webContents, permission) => allowed.has(permission));
 }
 
-function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
-
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -189,7 +176,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 15_000) {
     clearTimeout(timer);
   }
 }
-
 
 function setVpnStatus(patch) {
   vpnStatus = { ...vpnStatus, ...patch };
@@ -276,25 +262,6 @@ function measureTcpLatency(server, port, timeoutMs = 2500) {
   });
 }
 
-function parseClashShadowsocksProfile(body) {
-  const document = parseClashDocument(body);
-  const candidate = Array.isArray(document?.proxies)
-    ? document.proxies.find((proxy) => proxy?.type === 'ss' && proxy.server && proxy.port && proxy.cipher && proxy.password)
-    : null;
-  if (!candidate) return null;
-  const plugin = candidate.plugin ? String(candidate.plugin) : undefined;
-  if (plugin && plugin !== 'v2ray-plugin') throw new Error(`The subscription requires an unsupported plugin: ${plugin}.`);
-  return {
-    server: String(candidate.server),
-    serverPort: Number(candidate.port),
-    method: String(candidate.cipher),
-    password: String(candidate.password),
-    plugin,
-    pluginOptions: candidate['plugin-opts'] ? String(candidate['plugin-opts']) : undefined,
-    name: typeof candidate.name === 'string' ? candidate.name : undefined,
-  };
-}
-
 function isPublicIpv4(address) {
   if (!nodeNet.isIPv4(address)) return false;
   const [first, second] = address.split('.').map(Number);
@@ -371,10 +338,9 @@ async function fetchSubscriptionBody(sourceId = 'relay', format = 'clash') {
 
 async function fetchVpnNodes(sourceId = 'relay') {
   let document = null;
-  let body = '';
   let nodes = [];
   try {
-    body = await fetchSubscriptionBody(sourceId, 'clash');
+    const body = await fetchSubscriptionBody(sourceId, 'clash');
     document = parseClashDocument(body);
     nodes = listClashProxyNodes(document);
   } catch { /* try ss fallback below */ }
@@ -387,63 +353,8 @@ async function fetchVpnNodes(sourceId = 'relay') {
     }
   }
   if (!nodes.length) throw new Error(`${getVpnSource(sourceId).name} did not return any VPN nodes.`);
-  return { nodes, body, document };
+  return { nodes, document };
 }
-
-async function fetchVpnProfile(sourceId = 'relay', nodeName = '') {
-  try {
-    const { document, nodes } = await fetchVpnNodes(sourceId);
-    if (!nodes.length) throw new Error(`${getVpnSource(sourceId).name} did not return any VPN nodes.`);
-    const selected = nodes.some((node) => node.id === nodeName) ? nodeName : nodes[0].id;
-    const proxy = Array.isArray(document?.proxies)
-      ? document.proxies.find((item) => item?.name === selected)
-      : null;
-    if (proxy?.type === 'ss' && proxy.server && proxy.port && proxy.cipher && proxy.password) {
-      const plugin = proxy.plugin ? String(proxy.plugin) : undefined;
-      if (plugin && plugin !== 'v2ray-plugin') throw new Error(`The selected node requires an unsupported plugin: ${plugin}.`);
-      return {
-        server: String(proxy.server),
-        serverPort: Number(proxy.port),
-        method: String(proxy.cipher),
-        password: String(proxy.password),
-        plugin,
-        pluginOptions: proxy['plugin-opts'] ? String(proxy['plugin-opts']) : undefined,
-        name: selected,
-      };
-    }
-    // Non-SS Clash nodes are usable by the Mac clash helper via YAML selection.
-    if (document && Array.isArray(document.proxies) && document.proxies.length) {
-      return { name: selected, clashDocument: document };
-    }
-    // SS-URI-only listings have no Clash document; fall through to legacy SS parse.
-    throw new Error(`${getVpnSource(sourceId).name} returned nodes without a Clash profile; trying SS fallback.`);
-  } catch (error) {
-    // Fall back to legacy SS-only parsing.
-    const body = await fetchSubscriptionBody(sourceId, 'ss');
-    const clashProfile = parseClashShadowsocksProfile(body);
-    if (clashProfile) return clashProfile;
-    const decoded = body.startsWith('ss://') ? body : decodeBase64Url(body);
-    const profile = decoded.split(/\r?\n/).find((line) => line.startsWith('ss://'));
-    if (!profile) {
-      const detail = error instanceof Error ? error.message : '';
-      throw new Error(detail || `${getVpnSource(sourceId).name} did not return a usable Shadowsocks profile.`);
-    }
-    return parseShadowsocksUri(profile);
-  }
-}
-
-async function resolveVpnServer(profile) {
-  if (nodeNet.isIP(profile.server)) return profile;
-  const [address] = await resolvePublicIpv4(profile.server);
-  return { ...profile, server: address };
-}
-
-async function writeVpnConfig(profile, mode) {
-  const config = buildVpnConfig(profile, mode, VPN_PORT);
-  await fs.mkdir(vpnDirectory(), { recursive: true });
-  await fs.writeFile(vpnConfigFile(), JSON.stringify(config, null, 2), { mode: 0o600 });
-}
-
 
 function setUpdateStatus(patch) {
   updateStatus = { ...updateStatus, ...patch };
@@ -452,18 +363,6 @@ function setUpdateStatus(patch) {
   }
   return updateStatus;
 }
-
-async function validateVpnConfig(core) {
-  try {
-    await execFileAsync(core, ['check', '-c', vpnConfigFile()], { windowsHide: true });
-  } catch (error) {
-    const detail = String(error?.stderr || error?.stdout || '').trim();
-    throw new Error(detail || 'The generated VPN configuration is invalid.');
-  }
-}
-
-
-
 
 function macCoreRequest(controller) {
   return (options) => controllerRequest({ port: controller.port, secret: controller.secret, ...options });
@@ -492,19 +391,31 @@ function readMacCoreLogTail(logPath) {
   try { return tailLines(require('node:fs').readFileSync(logPath, 'utf8'), 6); } catch { return ''; }
 }
 
-async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
+function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
+  if (isQuitting || vpnDisconnecting) return Promise.resolve(vpnStatus);
+  // One pending approval/startup owns the config and script files. Duplicate clicks must not
+  // launch another root process or overwrite a configuration being used by an earlier attempt.
+  if (macConnectOperation) return macConnectOperation;
+  const attempt = ++macConnectAttempt;
+  macConnectOperation = Promise.resolve()
+    .then(() => startVpnElevated({ attempt, mode, sourceId, nodeName }))
+    .finally(() => { macConnectOperation = null; });
+  return macConnectOperation;
+}
+
+async function startVpnElevated({ attempt, mode, sourceId, nodeName }) {
   if (process.platform !== 'darwin') {
     throw new Error('Administrator VPN restart is only available on macOS.');
   }
 
   const { execFile, execSync } = require('node:child_process');
   const fsSync = require('node:fs');
-  const attempt = ++macConnectAttempt;
+  const superseded = () => attempt !== macConnectAttempt || vpnDisconnecting || isQuitting;
+  if (superseded()) return vpnStatus;
   stopMacCoreWatchdog();
-  macCoreController = null;
   // Best-effort stop of a previous elevated helper so reconnect does not stack tunnels.
   await stopMacClashHelper({ elevated: false }).catch(() => {});
-
+  if (superseded()) return vpnStatus;
 
   const candidateTars = [
     path.join(process.resourcesPath || '', 'bin', 'mac-vpn.tar.gz'),
@@ -570,12 +481,14 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
       requiresElevation: false,
     });
     const { document } = await fetchVpnNodes(sourceId);
+    if (superseded()) return vpnStatus;
     const applied = applySelectedClashNode(document, nodeName, { secret: controller.secret, port: controller.port });
     const configPath = path.join(clashPkgDir, 'config.yaml');
     fsSync.writeFileSync(configPath, yaml.dump(applied.document, { lineWidth: -1, noRefs: true }), 'utf8');
     nodeName = applied.selected;
     selectedGroups = groupsContainingNode(applied.document, nodeName);
   } catch (err) {
+    if (superseded()) return vpnStatus;
     // Keep bundled config.yaml if subscription refresh fails — still try to pin node name locally.
     try {
       const configPath = path.join(clashPkgDir, 'config.yaml');
@@ -598,6 +511,7 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
     }
   }
 
+  if (superseded()) return vpnStatus;
   try {
     if (fsSync.existsSync(scriptPath)) fsSync.rmSync(scriptPath, { force: true });
   } catch { /* ignore cleanup */ }
@@ -613,7 +527,11 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
   });
 
   return new Promise((resolve, reject) => {
-    execFile('osascript', ['-e', appleScriptElevatedRun(scriptPath)], (error, stdout) => {
+    // Track ownership before approval: the helper may exist while the controller is still booting.
+    macCoreController = controller;
+    execFile('osascript', ['-e', appleScriptElevatedRun(scriptPath)], (error) => {
+      // Disconnect waits for this operation, then stops any helper that was just authorized.
+      if (superseded()) { resolve(vpnStatus); return; }
       if (error) {
         if (isOsascriptAuthCancelled(error)) {
           resolve(setVpnStatus({
@@ -645,7 +563,8 @@ async function restartVpnElevated(mode, sourceId = 'relay', nodeName = '') {
 
 async function verifyMacCoreStarted({ attempt, controller, logPath, mode, sourceId, nodeName, selectedGroups }) {
   const source = getVpnSource(sourceId).id;
-  const superseded = () => attempt !== macConnectAttempt || vpnDisconnecting;
+  const superseded = () => attempt !== macConnectAttempt || vpnDisconnecting || isQuitting;
+  if (superseded()) return vpnStatus;
   setVpnStatus({ state: 'connecting', message: 'Starting the VPN core…', connectedAt: null, mode, sourceId: source, requiresElevation: false });
   const request = macCoreRequest(controller);
   const up = await waitForCore(request, { cancelled: superseded });
@@ -681,23 +600,6 @@ async function verifyMacCoreStarted({ attempt, controller, logPath, mode, source
   startMacCoreWatchdog(controller, attempt);
   return status;
 }
-
-async function waitForPort(port, timeoutMs = 10_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const connected = await new Promise((resolve) => {
-      const socket = nodeNet.createConnection({ host: '127.0.0.1', port });
-      socket.once('connect', () => { socket.destroy(); resolve(true); });
-      socket.once('error', () => resolve(false));
-      socket.setTimeout(400, () => { socket.destroy(); resolve(false); });
-    });
-    if (connected) return;
-    await delay(180);
-  }
-  throw new Error('The VPN core did not start in time.');
-}
-
-
 
 async function testWeChatConnectivity() {
   const WECHAT_URL = 'https://weixin.qq.com/';
@@ -752,77 +654,6 @@ async function testWeChatConnectivity() {
   }
 }
 
-async function probeVpnUrls(probeSession, urls, timeoutMs) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await Promise.any(urls.map(async (url) => {
-      const response = await probeSession.fetch(url, { cache: 'no-store', signal: controller.signal });
-      if (!response.ok && response.status !== 204) throw new Error(`HTTP ${response.status}`);
-      return response.status;
-    }));
-  } finally {
-    clearTimeout(timeout);
-    controller.abort();
-  }
-}
-
-async function verifyVpnConnection(mode) {
-  const probeSession = session.fromPartition('wlsaplus-vpn-probe');
-  await probeSession.setProxy(mode === 'full-tunnel'
-    ? { mode: 'direct' }
-    : { mode: 'fixed_servers', proxyRules: `http=127.0.0.1:${VPN_PORT};https=127.0.0.1:${VPN_PORT}` });
-  try {
-    const urls = [
-      'https://www.gstatic.com/generate_204',
-      'https://www.cloudflare.com/cdn-cgi/trace',
-      'https://weixin.qq.com/',
-    ];
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      await probeSession.closeAllConnections().catch(() => {});
-      await probeSession.clearHostResolverCache().catch(() => {});
-      try {
-        await probeVpnUrls(probeSession, urls, 10_000);
-        return;
-      } catch {
-        if (attempt < 2) await delay(800 * (attempt + 1));
-      }
-    }
-    throw new Error(`WLSAPlus relay started, but ${mode === 'full-tunnel' ? 'tunneled DNS' : 'the proxy'} did not become ready. Please reconnect.`);
-  } finally {
-    await probeSession.setProxy({ mode: 'direct' }).catch(() => {});
-    await probeSession.closeAllConnections().catch(() => {});
-  }
-}
-
-
-
-
-async function readMacProxy(service, kind) {
-  const { stdout } = await execFileAsync('networksetup', [`-get${kind}proxy`, service]);
-  const values = Object.fromEntries(stdout.split(/\r?\n/).map((line) => line.match(/^([^:]+):\s*(.*)$/)).filter(Boolean).map((match) => [match[1].trim(), match[2].trim()]));
-  return { enabled: values.Enabled === 'Yes', server: values.Server || '', port: Number(values.Port || 0) };
-}
-
-async function captureSystemProxyState() {
-  if (process.platform !== 'darwin') throw new Error('VPN system proxy is only available on macOS.');
-  const { stdout } = await execFileAsync('networksetup', ['-listallnetworkservices']);
-  const services = stdout.split(/\r?\n/).slice(1).map((value) => value.trim()).filter((value) => value && !value.startsWith('*'));
-  return { platform: 'darwin', services: await Promise.all(services.map(async (service) => ({ service, web: await readMacProxy(service, 'web'), secure: await readMacProxy(service, 'secureweb') }))) };
-}
-
-async function enableSystemProxy() {
-  const state = await captureSystemProxyState();
-  await fs.mkdir(vpnDirectory(), { recursive: true });
-  await fs.writeFile(vpnProxyStateFile(), JSON.stringify(state), { mode: 0o600 });
-  for (const item of state.services) {
-    await execFileAsync('networksetup', ['-setwebproxy', item.service, '127.0.0.1', String(VPN_PORT)]);
-    await execFileAsync('networksetup', ['-setsecurewebproxy', item.service, '127.0.0.1', String(VPN_PORT)]);
-    await execFileAsync('networksetup', ['-setwebproxystate', item.service, 'on']);
-    await execFileAsync('networksetup', ['-setsecurewebproxystate', item.service, 'on']);
-  }
-}
-
 async function restoreSystemProxy(state) {
   if (!state || state.platform !== 'darwin' || process.platform !== 'darwin') {
     await fs.rm(vpnProxyStateFile(), { force: true });
@@ -837,58 +668,23 @@ async function restoreSystemProxy(state) {
   await fs.rm(vpnProxyStateFile(), { force: true });
 }
 
+// Recover network settings left by older macOS versions that used a system proxy.
 async function restoreSavedSystemProxy() {
   const state = await readJson(vpnProxyStateFile(), null);
   if (state) await restoreSystemProxy(state);
 }
 
 async function stopMacClashHelper({ elevated = true } = {}) {
-  if (process.platform !== 'darwin') return { stopped: false, cancelled: false };
+  if (process.platform !== 'darwin') return { stopped: true, cancelled: false };
   const targetDir = path.join(app.getPath('userData'), 'vpn-bin');
   const execPath = path.join(targetDir, 'clash_pkg', 'clash');
-  // Match the absolute helper path so we do not kill unrelated clash processes.
-  const pattern = execPath;
-  try {
-    await execFileAsync('pkill', ['-f', pattern]);
-    await delay(250);
-    return { stopped: true, cancelled: false };
-  } catch {
-    // pkill exits non-zero when nothing matched or the process is root-owned.
-  }
-  if (!elevated) return { stopped: false, cancelled: false };
-  const escaped = pattern.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return await new Promise((resolve) => {
-    execFile(
-      'osascript',
-      ['-e', `do shell script "/usr/bin/pkill -f \"${escaped}\" || true" with administrator privileges`],
-      (error) => {
-        if (error && isOsascriptAuthCancelled(error)) {
-          resolve({ stopped: false, cancelled: true });
-          return;
-        }
-        resolve({ stopped: !error, cancelled: false });
-      },
-    );
-  });
+  return stopMacClashProcess({ execPath, run: execFileAsync, elevated });
 }
 
-async function stopVpnProcess() {
-  const child = vpnProcess;
-  vpnProcess = null;
-  if (!child || child.exitCode !== null) return;
-  await new Promise((resolve) => {
-    const timeout = setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); resolve(); }, 2_000);
-    child.once('exit', () => { clearTimeout(timeout); resolve(); });
-    child.kill();
-  });
-}
-
-function normalizeVpnMode(value) {
-  return VPN_CONNECTION_MODES.has(value) ? value : 'full-tunnel';
-}
-
-async function connectVpn(requestedMode = 'full-tunnel', requestedSource = 'relay', nodeName = '') {
-  const mode = normalizeVpnMode(requestedMode);
+async function connectVpn(_requestedMode = 'full-tunnel', requestedSource = 'relay', nodeName = '') {
+  if (isQuitting || vpnDisconnecting) return vpnStatus;
+  if (macConnectOperation) return macConnectOperation;
+  const mode = 'full-tunnel';
   const sourceId = getVpnSource(requestedSource).id;
   if (process.platform !== 'darwin') {
     return setVpnStatus({
@@ -903,7 +699,10 @@ async function connectVpn(requestedMode = 'full-tunnel', requestedSource = 'rela
   if (vpnStatus.state === 'connected' && vpnStatus.mode === mode && vpnStatus.sourceId === sourceId && (!nodeName || vpnStatus.nodeName === nodeName)) {
     return vpnStatus;
   }
-  if (vpnProcess) await disconnectVpn();
+  if (macCoreController || vpnStatus.state === 'connected') {
+    await disconnectVpn();
+    if (vpnStatus.state !== 'idle' || isQuitting) return vpnStatus;
+  }
 
   setVpnStatus({
     state: 'connecting',
@@ -924,25 +723,33 @@ async function connectVpn(requestedMode = 'full-tunnel', requestedSource = 'rela
   }
 }
 
-async function disconnectVpn() {
-  const mode = normalizeVpnMode(vpnStatus.mode);
+function disconnectVpn() {
+  if (vpnDisconnectOperation) return vpnDisconnectOperation;
+  vpnDisconnecting = true;
+  ++macConnectAttempt;
+  stopMacCoreWatchdog();
+  vpnDisconnectOperation = performVpnDisconnect()
+    .finally(() => { vpnDisconnecting = false; vpnDisconnectOperation = null; });
+  return vpnDisconnectOperation;
+}
+
+async function performVpnDisconnect() {
+  const mode = 'full-tunnel';
   const sourceId = vpnStatus.sourceId;
   const nodeName = vpnStatus.nodeName;
   const connectedAt = vpnStatus.connectedAt;
   setVpnStatus({ state: 'disconnecting', message: 'Disconnecting...', mode, sourceId, nodeName, requiresElevation: false });
-  vpnDisconnecting = true;
-  stopMacCoreWatchdog();
-  const attempt = ++macConnectAttempt;
+  // An already displayed admin prompt can still launch a core after cancellation. Await its
+  // completion before killing anything; canceled subscription fetches never reach that prompt.
+  await macConnectOperation?.catch(() => {});
   await restoreSavedSystemProxy().catch(() => {});
-  await stopVpnProcess();
-  // Mac full-tunnel uses an elevated clash helper, not vpnProcess — stop it too.
   const macStop = await stopMacClashHelper({ elevated: true }).catch(() => ({ stopped: false, cancelled: false }));
-  vpnDisconnecting = false;
-  if (macStop?.cancelled) {
-    if (macCoreController) startMacCoreWatchdog(macCoreController, attempt);
+  if (!macStop?.stopped) {
     return setVpnStatus({
       state: 'connected',
-      message: nodeName ? `Still connected · ${nodeName}` : 'Still connected (disconnect cancelled)',
+      message: macStop?.cancelled
+        ? 'Disconnect was cancelled. VPN may still be running. Tap Disconnect to retry.'
+        : 'Could not stop the VPN core. VPN may still be running. Tap Disconnect to retry.',
       connectedAt: connectedAt || new Date().toISOString(),
       mode,
       sourceId,
@@ -971,11 +778,16 @@ function writeUpdateMarker() {
 }
 
 async function cleanupBeforeUpdate() {
-  if (updateInstallRequested) return;
+  // Preparation can be canceled by a channel change while awaiting cleanup. Only the final
+  // updater quit callback commits exit/install flags after its last eligibility check.
+  const status = await disconnectVpn();
+  if (status.state !== 'idle') throw new Error('Could not stop the VPN core. Disconnect the VPN before installing the update.');
+}
+
+function quitForUpdate() {
   updateInstallRequested = true;
   isQuitting = true;
-  if (vpnProcess || vpnStatus.state === 'connected') await disconnectVpn().catch(() => {});
-  quitAfterCleanup = true;
+  app.quit();
 }
 
 function runForUpdate(command, args) {
@@ -1020,7 +832,7 @@ function configureAppUpdater() {
     spawnDetached: (command, args) => spawn(command, args, { detached: true, stdio: 'ignore' }).unref(),
     helperSource: path.join(__dirname, 'update-helper.sh'),
     beforeInstall: cleanupBeforeUpdate,
-    quit: () => app.quit(),
+    quit: quitForUpdate,
     onStatus: (status) => setUpdateStatus(status),
     launchedByUpdater: Boolean(updateMarkerArg),
     fetchImpl: updateFetch,
@@ -1037,7 +849,6 @@ function configureAppUpdater() {
     }
   }
 }
-
 
 async function translateWithGoogle(value, source, target) {
   const params = new URLSearchParams({ client: 'gtx', sl: source, tl: target, dt: 't', q: value });
@@ -1130,7 +941,6 @@ function showMainWindow(route = '') {
 async function readJson(file, fallback) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return fallback; }
 }
-
 
 function validateBaseUrl(value) {
   const url = new URL(String(value));
@@ -1244,11 +1054,9 @@ ipcMain.handle('vpn:test-latency', async (_event, nodes) => {
 });
 ipcMain.handle('vpn:test-wechat', async () => testWeChatConnectivity());
 ipcMain.handle('vpn:disconnect', () => disconnectVpn());
-ipcMain.handle('vpn:restart-elevated', (_event, mode, sourceId, nodeName) => restartVpnElevated(normalizeVpnMode(mode), sourceId, nodeName));
+ipcMain.handle('vpn:restart-elevated', (_event, mode, sourceId, nodeName) => connectVpn(mode, sourceId, nodeName));
 ipcMain.handle('updater:status', () => macUpdater?.getStatus() ?? updateStatus);
 ipcMain.handle('updater:check', () => macUpdater?.check() ?? updateStatus);
-// Downloads start automatically after a successful check; "download" is kept as an alias for older UI code.
-ipcMain.handle('updater:download', () => macUpdater?.check() ?? updateStatus);
 ipcMain.handle('updater:install', () => macUpdater?.install() ?? updateStatus);
 ipcMain.handle('updater:reveal-log', async () => {
   const file = path.join(app.getPath('userData'), 'updates', 'update.log');
@@ -1256,7 +1064,6 @@ ipcMain.handle('updater:reveal-log', async () => {
 });
 ipcMain.handle('updater:set-channel', (_event, channel) => macUpdater?.setChannel(channel === 'beta' ? 'beta' : 'stable') ?? updateStatus);
 ipcMain.handle('translator:translate', (_event, text, source, target) => translateText(text, source, target));
-ipcMain.handle('translator:capture-region', () => Promise.reject(new Error('Screen translation is not available on macOS.')));
 
 // Notifications must stay referenced until dismissed, or their click handler can be garbage-collected.
 const activeClassReminderNotifications = new Set();
@@ -1290,7 +1097,6 @@ function classReminders() {
 }
 
 ipcMain.handle('notice:get', () => fetchAppNotice());
-ipcMain.handle('notifications:show-class-reminder', (_event, options) => showClassReminderNotification(options));
 ipcMain.handle('reminders:sync', async (_event, payload) => {
   const scheduler = classReminders();
   if (!scheduler) return false;
@@ -1300,7 +1106,7 @@ ipcMain.handle('reminders:sync', async (_event, payload) => {
 if (hasSingleInstanceLock) {
   app.on('second-instance', (_event, commandLine) => {
     if (commandLine.includes('--prepare-update')) {
-      void cleanupBeforeUpdate().finally(() => app.quit());
+      void cleanupBeforeUpdate().then(quitForUpdate).catch((error) => console.error('Could not prepare for update:', error));
       return;
     }
     if (!commandLine.includes('--autostart')) showMainWindow();
@@ -1317,8 +1123,8 @@ app.whenReady().then(async () => {
     return;
   }
   if (prepareUpdateMode) {
-    await cleanupBeforeUpdate();
-    app.quit();
+    try { await cleanupBeforeUpdate(); quitForUpdate(); }
+    catch (error) { console.error('Could not prepare for update:', error); showMainWindow('tools/vpn'); }
     return;
   }
   configureAppUpdater();
@@ -1333,14 +1139,24 @@ app.whenReady().then(async () => {
   }
   if (!isAutostart || vpnAutoConnectMode) showMainWindow(vpnAutoConnectMode ? 'tools/vpn' : '');
   if (vpnAutoConnectMode) void connectVpn(vpnAutoConnectMode, vpnAutoConnectSource);
-  app.on('activate', showMainWindow);
+  app.on('activate', () => showMainWindow());
 });
 app.on('before-quit', (event) => {
   isQuitting = true;
   stopMacCoreWatchdog();
-  if ((vpnProcess || vpnStatus.state === 'connected') && !quitAfterCleanup) {
+  if (!quitAfterCleanup) {
     event.preventDefault();
-    void disconnectVpn().finally(() => { quitAfterCleanup = true; app.quit(); });
+    if (quitCleanupPending) return;
+    quitCleanupPending = true;
+    void disconnectVpn().then((status) => {
+      if (status.state === 'idle') { quitAfterCleanup = true; app.quit(); }
+      else { isQuitting = false; updateInstallRequested = false; showMainWindow('tools/vpn'); }
+    }).catch((error) => {
+      isQuitting = false;
+      updateInstallRequested = false;
+      console.error('Could not clean up the VPN before quitting:', error);
+      showMainWindow('tools/vpn');
+    }).finally(() => { quitCleanupPending = false; });
   }
 });
 app.on('will-quit', () => {

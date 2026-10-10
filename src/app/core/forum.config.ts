@@ -7,8 +7,8 @@ export const FORUM_FALLBACK_URL = 'https://lt.spacehubxyz.xn--j6w193g/';
 export const FORUM_PARTITION = 'persist:forum';
 
 /**
- * Theme + embed contract with the forum server (aws&gcp). Single source of truth for the names;
- * electron/forum-config.cjs mirrors the cookie names (checked by forum-config.test.cjs).
+ * Theme + embed contract with the forum server (aws&gcp).
+ * electron/forum-config.cjs defines the cookies used by the main process.
  * - Cookies (set by main on every forum origin in the forum partition; Secure, Path=/, SameSite=Lax):
  *     wlsaplus_theme=light|dark, wlsaplus_embed=1
  * - Query params on the initial (non-SSO) entry URL: ?theme=light|dark&embed=wlsaplus
@@ -17,9 +17,6 @@ export const FORUM_PARTITION = 'persist:forum';
  * Contract: /workspace/wlsaplus-forum-brand/SSO_INTEGRATION.md §7.
  */
 export type ForumTheme = 'light' | 'dark';
-export const FORUM_THEME_COOKIE = 'wlsaplus_theme';
-export const FORUM_EMBED_COOKIE = 'wlsaplus_embed';
-export const FORUM_EMBED_COOKIE_VALUE = '1';
 export const FORUM_THEME_PARAM = 'theme';
 export const FORUM_EMBED_PARAM = 'embed';
 export const FORUM_EMBED_PARAM_VALUE = 'wlsaplus';
@@ -71,6 +68,4 @@ export const FORUM_BRAND = {
   navLabel: 'Forum',
   /** Material Symbols Rounded icon name. Replace when the forum brand icon is available. */
   icon: 'forum',
-  /** Forum logo (teal variant from the forum brand kit), served from public/icons. */
-  logo: 'icons/forum-logo-teal.svg',
 } as const;

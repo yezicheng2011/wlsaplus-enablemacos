@@ -115,7 +115,7 @@ export class SchedulePage {
   readonly days = computed(() => {
     const groups = new Map<string, ClassSession[]>();
     for (const session of this.store.schedule().sessions) {
-      const date = session.startsAt.slice(0, 10); groups.set(date, [...(groups.get(date) ?? []), session]);
+      const date = this.localDateKey(new Date(session.startsAt)); groups.set(date, [...(groups.get(date) ?? []), session]);
     }
     return [...groups].map(([date, sessions]) => ({ date: `${date}T12:00:00`, sessions }));
   });

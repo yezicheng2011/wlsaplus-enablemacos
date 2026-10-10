@@ -2,7 +2,7 @@ import { Component, DestroyRef, NO_ERRORS_SCHEMA, ElementRef, OnInit, effect, in
 import { MatButtonModule } from '@angular/material/button';
 import { LocalStore } from '../core/local-store.service';
 import {
-  FORUM_BRAND, FORUM_SSO_REPORTABLE_CODES, FORUM_URL, ForumTheme,
+  FORUM_BRAND, FORUM_PARTITION, FORUM_SSO_REPORTABLE_CODES, FORUM_URL, ForumTheme,
   forumThemeMessageScript, isForumSsoConsumeUrl, withForumEntryParams,
 } from '../core/forum.config';
 
@@ -31,7 +31,7 @@ export const FORUM_SSO_NOTICE_MS = 8000;
       } @else if (failed()) {
         <div class="empty-state"><div><span class="material-symbols-rounded big">cloud_off</span><p>{{ brand.name }} could not be reached. {{ failed() }}</p><button mat-flat-button type="button" (click)="retry()">Try again</button></div></div>
       } @else if (src()) {
-        <webview #view class="forum-view" partition="persist:forum" allowpopups [attr.src]="src()"
+        <webview #view class="forum-view" [attr.partition]="partition" allowpopups [attr.src]="src()"
           (did-start-loading)="loading.set(true)" (did-stop-loading)="loading.set(false)"
           (did-fail-load)="onFailLoad($event)" (did-navigate)="onNavigate($event)" (did-navigate-in-page)="onNavigate($event)"></webview>
       }
@@ -65,6 +65,7 @@ export class ForumPage implements OnInit {
   private readonly store = inject(LocalStore);
   private readonly view = viewChild<ElementRef<ForumWebview>>('view');
   readonly brand = FORUM_BRAND;
+  readonly partition = FORUM_PARTITION;
   readonly desktop = !!window.wlsaplus?.forum;
   readonly src = signal<string | null>(null);
   readonly loading = signal(false);

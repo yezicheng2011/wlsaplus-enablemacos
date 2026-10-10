@@ -27,7 +27,7 @@ const {
 } = require('./update-core.cjs');
 
 const MARKER_NAME = 'launched.marker';
-const BUSY = new Set(['checking', 'downloading', 'ready', 'installing']);
+const BUSY = new Set(['checking', 'available', 'downloading', 'ready', 'installing']);
 const LOG_MAX_BYTES = 512 * 1024;
 
 /** Every state has something to show, even if a code path forgets its message. */
@@ -111,6 +111,8 @@ function createMacUpdater(options) {
   let checkTimer = null;
   let intervalTimer = null;
   let job = null;   // promise of the running background download (check() never waits for it)
+  let operation = null; // identity + cancellation for a check and its background download
+  let channelCleanup = Promise.resolve(); // finish removing cancelled staging before another download
   let seq = 0;      // increases with every status, so the UI can ignore stale replies
   const logFile = path.join(updatesDir, 'update.log');
   let logReady = null;
@@ -140,6 +142,14 @@ function createMacUpdater(options) {
 
   function channel() {
     return channelOverride || settings.channel || (isPrerelease(currentVersion) ? 'beta' : 'stable');
+  }
+
+  function accepts(update) {
+    return channel() === 'beta' || !isPrerelease(update.version);
+  }
+
+  function isCurrent(active) {
+    return operation === active && !active.controller.signal.aborted;
   }
 
   function setStatus(patch) {
@@ -210,11 +220,11 @@ function createMacUpdater(options) {
     return { target, admin };
   }
 
-  async function fetchManifest(tag) {
+  async function fetchManifest(tag, signal) {
     const urls = assetUrls(feed, tag, MANIFEST_NAME);
     const started = Date.now();
     try {
-      const text = await fetchText(urls, { fetchImpl, onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`) });
+      const text = await fetchText(urls, { fetchImpl, signal, onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`) });
       const manifest = verifyManifest(text, publicKeyPem);
       void log(`manifest ${tag}: version ${manifest.version}, files ${Object.keys(manifest.files || {}).join('/')} (${Date.now() - started} ms, signature ok)`);
       return manifest;
@@ -224,18 +234,19 @@ function createMacUpdater(options) {
     }
   }
 
-  async function fetchStableManifest() {
+  async function fetchStableManifest(signal) {
     let latest = null;
     try {
       const started = Date.now();
-      latest = JSON.parse(await fetchText([stableLatestUrl(feed)], { fetchImpl, onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`) }));
+      latest = JSON.parse(await fetchText([stableLatestUrl(feed)], { fetchImpl, signal, onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`) }));
       void log(`stable latest: ${latest?.tag} (${Date.now() - started} ms)`);
     } catch (error) {
+      signal?.throwIfAborted();
       void log(`stable latest: FAILED: ${describeError(error)}; trying mirrors`);
       // Site unavailable: the mirrors can still resolve GitHub's "latest" (non-prerelease) release.
       for (const mirror of feed.mirrors) {
         try {
-          const text = await fetchText([`${mirror}https://github.com/${UPDATE_REPO}/releases/latest/download/${MANIFEST_NAME}`], { fetchImpl });
+          const text = await fetchText([`${mirror}https://github.com/${UPDATE_REPO}/releases/latest/download/${MANIFEST_NAME}`], { fetchImpl, signal });
           return verifyManifest(text, publicKeyPem);
         } catch {}
       }
@@ -246,7 +257,7 @@ function createMacUpdater(options) {
       void log(`stable latest ${latest?.tag} has no ${MANIFEST_NAME} (not self-updating yet)`);
       return null; // e.g. 1.0.9: no self-update yet
     }
-    return fetchManifest(latest.tag);
+    return fetchManifest(latest.tag, signal);
   }
 
   /**
@@ -256,33 +267,47 @@ function createMacUpdater(options) {
    */
   async function check({ reason = 'manual' } = {}) {
     if (!supported) return status;
+    // A channel switch may queue more cleanup while this check is already waiting.
+    let pendingCleanup;
+    do {
+      pendingCleanup = channelCleanup;
+      await pendingCleanup;
+    } while (pendingCleanup !== channelCleanup);
     if (BUSY.has(status.state)) {
       void log(`check (${reason}) ignored: already ${status.state}`);
       return status;
     }
+    const active = { controller: new AbortController(), wanted: channel(), manifest: null };
+    operation = active;
     setStatus({ state: 'checking', message: 'Checking for updates...', version: null, percent: null });
     void log(`check (${reason}): version ${currentVersion}, channel ${channel()}, arch ${arch}, macOS ${systemVersion || '?'}, feed ${feed.base}`);
     try {
-      return await checkInner();
+      return await checkInner(active);
     } catch (error) {
+      if (!isCurrent(active)) return status;
       void log(`check: unexpected error: ${describeError(error)}\n${error?.stack || ''}`);
       return setStatus({ state: 'error', message: `Could not check for updates: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300), percent: null });
+    } finally {
+      if (isCurrent(active) && !job) operation = null;
     }
   }
 
-  async function checkInner() {
-    const wanted = channel();
+  async function checkInner(active) {
+    const wanted = active.wanted;
+    const signal = active.controller.signal;
     const manifests = [];
     const errors = [];
     try {
-      manifests.push(await fetchStableManifest());
+      manifests.push(await fetchStableManifest(signal));
     } catch (error) { errors.push(error); }
+    if (!isCurrent(active)) return status;
     if (wanted === 'beta') {
-      try { manifests.push(await fetchManifest(BETA_CHANNEL_TAG)); } catch (error) {
+      try { manifests.push(await fetchManifest(BETA_CHANNEL_TAG, signal)); } catch (error) {
         if (error?.notFound) void log('beta channel: no test build is published right now');
         else errors.push(error);
       }
     }
+    if (!isCurrent(active)) return status;
     if (!manifests.some(Boolean) && errors.length) {
       const signatureProblem = errors.find((error) => /signature|not valid JSON|unexpected product/iu.test(String(error?.message)));
       return setStatus({
@@ -299,12 +324,18 @@ function createMacUpdater(options) {
     }
     const file = pickUpdateFile(chosen, arch);
     if (!file) return setStatus({ state: 'error', message: `WLSAPlus ${chosen.version} has no build for this Mac.`, version: chosen.version, percent: null });
+    active.manifest = chosen;
     const location = await installLocation();
+    if (!isCurrent(active)) return status;
     void log(`install location: ${location.problem || `${location.target} (admin needed: ${location.admin})`}`);
     if (location.problem) return setStatus({ state: 'error', message: location.problem, version: chosen.version, percent: null });
     setStatus({ state: 'available', message: `WLSAPlus ${chosen.version} is available.`, version: chosen.version, percent: null });
     // Background: the IPC reply (and the button) must not wait minutes for the download.
-    job = download(chosen, file, location).finally(() => { job = null; });
+    const downloadJob = download(chosen, file, location, active).finally(() => {
+      if (job === downloadJob) job = null;
+      if (operation === active) operation = null;
+    });
+    job = downloadJob;
     return status;
   }
 
@@ -332,8 +363,9 @@ function createMacUpdater(options) {
     return stagedApp;
   }
 
-  async function download(manifest, file, location) {
+  async function download(manifest, file, location, active) {
     const stagingDir = path.join(updatesDir, 'staging', manifest.version);
+    const signal = active.controller.signal;
     try {
       // Drop staging folders of other versions.
       await fsp.mkdir(path.join(updatesDir, 'staging'), { recursive: true });
@@ -348,6 +380,7 @@ function createMacUpdater(options) {
       } catch (error) {
         if (/disk space/u.test(String(error?.message))) throw error;
       }
+      signal.throwIfAborted();
       setStatus({ state: 'downloading', message: `Downloading WLSAPlus ${manifest.version}...`, version: manifest.version, percent: 0 });
       let lastPercent = -1;
       const zipPath = path.join(stagingDir, file.name);
@@ -359,8 +392,10 @@ function createMacUpdater(options) {
         size: file.size,
         sha256: file.sha256,
         fetchImpl,
+        signal,
         onAttempt: (url, outcome) => void log(`  GET ${url} -> ${outcome}`),
         onProgress: (received, total) => {
+          if (!isCurrent(active)) return;
           const percent = Math.max(0, Math.min(100, Math.floor((received / total) * 100)));
           if (percent !== lastPercent) {
             lastPercent = percent;
@@ -368,12 +403,14 @@ function createMacUpdater(options) {
           }
         },
       });
+      signal.throwIfAborted();
       void log(`download done from ${usedUrl || 'existing file'} in ${Math.round((Date.now() - startedAt) / 1000)} s, sha256 ok`);
       setStatus({ state: 'downloading', message: `Verifying WLSAPlus ${manifest.version}...`, percent: 100 });
       const appDir = path.join(stagingDir, 'app');
       await fsp.rm(appDir, { recursive: true, force: true });
       await fsp.mkdir(appDir, { recursive: true });
       await run('ditto', ['-x', '-k', zipPath, appDir]);
+      signal.throwIfAborted();
       let stagedApp;
       try {
         stagedApp = await verifyStagedApp(appDir, manifest, file);
@@ -385,9 +422,14 @@ function createMacUpdater(options) {
       // readFile (not copyFile): the helper lives inside app.asar.
       await fsp.writeFile(helperFile, await fsp.readFile(helperSource), { mode: 0o755 });
       await fsp.chmod(helperFile, 0o755);
+      signal.throwIfAborted();
       staged = { version: manifest.version, stagedApp, marker: path.join(stagingDir, MARKER_NAME), file, location };
       return setStatus({ state: 'ready', message: `WLSAPlus ${manifest.version} is ready. Restart to update (or it installs when you quit).`, version: manifest.version, percent: 100 });
     } catch (error) {
+      if (!isCurrent(active)) {
+        await fsp.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+        return status;
+      }
       staged = null;
       void log(`download/verify FAILED: ${describeError(error)}`);
       const detail = error instanceof Error ? error.message : String(error);
@@ -395,17 +437,17 @@ function createMacUpdater(options) {
     }
   }
 
-  function helperArgs(location, mode) {
+  function helperArgs(location, mode, candidate) {
     const timeout = feed.test && /^\d+$/u.test(String(env.WLSAPLUS_UPDATE_HELPER_TIMEOUT || '')) ? String(env.WLSAPLUS_UPDATE_HELPER_TIMEOUT) : '90';
     return [
       helperFile,
       '--pid', String(pid),
       '--target', location.target,
-      '--staged', staged.stagedApp,
+      '--staged', candidate.stagedApp,
       '--backup', backupApp,
-      '--marker', staged.marker,
+      '--marker', candidate.marker,
       '--result', resultFile,
-      '--version', staged.version,
+      '--version', candidate.version,
       '--from', currentVersion,
       '--mode', mode,
       '--admin', location.admin ? '1' : '0',
@@ -416,15 +458,19 @@ function createMacUpdater(options) {
 
   /** "Restart now": clean up (VPN off), start the helper, quit. */
   async function install() {
-    if (status.state !== 'ready' || !staged) return status;
+    if (status.state !== 'ready' || !staged || !accepts(staged)) return status;
+    const candidate = staged;
     const location = await installLocation();
+    if (status.state !== 'ready' || staged !== candidate || !accepts(candidate)) return status;
     if (location.problem) return setStatus({ state: 'error', message: location.problem, percent: null });
     setStatus({ state: 'installing', message: 'Closing WLSAPlus and installing the update...', percent: 100 });
-    void log(`install (restart): ${staged.version} -> ${location.target} (admin: ${location.admin})`);
+    void log(`install (restart): ${candidate.version} -> ${location.target} (admin: ${location.admin})`);
     try {
       await beforeInstall();
-      spawnDetached('/bin/bash', helperArgs(location, 'restart'));
+      if (status.state !== 'installing' || staged !== candidate || !accepts(candidate)) return status;
+      spawnDetached('/bin/bash', helperArgs(location, 'restart', candidate));
     } catch (error) {
+      if (staged !== candidate || !accepts(candidate)) return status;
       return setStatus({ state: 'error', message: `Update failed: ${error instanceof Error ? error.message : String(error)}`, percent: null });
     }
     quit();
@@ -437,11 +483,11 @@ function createMacUpdater(options) {
    */
   let quitInstallStarted = false;
   function installOnQuit() {
-    if (quitInstallStarted || status.state !== 'ready' || !staged || !staged.location?.target || staged.location.admin) return false;
+    if (quitInstallStarted || status.state !== 'ready' || !staged || !accepts(staged) || !staged.location?.target || staged.location.admin) return false;
     quitInstallStarted = true;
     void log(`install on quit: ${staged.version}`);
     try {
-      spawnDetached('/bin/bash', helperArgs(staged.location, 'quit'));
+      spawnDetached('/bin/bash', helperArgs(staged.location, 'quit', staged));
       return true;
     } catch {
       return false;
@@ -450,8 +496,27 @@ function createMacUpdater(options) {
 
   async function setChannel(next) {
     if (!['beta', 'stable'].includes(next)) return status;
+    const previous = channel();
     settings.channel = next;
+    if (channel() !== previous) {
+      const cancel = operation && (!operation.manifest || !accepts(operation.manifest));
+      const discarded = staged && !accepts(staged) ? staged : null;
+      if (cancel) {
+        operation.controller.abort();
+        operation = null;
+      }
+      // Revoke installation eligibility before the first await (including installOnQuit).
+      if (discarded) staged = null;
+      if (cancel || discarded) {
+        const cancelledJob = cancel ? job : null;
+        channelCleanup = Promise.all([channelCleanup, cancelledJob]).then(async () => {
+          if (discarded) await fsp.rm(path.dirname(discarded.marker), { recursive: true, force: true }).catch(() => {});
+        });
+        setStatus({ state: supported ? 'idle' : 'unsupported', message: 'Update channel changed. Check for updates again.', version: null, percent: null });
+      }
+    }
     await saveSettings().catch(() => {});
+    await channelCleanup;
     void log(`channel set to ${next}`);
     setStatus({});
     return status;
