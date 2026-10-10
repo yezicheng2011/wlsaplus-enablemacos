@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import type { PlatformHttpResponse, PlatformInfo } from './models';
+import type { PlatformHttpResponse } from './models';
 
 export interface NativeRequest {
   baseUrl: string;
@@ -13,16 +13,6 @@ export interface NativeRequest {
 /** WLSAPlus is a macOS Electron app; every native capability goes through the preload bridge. */
 @Injectable({ providedIn: 'root' })
 export class PlatformService {
-  readonly info: PlatformInfo = {
-    kind: 'electron',
-    os: 'macos',
-    supportsPowerSchool: true,
-    supportsDesktopCards: false,
-    supportsVpn: true,
-    supportsScreenTranslation: false,
-    supportsPhoneControl: false,
-  };
-
   async request(options: NativeRequest): Promise<PlatformHttpResponse> {
     return this.bridge().powerschool.request(options);
   }

@@ -17,14 +17,6 @@ function installBridge(): Bridge {
 describe('PlatformService (desktop bridge)', () => {
   afterEach(() => { delete (window as unknown as { wlsaplus?: unknown }).wlsaplus; });
 
-  it('always describes the macOS Electron app', () => {
-    const info = new PlatformService().info;
-    expect(info.kind).toBe('electron');
-    expect(info.os).toBe('macos');
-    expect(info.supportsPowerSchool).toBe(true);
-    expect(info.supportsVpn).toBe(true);
-  });
-
   it('sends PowerSchool requests through the preload bridge', async () => {
     const bridge = installBridge();
     const options = { baseUrl: 'https://ps.wlsash.org.cn', path: '/guardian/home.html', method: 'GET' as const, referrerPath: '/guardian/scores.html' };

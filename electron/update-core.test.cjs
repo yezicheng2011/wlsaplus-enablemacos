@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const { Writable } = require('node:stream');
 const test = require('node:test');
 const core = require('./update-core.cjs');
 
@@ -183,4 +184,59 @@ test('downloadVerified waits for a slow first byte but aborts a stalled transfer
     server.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('downloadVerified rejects writable open, write and finalization failures without uncaught errors', async (t) => {
+  const body = crypto.randomBytes(100_000);
+  for (const phase of ['open', 'write', 'final']) {
+    await t.test(phase, async (t) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wlsa-dl-'));
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const dest = path.join(dir, 'update.zip');
+      const writes = [];
+      t.mock.method(fs, 'createWriteStream', () => {
+        const fail = (callback) => setImmediate(() => callback(Object.assign(new Error(`ENOSPC during ${phase}`), { code: 'ENOSPC' })));
+        const out = new Writable({
+          highWaterMark: 1, // The write failure happens while the pipeline is waiting for drain.
+          construct(callback) { if (phase === 'open') fail(callback); else callback(); },
+          write(chunk, encoding, callback) { if (phase === 'write') fail(callback); else callback(); },
+          final(callback) { if (phase === 'final') fail(callback); else callback(); },
+        });
+        writes.push(out);
+        return out;
+      });
+      await assert.rejects(core.downloadVerified({
+        urls: ['https://updates.example/update.zip'], dest, size: body.length, sha256: sha(body),
+        fetchImpl: async () => new Response(body),
+      }), { code: 'ENOSPC' });
+      assert.equal(writes.length, 2, 'both attempts reject normally');
+      assert.ok(writes.every((out) => out.destroyed), 'failed output streams are closed');
+      assert.equal(fs.existsSync(dest), false, 'failed output never becomes an installable archive');
+    });
+  }
+});
+
+test('downloadVerified cancellation closes a stalled transfer without retrying other sources', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wlsa-dl-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const controller = new AbortController();
+  const body = crypto.randomBytes(1000);
+  const dest = path.join(dir, 'update.zip');
+  let requests = 0;
+  let cancelled = false;
+  await assert.rejects(core.downloadVerified({
+    urls: ['https://updates.example/update.zip', 'https://mirror.example/update.zip'],
+    dest, size: body.length * 2, sha256: sha(body), signal: controller.signal,
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(new ReadableStream({
+        start(stream) { stream.enqueue(body); },
+        cancel() { cancelled = true; },
+      }));
+    },
+    onProgress: () => controller.abort(),
+  }), { name: 'AbortError' });
+  assert.equal(requests, 1);
+  assert.equal(cancelled, true);
+  assert.equal(fs.existsSync(dest), false);
 });

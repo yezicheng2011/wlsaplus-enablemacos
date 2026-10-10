@@ -7,16 +7,26 @@ import type { PowerSchoolCredentials } from './models';
  */
 @Injectable({ providedIn: 'root' })
 export class CredentialVault {
+  // IPC handlers may complete out of order. In particular, a clear must finish
+  // after any credential write that was already started.
+  private pending: Promise<unknown> = Promise.resolve();
+
   async get(): Promise<PowerSchoolCredentials | null> {
-    return this.bridge().get();
+    return this.enqueue(() => this.bridge().get());
   }
 
   async set(value: PowerSchoolCredentials): Promise<void> {
-    return this.bridge().set(value);
+    return this.enqueue(() => this.bridge().set(value));
   }
 
   async clear(): Promise<void> {
-    return this.bridge().clear();
+    return this.enqueue(() => this.bridge().clear());
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(operation);
+    this.pending = result.catch(() => undefined);
+    return result;
   }
 
   private bridge(): NonNullable<Window['wlsaplus']>['credentials'] {

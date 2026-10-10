@@ -8,23 +8,20 @@ The distributed macOS app may also include the following components. Their licen
 
 | Component | Role | License | License file |
 | --- | --- | --- | --- |
-| [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) | Binary inside `electron/bin/mac-vpn.tar.gz` (`clash_pkg/clash`), the only VPN core of the macOS app; shipped as `Contents/Resources/bin/` | GPL-3.0 | `electron/bin/LICENSE-mihomo.txt` (also `build/vpn-core/LICENSE-mihomo.txt`) |
-
-sing-box and v2ray-plugin are **not** shipped in the app. `scripts/download-vpn-core.mjs` only downloads them when `WLSAPLUS_FETCH_SING_BOX=1` is set (used by the optional `electron/vpn-config.test.cjs`); their licenses are kept in `build/vpn-core/LICENSE-sing-box.txt` (GPL-3.0) and `build/vpn-core/LICENSE-v2ray-plugin.txt` (MIT).
+| [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) | Binary inside `electron/bin/mac-vpn.tar.gz` (`clash_pkg/clash`), the only VPN core of the macOS app; shipped as `Contents/Resources/bin/` | GPL-3.0 | `electron/bin/LICENSE-mihomo.txt` |
 
 ## Major npm / runtime dependencies
 
-These are installed via npm and are **not** copied into this repository as source. Typical licenses (verify with your installed `node_modules` when redistributing):
+These are installed via npm. The Material Symbols font is also checked in as a subset under `build/fonts/`; its font axes and the icons used by the app are preserved. The original Apache-2.0 license is retained in `build/fonts/LICENSE-material-symbols.txt` and included in the renderer's `licenses/` directory. Typical licenses (verify with your installed `node_modules` when redistributing):
 
 | Package | Typical license |
 | --- | --- |
 | Angular (`@angular/*`) | MIT |
 | Angular Material / CDK | MIT |
 | Electron / Electron Forge | MIT (Electron also includes Chromium and Node under their own terms) |
-| electron-updater | MIT |
 | RxJS | Apache-2.0 |
-| tesseract.js and `@tesseract.js-data/*` | Apache-2.0 (engine / traineddata may carry additional notices) |
-| material-symbols / Roboto font packages | OFL / Apache as declared by those packages |
+| material-symbols (including the bundled subset) | Apache-2.0 |
+| Roboto font package | OFL-1.1 |
 
 For a machine-readable inventory after `npm install`, you can run a license checker such as `npx license-checker --summary` (optional; not required to build).
 

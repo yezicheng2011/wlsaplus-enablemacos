@@ -250,7 +250,7 @@ test('main.cjs wires verification, watchdog and core.log for the mac helper', ()
   assert.ok(!/do shell script "\$\{escapedScript\}"/.test(main), 'raw unquoted script path removed');
   assert.match(main, /'The VPN core did not start'/);
   assert.match(main, /'VPN core exited unexpectedly'/);
-  const disconnect = main.slice(main.indexOf('async function disconnectVpn()'));
+  const disconnect = main.slice(main.indexOf('function disconnectVpn()'));
   assert.ok(disconnect.indexOf('stopMacCoreWatchdog()') < disconnect.indexOf('stopMacClashHelper('), 'watchdog stops before the helper is killed');
   const forge = require(path.join('..', 'forge.config.cjs'));
   assert.equal(forge.packagerConfig.ignore('/electron/mac-clash-controller.cjs'), false);

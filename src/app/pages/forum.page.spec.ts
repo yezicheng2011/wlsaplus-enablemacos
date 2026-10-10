@@ -15,7 +15,6 @@ function installBridge(ssoUrl: (options?: { fallback?: boolean }) => Promise<str
   const spy = vi.fn(async (options?: { fallback?: boolean }) => { calls.push('ssoUrl'); return ssoUrl(options); });
   const setTheme = vi.fn(async (theme: 'light' | 'dark') => { calls.push(`setTheme:${theme}`); });
   window.wlsaplus = {
-    platform: { os: 'macos' },
     system: { openExternal: vi.fn().mockResolvedValue(undefined) },
     forum: { ssoUrl: spy, ssoStatus: vi.fn().mockResolvedValue(status), clearSession: vi.fn().mockResolvedValue(undefined), setTheme },
   } as unknown as Bridge;

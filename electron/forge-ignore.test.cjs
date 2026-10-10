@@ -1,57 +1,73 @@
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const test = require('node:test');
 const path = require('node:path');
 
-test('forge ignore keeps main-process runtime modules and dist UI', () => {
-  const forge = require(path.join('..', 'forge.config.cjs'));
-  const ignore = forge.packagerConfig.ignore;
+const root = path.join(__dirname, '..');
+const forge = require(path.join(root, 'forge.config.cjs'));
+const ignore = forge.packagerConfig.ignore;
+
+test('forge packages only runtime code, the renderer and license notices', () => {
   assert.equal(forge.packagerConfig.prune, false);
-  assert.equal(ignore('/node_modules/js-yaml'), false);
-  assert.equal(ignore('/node_modules/argparse'), false);
-  assert.equal(ignore('/node_modules/electron-updater'), true); // replaced by electron/mac-updater.cjs
-  assert.equal(ignore('/electron/mac-updater.cjs'), false);
-  assert.equal(ignore('/electron/update-core.cjs'), false);
-  assert.equal(ignore('/electron/update-config.cjs'), false);
-  assert.equal(ignore('/electron/update-helper.sh'), false); // copied out of app.asar at install time
-  assert.equal(ignore('/dist/wlsaplus/browser/index.html'), false);
-  assert.equal(ignore('/electron/main.cjs'), false);
-  assert.equal(ignore('/electron/forum-config.cjs'), false);
-  assert.equal(ignore('/electron/forum-sso.cjs'), false);
-  assert.equal(ignore('/electron/forum-theme.cjs'), false);
-  assert.equal(ignore('/electron/forum-theme.test.cjs'), true);
-  assert.equal(ignore('/electron/forum-config.test.cjs'), true);
-  assert.equal(ignore('/node_modules/tesseract.js'), true);
-  assert.equal(ignore('/node_modules/rxjs'), true);
-  assert.equal(ignore('/node_modules/@angular/core'), true);
-  assert.equal(ignore('/src/app/app.ts'), true);
-  assert.equal(ignore('/release-assets/WLSAPlus-1.1.0-mac-arm64.zip'), true);
-  assert.equal(ignore('/e2e-logs/update.log'), true);
-  assert.equal(ignore('node_modules/tesseract.js'), true); // no leading slash
+  for (const file of [
+    '', '/', '/package.json', '/LICENSE', '/THIRD_PARTY_NOTICES.md',
+    '/electron', '/electron/main.cjs', '/electron/preload.cjs',
+    '/electron/mac-updater.cjs', '/electron/update-core.cjs', '/electron/update-config.cjs',
+    '/electron/update-helper.sh', '/electron/forum-config.cjs', '/electron/forum-sso.cjs',
+    '/electron/forum-theme.cjs', '/build', '/build/icon.png', '/dist', '/dist/wlsaplus',
+    '/dist/wlsaplus/3rdpartylicenses.txt', '/dist/wlsaplus/browser',
+    '/dist/wlsaplus/browser/index.html', '/dist/wlsaplus/browser/media/icons.woff2',
+    '/node_modules', '/node_modules/js-yaml', '/node_modules/js-yaml/index.js',
+    '/node_modules/js-yaml/lib', '/node_modules/js-yaml/lib/loader.js',
+  ]) assert.equal(ignore(file), false, file);
+
+  for (const file of [
+    '/node_modules/argparse', '/node_modules/js-yaml/bin', '/node_modules/js-yaml/dist',
+    '/node_modules/js-yaml/README.md', '/node_modules/rxjs', '/node_modules/@angular/core',
+    '/electron/forum-theme.test.cjs', '/electron/entitlements.plist', '/build/icon.icns',
+    '/src', '/src/app/app.ts', '/public', '/scripts', '/docs', '/release-kit',
+    '/vpn-subscription-worker', '/release-assets/WLSAPlus.zip', '/e2e-logs/update.log',
+    '/package-lock.json', '/forge.config.cjs', '/README.md', '/OVERNIGHT_SUMMARY.md',
+    '/.git', '/.github', '/.angular', '/.env', '/unexpected-output',
+    '/dist/wlsaplus/browser/main.js.map', '/dist/old-build/index.html',
+  ]) assert.equal(ignore(file), true, file);
+  assert.equal(ignore('node_modules/rxjs'), true);
+  assert.equal(ignore('electron/main.cjs'), false);
 });
 
-test('forge keeps sing-box/v2ray-plugin out of the app; mihomo ships via Resources/bin', () => {
-  const forge = require(path.join('..', 'forge.config.cjs'));
-  const ignore = forge.packagerConfig.ignore;
-  // build/icon.png is the runtime window icon (electron/main.cjs iconPath)
-  assert.equal(ignore('/build'), false);
-  assert.equal(ignore('/build/icon.png'), false);
-  assert.equal(ignore('/build/icon.icns'), true);
-  assert.equal(ignore('/build/vpn-core'), true);
-  assert.equal(ignore('/build/vpn-core/sing-box'), true);
-  assert.equal(ignore('/build/vpn-core/v2ray-plugin'), true);
-  assert.equal(ignore('/electron/bin/mac-vpn.tar.gz'), true); // extraResource, not asar
-  const extra = forge.packagerConfig.extraResource.map((entry) => path.relative(path.join(__dirname, '..'), entry));
-  assert.deepEqual(extra, [path.join('electron', 'bin')]);
+test('VPN archive is copied once as Resources/bin', () => {
+  assert.equal(ignore('/electron/bin'), true);
+  assert.equal(ignore('/electron/bin/mac-vpn.tar.gz'), true);
+  assert.deepEqual(forge.packagerConfig.extraResource.map((entry) => path.relative(root, entry)), [path.join('electron', 'bin')]);
 });
 
-test('forge ships the OCR assets that translator.page.ts loads from ocr/', () => {
-  const forge = require(path.join('..', 'forge.config.cjs'));
-  const ignore = forge.packagerConfig.ignore;
-  assert.equal(ignore('/dist/wlsaplus/browser/ocr'), false);
-  assert.equal(ignore('/dist/wlsaplus/browser/ocr/worker.min.js'), false);
-  assert.equal(ignore('/dist/wlsaplus/browser/ocr/tesseract-core-lstm.wasm.js'), false);
-  assert.equal(ignore('/dist/wlsaplus/browser/ocr/eng.traineddata.gz'), false);
-  assert.equal(ignore('/dist/wlsaplus/browser/ocr/chi_sim.traineddata.gz'), false);
+test('removed OCR code and stale OCR assets stay out of the package', () => {
+  for (const file of [
+    '/node_modules/tesseract.js', '/node_modules/@tesseract.js-data',
+    '/dist/wlsaplus/browser/ocr', '/dist/wlsaplus/browser/ocr/worker.min.js',
+    '/dist/wlsaplus/browser/ocr/eng.traineddata.gz',
+  ]) assert.equal(ignore(file), true, file);
+  const angular = require(path.join(root, 'angular.json'));
+  assert.equal(angular.projects.wlsaplus.architect.build.options.assets.some((asset) => asset.output === 'ocr'), false);
+});
+
+test('the packaged js-yaml subset can load and dump profiles without other modules', (t) => {
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'wlsaplus-runtime-'));
+  t.after(() => fs.rmSync(staging, { recursive: true, force: true }));
+  const source = path.join(root, 'node_modules', 'js-yaml');
+  const destination = path.join(staging, 'node_modules', 'js-yaml');
+  fs.cpSync(source, destination, {
+    recursive: true,
+    filter: (file) => !ignore(`/${path.relative(root, file).split(path.sep).join('/')}`),
+  });
+  execFileSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const yaml = require(process.argv[1]);
+    const profile = { proxies: [{ name: 'test', type: 'ss', port: 443 }], mode: 'rule' };
+    assert.deepEqual(yaml.load(yaml.dump(profile)), profile);
+  `, destination], { cwd: staging });
 });
 
 test('forge does not sign ad-hoc builds (working.command runs codesign itself)', () => {

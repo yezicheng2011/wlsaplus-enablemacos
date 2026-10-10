@@ -16,10 +16,6 @@ export class TranslationService {
     return this.translateWithMyMemory(trimmed, source, target);
   }
 
-  captureRegion(): Promise<string | null> {
-    return Promise.reject(new Error('Screen translation is not available on macOS.'));
-  }
-
   private async translateWithMyMemory(text: string, source: string, target: string): Promise<TranslationResult> {
     const chunks = this.splitTextByBytes(text, 450);
     const translations: string[] = [];

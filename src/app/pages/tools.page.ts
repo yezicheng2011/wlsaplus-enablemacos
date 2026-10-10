@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
 @Component({
@@ -15,7 +15,6 @@ import { RouterLink } from '@angular/router';
     </div>
   `,
   styles: `
-    button.tool-row { width: 100%; text-align: left; font: inherit; cursor: pointer; }
     .tool-list { display: grid; gap: 10px; } .tool-row { min-height: 92px; padding: 18px; display: grid; grid-template-columns: 48px minmax(0,1fr) 24px; align-items: center; gap: 16px; color: var(--app-text); text-decoration: none; }
     .tool-row:hover { border-color: color-mix(in srgb, var(--app-accent) 48%, var(--app-border)); background: color-mix(in srgb, var(--app-accent-soft) 28%, var(--app-surface)); }
     .tool-icon { width: 48px; height: 48px; border-radius: 8px; background: var(--app-accent-soft); color: var(--app-accent); font-size: 26px; }

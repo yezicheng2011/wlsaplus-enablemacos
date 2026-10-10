@@ -37,4 +37,24 @@ describe('CredentialVault', () => {
     await expect(vault.clear()).rejects.toThrow('Secure credential storage is unavailable');
     expect(localStorage.getItem('wlsaplus:credentials')).toBeNull();
   });
+
+  it('still clears credentials after an earlier secure write rejects', async () => {
+    let rejectWrite!: (error: Error) => void;
+    const write = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    const bridge = {
+      get: vi.fn(async () => credentials),
+      set: vi.fn(() => write),
+      clear: vi.fn(async () => undefined),
+    };
+    (window as unknown as { wlsaplus: unknown }).wlsaplus = { credentials: bridge };
+    const vault = new CredentialVault();
+    const saving = vault.set(credentials).catch((error: unknown) => error);
+    const clearing = vault.clear();
+
+    rejectWrite(new Error('Disk full'));
+    expect(await saving).toMatchObject({ message: 'Disk full' });
+    await clearing;
+
+    expect(bridge.clear).toHaveBeenCalledOnce();
+  });
 });

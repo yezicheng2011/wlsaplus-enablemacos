@@ -1,7 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('wlsaplus', {
-  platform: { os: process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux' },
   system: {
     openExternal: (url) => ipcRenderer.invoke('system:open-external', url),
   },
@@ -37,7 +36,6 @@ contextBridge.exposeInMainWorld('wlsaplus', {
   updater: {
     status: () => ipcRenderer.invoke('updater:status'),
     check: () => ipcRenderer.invoke('updater:check'),
-    download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
     setChannel: (channel) => ipcRenderer.invoke('updater:set-channel', channel),
     revealLog: () => ipcRenderer.invoke('updater:reveal-log'),
@@ -49,10 +47,6 @@ contextBridge.exposeInMainWorld('wlsaplus', {
   },
   translator: {
     translate: (text, source, target) => ipcRenderer.invoke('translator:translate', text, source, target),
-    captureRegion: () => Promise.reject(new Error('Screen translation is not available on macOS.')),
-  },
-  notifications: {
-    showClassReminder: (options) => ipcRenderer.invoke('notifications:show-class-reminder', options),
   },
   notice: {
     get: () => ipcRenderer.invoke('notice:get'),

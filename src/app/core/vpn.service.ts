@@ -1,17 +1,14 @@
-import { Injectable, inject, signal } from '@angular/core';
-import { PlatformService } from './platform.service';
+import { Injectable, signal } from '@angular/core';
 import type { VpnConnectionMode, VpnNode, VpnStatus, WeChatProbeResult } from './models';
-import { VPN_SOURCES, vpnSource } from './vpn-sources';
+import { vpnSource } from './vpn-sources';
 
 const IDLE: VpnStatus = { state: 'idle', message: 'Ready', connectedAt: null, mode: 'unavailable' };
 const NODE_KEY = 'wlsaplus:vpn-node';
 
 @Injectable({ providedIn: 'root' })
 export class VpnService {
-  private readonly platform = inject(PlatformService);
   readonly status = signal<VpnStatus>(IDLE);
   readonly mode = signal<VpnConnectionMode>('full-tunnel');
-  readonly sources = VPN_SOURCES;
   readonly sourceId = signal<string>(this.readSource());
   readonly nodes = signal<VpnNode[]>([]);
   readonly selectedNodeId = signal<string>(this.readNode());
@@ -24,7 +21,7 @@ export class VpnService {
     if (window.wlsaplus) {
       void window.wlsaplus.vpn.status().then((status) => this.applyStatus(status));
       window.wlsaplus.vpn.onStatus((status) => this.applyStatus(status));
-      if (this.platform.info.supportsVpn) void this.refreshNodes();
+      void this.refreshNodes();
     }
   }
 
@@ -38,9 +35,12 @@ export class VpnService {
         this.setNode(listed[0].id);
       }
     } catch (error) {
+      const current = this.status();
+      // A late subscription failure cannot determine whether the native core is
+      // connected, or replace the status of an in-progress start/stop operation.
+      if (current.state === 'connecting' || current.state === 'disconnecting') return;
       this.status.set({
-        ...this.status(),
-        state: this.status().state === 'connected' ? 'connected' : 'idle',
+        ...current,
         message: error instanceof Error ? error.message : 'Could not load VPN nodes.',
       });
     } finally {
@@ -121,13 +121,6 @@ export class VpnService {
     if (!window.wlsaplus) return;
     this.status.set({ ...this.status(), state: 'disconnecting', message: 'Disconnecting...' });
     this.applyStatus(await window.wlsaplus.vpn.disconnect());
-  }
-
-  setSource(sourceId: string): void {
-    const source = vpnSource(sourceId);
-    this.sourceId.set(source.id);
-    localStorage.setItem('wlsaplus:vpn-source', source.id);
-    void this.refreshNodes();
   }
 
   setNode(nodeId: string): void {

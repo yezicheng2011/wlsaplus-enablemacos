@@ -3,7 +3,8 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
-const { Readable } = require('node:stream');
+const { Readable, Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { UPDATE_PRODUCT } = require('./update-config.cjs');
 
 const SEMVER_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
@@ -164,15 +165,17 @@ async function fileSize(file) {
 }
 
 /** Fetches a small text resource from the first URL that answers. */
-async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes = MAX_MANIFEST_BYTES, onAttempt = () => {} } = {}) {
+async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes = MAX_MANIFEST_BYTES, onAttempt = () => {}, signal } = {}) {
   let lastError = null;
   for (const url of urls) {
+    signal?.throwIfAborted();
     const controller = new AbortController();
+    const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const timer = setTimeout(() => controller.abort(new Error(`Timed out after ${Math.round(timeoutMs / 1000)} s: ${url}`)), timeoutMs);
     const started = Date.now();
     const note = (outcome) => { try { onAttempt(url, `${outcome} (${Date.now() - started} ms)`); } catch {} };
     try {
-      const response = await fetchImpl(url, { cache: 'no-store', signal: controller.signal, headers: { 'Cache-Control': 'no-cache' } });
+      const response = await fetchImpl(url, { cache: 'no-store', signal: requestSignal, headers: { 'Cache-Control': 'no-cache' } });
       if (response.status === 404) { note('404'); lastError = Object.assign(new Error(`Not found: ${url}`), { notFound: true }); continue; }
       if (!response.ok) { note(`HTTP ${response.status}`); lastError = new Error(`HTTP ${response.status} for ${url}`); continue; }
       const text = await response.text();
@@ -180,6 +183,7 @@ async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes
       note(`200, ${text.length} bytes`);
       return text;
     } catch (error) {
+      signal?.throwIfAborted();
       const cause = error?.cause ? ` (${error.cause.code || ''} ${error.cause.message || error.cause})` : '';
       note(`error: ${error?.message || error}${cause}`);
       lastError = error;
@@ -196,8 +200,10 @@ async function fetchText(urls, { fetchImpl = fetch, timeoutMs = 90_000, maxBytes
  */
 // Timeouts are generous: on a cold cache the official site first pulls the whole file from GitHub into its
 // Drive-backed cache before the first byte arrives (measured 15-40 s), so the first byte may take minutes.
-async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, onProgress = () => {}, onAttempt = () => {}, firstByteTimeoutMs = 300_000, idleTimeoutMs = 120_000 }) {
+async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, onProgress = () => {}, onAttempt = () => {}, firstByteTimeoutMs = 300_000, idleTimeoutMs = 120_000, signal }) {
+  signal?.throwIfAborted();
   if ((await fileSize(dest)) === size && (await sha256File(dest)) === sha256) {
+    signal?.throwIfAborted();
     onProgress(size, size);
     return null;
   }
@@ -206,11 +212,13 @@ async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, o
   let lastError = null;
   for (const url of urls) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      signal?.throwIfAborted();
       try {
         let have = await fileSize(part);
         if (have > size) { await fsp.rm(part, { force: true }); have = -1; }
         if (have === size) {
           if ((await sha256File(part)) === sha256) {
+            signal?.throwIfAborted();
             await fsp.rename(part, dest);
             onProgress(size, size);
             return url;
@@ -219,28 +227,31 @@ async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, o
           have = -1;
         }
         const controller = new AbortController();
+        const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
         let idle = setTimeout(() => controller.abort(), firstByteTimeoutMs);
         const headers = have > 0 ? { Range: `bytes=${have}-` } : {};
         try {
-          const response = await fetchImpl(url, { headers, signal: controller.signal, redirect: 'follow' });
+          const response = await fetchImpl(url, { headers, signal: requestSignal, redirect: 'follow' });
           let append = false;
           if (response.status === 206 && have > 0) append = true;
           else if (response.status !== 200) throw new Error(`HTTP ${response.status} for ${url}`);
           if (!response.body) throw new Error(`Empty response from ${url}`);
           let received = append ? have : 0;
-          const out = fs.createWriteStream(part, { flags: append ? 'a' : 'w' });
-          try {
-            for await (const chunk of Readable.fromWeb(response.body)) {
-              clearTimeout(idle);
-              idle = setTimeout(() => controller.abort(), idleTimeoutMs);
-              received += chunk.length;
-              if (received > size) throw new Error('Download is larger than expected.');
-              if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
-              onProgress(received, size);
-            }
-          } finally {
-            await new Promise((resolve) => out.end(resolve));
-          }
+          const progress = new Transform({
+            transform(chunk, encoding, callback) {
+              try {
+                clearTimeout(idle);
+                idle = setTimeout(() => controller.abort(), idleTimeoutMs);
+                received += chunk.length;
+                if (received > size) throw new Error('Download is larger than expected.');
+                onProgress(received, size);
+                callback(null, chunk);
+              } catch (error) { callback(error); }
+            },
+          });
+          // pipeline owns backpressure, stream errors and close: ENOSPC/open/finalization failures must
+          // reject this attempt, including failures while waiting for the writable to drain.
+          await pipeline(Readable.fromWeb(response.body), progress, fs.createWriteStream(part, { flags: append ? 'a' : 'w' }), { signal: requestSignal });
         } finally {
           clearTimeout(idle);
         }
@@ -251,9 +262,11 @@ async function downloadVerified({ urls, dest, size, sha256, fetchImpl = fetch, o
           await fsp.rm(part, { force: true });
           throw new Error('Downloaded file failed the sha256 check.');
         }
+        signal?.throwIfAborted();
         await fsp.rename(part, dest);
         return url;
       } catch (error) {
+        signal?.throwIfAborted();
         try { onAttempt(url, `attempt ${attempt + 1} failed: ${error?.message || error}`); } catch {}
         lastError = error;
       }

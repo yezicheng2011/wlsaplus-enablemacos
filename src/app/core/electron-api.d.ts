@@ -14,7 +14,6 @@ import type {
 declare global {
   interface Window {
     wlsaplus?: {
-      platform: { os: 'windows' | 'macos' | 'linux' };
       system: {
         openExternal(url: string): Promise<void>;
       };
@@ -56,7 +55,6 @@ declare global {
       updater: {
         status(): Promise<UpdateStatus>;
         check(): Promise<UpdateStatus>;
-        download(): Promise<UpdateStatus>;
         install(): Promise<UpdateStatus>;
         setChannel(channel: 'stable' | 'beta'): Promise<UpdateStatus>;
         revealLog?(): Promise<boolean>;
@@ -64,10 +62,6 @@ declare global {
       };
       translator: {
         translate(text: string, source: string, target: string): Promise<TranslationResult>;
-        captureRegion(): Promise<string | null>;
-      };
-      notifications: {
-        showClassReminder(options: { title: string; body: string; sessionId: string }): Promise<boolean>;
       };
       /** In-app notice from the official site, fetched by the main process (null when unavailable). */
       notice: {

@@ -63,11 +63,6 @@ export class UpdateService {
     try { this.apply(await window.wlsaplus.updater.check()); } catch (error) { this.fail('Could not check for updates', error); }
   }
 
-  async download(): Promise<void> {
-    if (!window.wlsaplus?.updater) return;
-    try { this.apply(await window.wlsaplus.updater.download()); } catch (error) { this.fail('Could not download the update', error); }
-  }
-
   async install(): Promise<void> {
     if (!window.wlsaplus?.updater) return;
     try { this.apply(await window.wlsaplus.updater.install()); } catch (error) { this.fail('Could not install the update', error); }

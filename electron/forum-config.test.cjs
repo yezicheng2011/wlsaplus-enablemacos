@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  FORUM_URL, FORUM_FALLBACK_URL, FORUM_PARTITION, FORUM_THEME_COOKIE, FORUM_EMBED_COOKIE, FORUM_EMBED_COOKIE_VALUE,
+  FORUM_URL, FORUM_FALLBACK_URL, FORUM_PARTITION,
   FORUM_THEME_PARAM, FORUM_EMBED_PARAM, FORUM_EMBED_PARAM_VALUE, forumSsoNext,
   isForumUrl, isWebUrl, forumBaseUrl, isForumWebviewAttachAllowed, hardenForumWebPreferences,
 } = require('./forum-config.cjs');
@@ -57,9 +57,6 @@ test('renderer forum config matches the main-process config', () => {
   assert.match(source, new RegExp(`FORUM_URL = '${FORUM_URL.replace(/[.]/g, '\\.')}'`));
   assert.match(source, new RegExp(`FORUM_FALLBACK_URL = '${FORUM_FALLBACK_URL.replace(/[.]/g, '\\.')}'`));
   assert.match(source, new RegExp(`FORUM_PARTITION = '${FORUM_PARTITION}'`));
-  assert.match(source, new RegExp(`FORUM_THEME_COOKIE = '${FORUM_THEME_COOKIE}'`));
-  assert.match(source, new RegExp(`FORUM_EMBED_COOKIE = '${FORUM_EMBED_COOKIE}'`));
-  assert.match(source, new RegExp(`FORUM_EMBED_COOKIE_VALUE = '${FORUM_EMBED_COOKIE_VALUE}'`));
   assert.match(source, new RegExp(`FORUM_THEME_PARAM = '${FORUM_THEME_PARAM}'`));
   assert.match(source, new RegExp(`FORUM_EMBED_PARAM = '${FORUM_EMBED_PARAM}'`));
   assert.match(source, new RegExp(`FORUM_EMBED_PARAM_VALUE = '${FORUM_EMBED_PARAM_VALUE}'`));
