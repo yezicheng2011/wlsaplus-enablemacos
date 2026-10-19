@@ -49,9 +49,11 @@ enum ProxyEndpointResolver {
             if leftV6 != rightV6 { return !leftV6 && rightV6 }
             return left < right
         }
-        guard !result.isEmpty, result.count <= 64 else {
+        guard !result.isEmpty else {
             throw ProxyError.configuration("The proxy server has no usable IP endpoint")
         }
+        // Cap fan-out so a noisy DNS answer cannot stretch the outer probe budget.
+        if result.count > 8 { result = Array(result.prefix(8)) }
         return result
     }
 
@@ -89,6 +91,9 @@ final class NetworkByteTransport: ByteTransport {
     private var receiving = false
     private var attemptTimeout: DispatchWorkItem?
     private let perAttemptSeconds: TimeInterval
+    private var lastDialError: Error?
+    /// Hard cap on addresses actually dialed (IPv4-first list may be longer).
+    private static let maxDialCandidates = 4
 
     init(node: ProxyNode, datagram: Bool, queue: DispatchQueue,
          perAttemptSeconds: TimeInterval = 6) throws {
@@ -100,7 +105,8 @@ final class NetworkByteTransport: ByteTransport {
         }
         self.port = port
         guard node.skipCertVerify != true else { throw ProxyError.unsupported("Insecure TLS is disabled") }
-        candidates = try ProxyEndpointResolver.addresses(host: node.server, port: node.port)
+        let resolved = try ProxyEndpointResolver.addresses(host: node.server, port: node.port)
+        candidates = Array(resolved.prefix(Self.maxDialCandidates))
         if datagram {
             parameters = NWParameters.udp
             parameters.preferNoProxies = true
@@ -183,8 +189,13 @@ final class NetworkByteTransport: ByteTransport {
             previous.cancel()
             connection = nil
         }
+        if let reason { lastDialError = reason }
         guard candidateIndex < candidates.count else {
-            fail(reason ?? ProxyError.timeout)
+            let tried = candidates.count
+            let detail = Self.shortError(lastDialError ?? reason)
+            fail(ProxyError.dial(
+                "TCP dial failed after \(tried) address(es) (IPv4 preferred); last error: \(detail)"
+            ))
             return
         }
         let host = candidates[candidateIndex]
@@ -216,6 +227,13 @@ final class NetworkByteTransport: ByteTransport {
             attemptTimeout = timeout
             queue.asyncAfter(deadline: .now() + perAttemptSeconds, execute: timeout)
         }
+    }
+
+    private static func shortError(_ error: Error?) -> String {
+        guard let error else { return "unknown" }
+        if let proxy = error as? ProxyError, let text = proxy.errorDescription { return text }
+        let text = error.localizedDescription
+        return text.isEmpty ? String(describing: type(of: error)) : text
     }
 
     private func cancelAttemptTimeout() {
@@ -286,8 +304,12 @@ enum WebSocketWire {
         let lines = text.components(separatedBy: "\r\n")
         guard let first = lines.first else { throw ProxyError.malformed("Missing WebSocket HTTP status") }
         let status = first.split(separator: " ", omittingEmptySubsequences: true)
-        guard status.count >= 2, status[0] == "HTTP/1.1", status[1] == "101" else {
-            throw ProxyError.malformed("The server refused the WebSocket upgrade")
+        guard status.count >= 2, status[0].hasPrefix("HTTP/1.") else {
+            throw ProxyError.malformed("Missing or unsupported WebSocket HTTP version")
+        }
+        guard status[1] == "101" else {
+            let code = String(status[1])
+            throw ProxyError.malformed("The server refused the WebSocket upgrade (HTTP \(code))")
         }
         var headers = [String: [String]]()
         for line in lines.dropFirst() where !line.isEmpty {
@@ -387,15 +409,21 @@ final class WebSocketByteTransport: ByteTransport {
     var onError: ((Error) -> Void)?
     var onClose: (() -> Void)?
     private let base: ByteTransport
+    private let queue: DispatchQueue
     private let request: Data
     private let key: String
+    private let upgradeSeconds: TimeInterval
     private var handshake = Data()
     private var upgraded = false
     private var closed = false
     private var decoder = WebSocketFrameDecoder()
+    private var upgradeTimeout: DispatchWorkItem?
 
-    init(base: ByteTransport, node: ProxyNode) throws {
+    init(base: ByteTransport, node: ProxyNode, queue: DispatchQueue,
+         upgradeSeconds: TimeInterval = 12) throws {
         self.base = base
+        self.queue = queue
+        self.upgradeSeconds = max(3, min(upgradeSeconds, 30))
         let path = node.wsPath?.isEmpty == false ? node.wsPath! : "/"
         let literal = node.server.contains(":") ? "[\(node.server)]" : node.server
         // Prefer an explicit Host header from the subscription. When absent, include
@@ -413,7 +441,11 @@ final class WebSocketByteTransport: ByteTransport {
         key = try ProtocolCrypto.random(16).base64EncodedString()
         request = Data(("GET \(path) HTTP/1.1\r\nHost: \(host)\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
                         "Sec-WebSocket-Key: \(key)\r\nSec-WebSocket-Version: 13\r\n\r\n").utf8)
-        base.onReady = { [weak self] in guard let self, !self.closed else { return }; self.base.send(self.request) }
+        base.onReady = { [weak self] in
+            guard let self, !self.closed else { return }
+            self.armUpgradeTimeout()
+            self.base.send(self.request)
+        }
         base.onData = { [weak self] in self?.receive($0) }
         base.onError = { [weak self] in self?.fail($0) }
         base.onClose = { [weak self] in self?.finished() }
@@ -424,9 +456,29 @@ final class WebSocketByteTransport: ByteTransport {
         guard upgraded else { fail(ProxyError.closed); return }
         do { base.send(try WebSocketWire.clientFrame(data)) } catch { fail(error) }
     }
-    func close() { guard !closed else { return }; closed = true; base.close() }
+    func close() {
+        guard !closed else { return }
+        closed = true
+        cancelUpgradeTimeout()
+        base.close()
+    }
     func finishWriting() { /* VMess termination is carried in a final binary message. */ }
     func setReadEnabled(_ enabled: Bool) { base.setReadEnabled(enabled) }
+
+    private func armUpgradeTimeout() {
+        cancelUpgradeTimeout()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, !self.closed, !self.upgraded else { return }
+            self.fail(ProxyError.dial("WebSocket upgrade timed out waiting for HTTP 101"))
+        }
+        upgradeTimeout = item
+        queue.asyncAfter(deadline: .now() + upgradeSeconds, execute: item)
+    }
+
+    private func cancelUpgradeTimeout() {
+        upgradeTimeout?.cancel()
+        upgradeTimeout = nil
+    }
 
     private func receive(_ received: Data) {
         guard !closed else { return }
@@ -442,6 +494,7 @@ final class WebSocketByteTransport: ByteTransport {
                 guard boundary.upperBound <= 16_384 else { throw ProxyError.bufferLimit }
                 try WebSocketWire.validateUpgrade(Data(handshake[..<boundary.upperBound]), key: key)
                 data = Data(handshake[boundary.upperBound...]); handshake.removeAll()
+                cancelUpgradeTimeout()
                 upgraded = true; onReady?()
             }
             for event in try decoder.receive(data) {
@@ -455,7 +508,12 @@ final class WebSocketByteTransport: ByteTransport {
             }
         } catch { fail(error) }
     }
-    private func fail(_ error: Error) { guard !closed else { return }; onError?(error); close() }
+    private func fail(_ error: Error) {
+        guard !closed else { return }
+        cancelUpgradeTimeout()
+        onError?(error)
+        close()
+    }
     private func finished() {
         guard !closed else { return }
         do {

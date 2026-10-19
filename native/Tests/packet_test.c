@@ -317,6 +317,79 @@ static void test_fragment_rejection_and_expiry(void) {
     wlp_remote_open(e, o->id); assert(o->data_length == 6);
     wlp_free(e); free(o);
 }
+
+/* SYN with optional TCP options. option_bytes is the raw option list (may be empty). */
+static size_t tcp_syn_opts(uint8_t *p, int version, uint32_t seq, unsigned window,
+                           const uint8_t *option_bytes, size_t option_length) {
+    size_t padded = (option_length + 3) & ~((size_t)3);
+    size_t header = 20 + padded;
+    size_t offset = ip(p, version, 6, header, 0);
+    uint8_t *t = p + offset;
+    memset(t, 0, header);
+    s16(t, 49152); s16(t + 2, 443); s32(t + 4, seq); s32(t + 8, 0);
+    t[12] = (uint8_t)((header / 4) << 4); t[13] = (uint8_t)SYN; s16(t + 14, (uint16_t)window);
+    if (option_length) memcpy(t + 20, option_bytes, option_length);
+    s16(t + 16, pseudo(p, offset, header, 6));
+    return offset + header;
+}
+static void test_tcp_option_policy(void) {
+    observer *o = calloc(1, sizeof(*o)); assert(o);
+    wlp_engine *e = engine(o);
+    uint8_t p[512], opts[16];
+    /* Plain SYN without options still accepted. */
+    size_t n = tcp_syn_opts(p, 4, 1, 8192, NULL, 0);
+    assert(wlp_input(e, p, n) == 0);
+    assert(o->connects == 1);
+    wlp_remote_abort(e, o->id);
+    wlp_free(e);
+
+    /* MSS=1200 on SYN is accepted (only negotiated TCP option). */
+    e = engine(o); o->connects = 0; o->closes = 0; o->packet_count = 0;
+    opts[0] = 2; opts[1] = 4; opts[2] = 0x04; opts[3] = 0xb0; /* MSS 1200 */
+    n = tcp_syn_opts(p, 4, 2, 8192, opts, 4);
+    assert(wlp_input(e, p, n) == 0);
+    assert(o->connects == 1);
+    wlp_remote_abort(e, o->id);
+    wlp_free(e);
+
+    /* MSS below 64 is rejected (malformed). */
+    e = engine(o); o->connects = 0;
+    opts[0] = 2; opts[1] = 4; opts[2] = 0; opts[3] = 32;
+    n = tcp_syn_opts(p, 4, 3, 8192, opts, 4);
+    assert(wlp_input(e, p, n) == -1);
+    assert(o->connects == 0);
+    wlp_free(e);
+
+    /* SACK-permitted (kind 4) is ignored, not negotiated; SYN still accepted. */
+    e = engine(o); o->connects = 0; o->packet_count = 0;
+    opts[0] = 4; opts[1] = 2; /* SACK permitted */
+    n = tcp_syn_opts(p, 4, 4, 8192, opts, 2);
+    assert(wlp_input(e, p, n) == 0);
+    assert(o->connects == 1);
+    assert(o->packet_count == 0);
+    wlp_remote_open(e, o->id);
+    assert(o->packet_count >= 1);
+    assert((flags(last(o)) & (SYN | ACK)) == (SYN | ACK));
+    {
+        packet *synack = last(o);
+        size_t off = offset(synack);
+        size_t hdr = (synack->bytes[off + 12] >> 4) * 4u;
+        /* SYN-ACK carries at most MSS (kind 2); never SACK/WScale/timestamp. */
+        assert(hdr == 20 || hdr == 24);
+        for (size_t i = 20; i + 1 < hdr;) {
+            uint8_t kind = synack->bytes[off + i];
+            if (kind == 0) break;
+            if (kind == 1) { ++i; continue; }
+            assert(kind == 2);
+            assert(i + 1 < hdr);
+            i += synack->bytes[off + i + 1];
+        }
+    }
+    wlp_remote_abort(e, o->id);
+    wlp_free(e);
+    free(o);
+}
+
 static void test_malformed(void) {
     observer *o = calloc(1, sizeof(*o)); assert(o); wlp_engine *e = engine(o); uint8_t p[2048], valid[512];
     size_t n = udp(valid, 4, 0, "test", 4);
@@ -346,10 +419,10 @@ int main(void) {
     test_limits_timeouts_and_fast_retransmit();
     test_fragment_reassembly(4, 0); test_fragment_reassembly(6, 0); test_fragment_reassembly(6, 1);
     test_maximum_fragment_payload(4); test_maximum_fragment_payload(6);
-    test_fragment_rejection_and_expiry(); test_malformed();
+    test_fragment_rejection_and_expiry(); test_tcp_option_policy(); test_malformed();
 #ifndef __APPLE__
     char name[32]; errno = 0; assert(wl_tun_open(name, sizeof(name)) == -1 && errno == ENOTSUP);
 #endif
-    puts("packet tests passed: TCP loss/order/window/FIN/RST/wrap/limits; IPv4/IPv6 UDP/fragments; malformed corpus");
+    puts("packet tests passed: TCP loss/order/window/FIN/RST/wrap/limits/options; IPv4/IPv6 UDP/fragments; malformed corpus");
     return 0;
 }

@@ -67,11 +67,12 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
 }
 
 public enum ProxyError: LocalizedError {
-    case configuration(String), unsupported(String), malformed(String)
+    case configuration(String), unsupported(String), malformed(String), dial(String)
     case authentication, nonceExhausted, bufferLimit, randomness, closed, timeout
     public var errorDescription: String? {
         switch self {
-        case .configuration(let reason), .unsupported(let reason), .malformed(let reason): return reason
+        case .configuration(let reason), .unsupported(let reason), .malformed(let reason), .dial(let reason):
+            return reason
         case .authentication: return "The proxy response failed authentication"
         case .nonceExhausted: return "The encrypted session reached its nonce limit; reconnect"
         case .bufferLimit: return "The proxy exceeded its bounded buffering limit"
@@ -132,7 +133,10 @@ final class ProxyConnection {
             if datagram && node.udp != true { throw ProxyError.unsupported("UDP is disabled for this server") }
             let ss = ["ss", "shadowsocks"].contains(node.type.lowercased())
             if ss {
-                shadowsocks = try ShadowsocksSession(password: node.password!, destinationHost: host,
+                guard let password = node.password, !password.isEmpty else {
+                    throw ProxyError.configuration("Shadowsocks requires a non-empty password")
+                }
+                shadowsocks = try ShadowsocksSession(password: password, destinationHost: host,
                                                       destinationPort: port, udp: datagram)
             } else {
                 vmess = try VMessSession(uuid: node.uuid!, alterId: node.alterId ?? 0,
@@ -143,7 +147,9 @@ final class ProxyConnection {
                                                    perAttemptSeconds: 6)
             let channel: ByteTransport
             if !ss && (node.network ?? "tcp").lowercased() == "ws" {
-                channel = try WebSocketByteTransport(base: network, node: node)
+                // Upgrade budget sits inside the outer 28s dial window after TCP is ready.
+                channel = try WebSocketByteTransport(base: network, node: node, queue: queue,
+                                                    upgradeSeconds: 12)
             } else { channel = network }
             transport = channel
             channel.onReady = { [weak self] in self?.transportReady() }
