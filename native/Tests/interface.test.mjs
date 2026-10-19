@@ -1,8 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const app = require('../Resources/app.js');
+import '../Resources/app.js';
+const app = globalThis.WLSA;
 
 // Run without a DOM: the production helper and bridge code is the code under test.
 test('native bridge correlates concurrent, out-of-order replies', async () => {
@@ -150,4 +149,19 @@ test('current and next class use the real interval and show only valid synced cl
   assert.equal(app.currentAndNext(entries,'2026-10-19T10:00:00').current,null);
   assert.equal(app.currentAndNext(entries,'2026-10-19T12:00:00').next,null);
   assert.equal(app.format24('2026-10-19T13:05:00'),'13:05');
+});
+
+
+test('to-do details survive edits, completion and reordering without interpreting markup', () => {
+  const details='Read pages 10–20.\nKeep <script>literal</script> & notes.';
+  const original=app.normalizeTodo({id:'one',title:'Reading',details});
+  const edited=app.normalizeTodo({...original,title:'Reading revised'});
+  assert.equal(edited.details,details);
+  const completed=app.toggleTodo([edited,{id:'two',title:'Other',details:'Second note'}],'one');
+  assert.equal(completed[0].details,details);
+  const moved=app.moveTodo(completed,'one','down');
+  assert.equal(moved[1].details,details);
+  assert.equal(moved[0].details,'Second note');
+  assert.equal(app.normalizeTodo({title:'No notes'}).details,'');
+  assert.match(app.h(edited.details),/&lt;script&gt;literal/);
 });

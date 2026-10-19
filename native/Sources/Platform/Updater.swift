@@ -10,6 +10,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
     private var continuation: CheckedContinuation<URL, Error>?
     private var result: Result<URL, Error>?
     private var session: URLSession?
+    private var resumeFile: URL?
     init(expected: Int64, destination: URL, progress: @escaping (Double) -> Void) { self.expected = expected; self.destination = destination; self.progress = progress }
     func fetch(_ url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
@@ -18,7 +19,9 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
             configuration.timeoutIntervalForRequest = 300; configuration.timeoutIntervalForResource = 3600
             let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
             self.session = session
-            let resume = destination.appendingPathExtension("resume")
+            let identifier = SHA256.hash(data: Data(url.absoluteString.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+            let resume = destination.appendingPathExtension("resume-" + identifier)
+            self.resumeFile = resume
             if let saved = try? Data(contentsOf: resume) { session.downloadTask(withResumeData: saved).resume() }
             else { var request = URLRequest(url: url); request.cachePolicy = .reloadIgnoringLocalCacheData; session.downloadTask(with: request).resume() }
         }
@@ -34,13 +37,13 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
         do {
             if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
             try FileManager.default.moveItem(at: location, to: destination)
-            try? FileManager.default.removeItem(at: destination.appendingPathExtension("resume"))
+            if let resumeFile { try? FileManager.default.removeItem(at: resumeFile) }
             result = .success(destination)
         } catch { result = .failure(error) }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error = error as NSError?, let resume = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data {
-            try? privateWrite(resume, to: destination.appendingPathExtension("resume"))
+        if let error = error as NSError?, let resume = error.userInfo[NSURLSessionDownloadTaskResumeData] as? Data, let resumeFile {
+            try? privateWrite(resume, to: resumeFile)
         }
         let completed = result ?? .failure(error ?? AppError("Update download did not finish."))
         continuation?.resume(with: completed); continuation = nil
@@ -146,7 +149,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
                     _ = try await job.fetch(url)
                     try Self.verifyArchive(archive, file: file)
                     downloaded = true; break
-                } catch { log("package attempt failed: \(error.localizedDescription)"); try? FileManager.default.removeItem(at: archive); try? FileManager.default.removeItem(at: archive.appendingPathExtension("resume")) }
+                } catch { log("package attempt failed: \(error.localizedDescription)"); try? FileManager.default.removeItem(at: archive) }
             }
             guard downloaded else { throw AppError("Could not download and verify the update. Check the update log.") }
             try ArchivePolicy.validate(archive)

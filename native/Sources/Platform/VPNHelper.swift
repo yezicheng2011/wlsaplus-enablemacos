@@ -72,7 +72,7 @@ struct VPNHelperConfiguration: Codable {
 }
 
 enum VPNHelper {
-    static let journal = URL(fileURLWithPath: "/var/db/wlsaplus-native/journal.json")
+    static let journal = URL(fileURLWithPath: "/private/var/db/wlsaplus-native/journal.json")
     private static var active: VPNRuntime?
 
     /// Elevated short-lived launcher: native argv only, no background shell.
@@ -263,7 +263,7 @@ private final class VPNRuntime {
                     do {
                         self.node = successful.0; self.latency = Int(successful.1); self.probeAuthenticated = true
                         self.originalDefault = try Self.defaultFingerprint()
-                        try self.configureTunnel(addresses: addresses)
+                        try self.configureTunnel(addresses: [successful.0.server])
                         self.verifyTunnel()
                     } catch { self.failAndRecover(error) }
                 }
