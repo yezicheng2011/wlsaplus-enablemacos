@@ -44,6 +44,9 @@ final class NetworkPlan {
     private let journalURL: URL
     private var storage: RecoveryStorage?
     private var journal: Journal?
+    #if NATIVE_INTEGRATION_TESTS
+    private(set) var verificationFailureClass: String?
+    #endif
     private static let tunnelDNS = ["1.1.1.1", "8.8.8.8"]
 
     init(interface: String, nodeAddresses: [String], journal: URL) {
@@ -104,6 +107,9 @@ final class NetworkPlan {
     /// or DNS: an external change ends the session, and restore() preserves
     /// settings which no longer match the transaction's ownership record.
     func verifyActive() throws {
+        #if NATIVE_INTEGRATION_TESTS
+        verificationFailureClass = "transaction"
+        #endif
         guard let journal, storage != nil, journal.interface == interface,
               journal.routes.allSatisfy({ $0.state == 2 }),
               journal.services.allSatisfy({ $0.state == 2 }),
@@ -112,6 +118,9 @@ final class NetworkPlan {
             throw AppError("The VPN network transaction is not fully committed.")
         }
         for route in journal.routes {
+            #if NATIVE_INTEGRATION_TESTS
+            verificationFailureClass = route.host ? "owned-bypass" : "capture-ipv\(route.family)"
+            #endif
             guard let current = try Self.lookup(family: route.family, target: route.target), Self.owns(current, route: route), Self.usable(current) else {
                 throw AppError("A VPN capture or server bypass route changed. Reconnect the VPN.")
             }
@@ -119,21 +128,30 @@ final class NetworkPlan {
         // Preexisting physical host routes are deliberately not owned/deleted by
         // us. They still must remain exact physical bypasses for the pinned node.
         for address in nodeAddresses {
+            #if NATIVE_INTEGRATION_TESTS
+            verificationFailureClass = "pinned-bypass"
+            #endif
             guard let family = Self.family(address),
                   let route = try Self.lookup(family: family, target: address),
                   Self.exact(route, destination: address, prefix: family == 4 ? 32 : 128, family: family),
                   Self.validInterface(route.interface), route.interface != interface,
                   !route.interface.hasPrefix("utun"), !route.interface.hasPrefix("tun"),
-                  Self.usable(route) else {
+                  Self.usable(route), Self.stableHostBypass(route) else {
                 throw AppError("The pinned VPN server no longer has a physical bypass route.")
             }
         }
+        #if NATIVE_INTEGRATION_TESTS
+        verificationFailureClass = "dns"
+        #endif
         let names = Set(try Self.serviceNames(includeDisabled: true))
         for service in journal.services {
             guard names.contains(service.name), try Self.dns(service.name) == Self.tunnelDNS else {
                 throw AppError("VPN DNS ownership changed. Reconnect the VPN.")
             }
         }
+        #if NATIVE_INTEGRATION_TESTS
+        verificationFailureClass = nil
+        #endif
     }
 
     static func recover(journal: URL) throws {
@@ -159,12 +177,18 @@ final class NetworkPlan {
             let prefix = family == 4 ? 32 : 128
             let existing = try Self.lookup(family: family, target: address)
             if let existing, Self.exact(existing, destination: address, prefix: prefix, family: family) {
-                // A more-specific preexisting physical host route already bypasses
-                // our /1 routes. Preserve it rather than claiming ownership.
-                guard existing.interface != interface && !existing.interface.hasPrefix("utun") else {
+                guard Self.validInterface(existing.interface), existing.interface != interface,
+                      !existing.interface.hasPrefix("utun"), !existing.interface.hasPrefix("tun"), Self.usable(existing) else {
                     throw AppError("A VPN server is already routed through another tunnel.")
                 }
-                continue
+                // A successful preflight commonly creates a WASCLONED host
+                // cache entry. Darwin may invalidate it when /1 routes change.
+                // Only an explicit stable host route can be preserved as a
+                // bypass; materialize a journal-owned static route for clones.
+                // Apple route.h documents STATIC and WASCLONED separately:
+                // https://github.com/apple/darwin-xnu/blob/main/bsd/net/route.h
+                if Self.stableHostBypass(existing) { continue }
+                guard Self.ephemeralHostClone(existing) else { throw AppError("An existing server host route has unknown ownership.") }
             }
             let original = family == 4 ? original4 : original6
             guard let original, let gateway = original.gateway, Self.family(gateway) == family,
@@ -182,6 +206,7 @@ final class NetworkPlan {
         for route in routes {
             if let existing = try Self.lookup(family: route.family, target: route.target),
                Self.exact(existing, destination: route.destination, prefix: route.prefix, family: route.family) {
+                if route.host, Self.replaceableClone(existing, route: route) { continue }
                 throw AppError("A required route already exists. Disconnect other VPNs before connecting.")
             }
         }
@@ -240,10 +265,23 @@ final class NetworkPlan {
     private static func add(_ route: Route) throws {
         // RTF_PROTO2 identifies routes created by this transaction, including the
         // narrow crash interval between a successful add and its journal commit.
-        var arguments = ["-n", "add", route.family == 4 ? "-inet" : "-inet6", route.host ? "-host" : "-net", route.target, "-proto2"]
+        var arguments = ["-n", "add", route.family == 4 ? "-inet" : "-inet6", route.host ? "-host" : "-net", route.target, "-static", "-proto2"]
         if let gateway = route.gateway { arguments += [gateway, "-ifp", route.interface] }
         else { arguments += ["-interface", route.interface] }
-        _ = try execute("/sbin/route", arguments)
+        do { _ = try execute("/sbin/route", arguments) }
+        catch {
+            // apply() persisted state=1 before entering this method. If an
+            // ephemeral cache route prevents adding the durable bypass, remove
+            // only the exact verified physical clone and retry once. A deleted
+            // cache entry is regenerated from the untouched physical default.
+            guard route.host, let current = try lookup(family: route.family, target: route.target),
+                  replaceableClone(current, route: route) else { throw error }
+            var removal = ["-n", "delete", route.family == 4 ? "-inet" : "-inet6", "-host", route.target]
+            if current.flags.contains("IFSCOPE") { removal += ["-ifscope", current.interface] }
+            if let gateway = route.gateway { removal += [gateway, "-ifp", route.interface] }
+            _ = try execute("/sbin/route", removal)
+            _ = try execute("/sbin/route", arguments)
+        }
         guard let current = try lookup(family: route.family, target: route.target), owns(current, route: route) else { throw AppError("The operating system did not confirm the requested owned route.") }
     }
     private static func delete(_ route: Route) throws {
@@ -255,8 +293,21 @@ final class NetworkPlan {
     private static func usable(_ route: RouteInfo) -> Bool {
         route.flags.contains("UP") && !route.flags.contains("REJECT") && !route.flags.contains("BLACKHOLE")
     }
+    private static func stableHostBypass(_ route: RouteInfo) -> Bool {
+        route.flags.contains("HOST") && route.flags.contains("STATIC") &&
+        route.flags.isDisjoint(with: ["WASCLONED", "DYNAMIC", "MODIFIED", "IFSCOPE"])
+    }
+    private static func ephemeralHostClone(_ route: RouteInfo) -> Bool {
+        route.flags.contains("HOST") && route.flags.contains("WASCLONED") &&
+        route.flags.isDisjoint(with: ["STATIC", "PROTO1", "PROTO2", "PROTO3", "DYNAMIC", "MODIFIED", "REJECT", "BLACKHOLE"])
+    }
+    private static func replaceableClone(_ current: RouteInfo, route: Route) -> Bool {
+        route.host && ephemeralHostClone(current) && usable(current) &&
+        current.interface == route.interface && equivalent(current.gateway ?? "", route.gateway ?? "") &&
+        exact(current, destination: route.destination, prefix: route.prefix, family: route.family)
+    }
     private static func owns(_ current: RouteInfo, route: Route) -> Bool {
-        guard current.flags.contains("PROTO2"), current.interface == route.interface,
+        guard current.flags.contains("PROTO2"), current.flags.contains("STATIC"), !current.flags.contains("WASCLONED"), current.interface == route.interface,
               exact(current, destination: route.destination, prefix: route.prefix, family: route.family) else { return false }
         if let gateway = route.gateway { return equivalent(current.gateway ?? "", gateway) }
         return !current.flags.contains("GATEWAY")
@@ -410,6 +461,23 @@ final class NetworkPlan {
         let host = Route(family: 4, destination: "203.0.113.9", prefix: 32, gateway: "192.0.2.1", interface: "en0")
         let physical = RouteInfo(fields: fields("destination: 203.0.113.9\ngateway: 192.0.2.1\ninterface: en0\nflags: <UP,GATEWAY,HOST,DONE,STATIC,PROTO2>\n"))
         try expect(owns(physical, route: host))
+        try expect(stableHostBypass(physical))
+        let manual = RouteInfo(fields: physical.fields.merging(["flags": "<UP,GATEWAY,HOST,DONE,STATIC>"]) { _, new in new })
+        try expect(stableHostBypass(manual) && !owns(manual, route: host))
+        let clone = RouteInfo(fields: physical.fields.merging(["flags": "<UP,GATEWAY,HOST,DONE,WASCLONED,IFREF>"]) { _, new in new })
+        try expect(ephemeralHostClone(clone) && replaceableClone(clone, route: host) && !stableHostBypass(clone) && !owns(clone, route: host))
+        let scopedClone = RouteInfo(fields: clone.fields.merging(["flags": "<UP,GATEWAY,HOST,DONE,WASCLONED,IFSCOPE,IFREF>"]) { _, new in new })
+        try expect(replaceableClone(scopedClone, route: host))
+        for flags in ["<UP,GATEWAY,HOST,DONE>", "<UP,GATEWAY,HOST,DONE,STATIC,WASCLONED>",
+                      "<UP,GATEWAY,HOST,DONE,WASCLONED,PROTO2>", "<UP,GATEWAY,HOST,DONE,WASCLONED,DYNAMIC>"] {
+            let unknown = RouteInfo(fields: clone.fields.merging(["flags": flags]) { _, new in new })
+            try expect(!replaceableClone(unknown, route: host))
+        }
+        for patch in [["interface": "utun7"], ["gateway": "192.0.2.2"], ["destination": "203.0.113.10"]] {
+            try expect(!replaceableClone(RouteInfo(fields: clone.fields.merging(patch) { _, new in new }), route: host))
+        }
+        let scopedStatic = RouteInfo(fields: physical.fields.merging(["flags": "<UP,GATEWAY,HOST,DONE,STATIC,IFSCOPE>"]) { _, new in new })
+        try expect(!stableHostBypass(scopedStatic) && !replaceableClone(scopedStatic, route: host))
         try expect(!owns(RouteInfo(fields: physical.fields.merging(["gateway": "192.0.2.2"]) { _, new in new }), route: host))
         try expect(!owns(RouteInfo(fields: physical.fields.merging(["flags": "<UP,GATEWAY,DONE,STATIC,PROTO2>"]) { _, new in new }), route: host))
         // Missing IPv6 defaults are normal on IPv4-only networks. Darwin does

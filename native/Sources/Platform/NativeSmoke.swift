@@ -43,6 +43,7 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         catch { throw Failure.blocked("preauthorized sudo") }
         try VPNHelper.runReadOnlyDefaultRouteTests()
         stage("exact-default parser pass")
+        stage("packet evidence regressions pass")
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("wlsaplus-native-smoke-\(UUID().uuidString)", isDirectory: true)
@@ -84,20 +85,37 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
                     stage("native readiness pass")
                     failureStage = "tunnel route selection"
                     try assertTunnelRoute(interface: name)
+                    _ = try await service.smokeRefreshEvidence()
+                    let beforeHTTPS = service.smokeHelperCounters
                     failureStage = "routed HTTPS"
                     stage("routed HTTPS")
                     let (_, response) = try await VPNHTTPS.fetch(URL(string: "https://www.gstatic.com/generate_204")!, maximum: 4096, timeout: 12)
                     guard response.statusCode == 204 else { throw Failure.assertion("routed HTTPS status") }
                     failureStage = "routed UDP DNS"
                     stage("routed UDP DNS")
-                    try await SmokeDNSProbe.test()
+                    let dnsIdentifier = try ProtocolCrypto.random(2)
+                    try await service.smokeBeginDNS(identifier: dnsIdentifier)
+                    try await SmokeDNSProbe.test(identifier: dnsIdentifier)
+                    failureStage = "native packet evidence"
+                    let dnsObserved = try await service.smokeRefreshEvidence()
+                    let evidence = service.smokeHelperCounters
+                    for key in ["tun-read", "tun-handled", "tun-write", "open-tcp", "open-udp", "to-proxy-bytes", "from-proxy-bytes"] {
+                        guard (evidence[key] ?? 0) > 0 else { throw Failure.assertion("native packet evidence") }
+                    }
+                    for key in ["to-proxy-tcp-bytes", "from-proxy-tcp-bytes"] {
+                        guard (evidence[key] ?? 0) > (beforeHTTPS[key] ?? 0) else { throw Failure.assertion("routed TCP packet evidence") }
+                    }
+                    guard dnsObserved else { throw Failure.assertion("routed DNS packet correlation") }
+                    stage("C packets TCP proxy bytes UDP DNS correlation pass")
                     attemptPassed = true
                 } catch {
                     // Foreign errors may contain endpoints or private runtime
                     // paths. Only this fixed stage class reaches CI logs.
                     stage("\(failureStage) failed")
+                    _ = try? await service.smokeRefreshEvidence()
                     if let helperStage = service.smokeHelperStage { stage("helper-stage \(helperStage)") }
                     if let reason = service.smokeHelperReason { stage("helper-reason \(reason)") }
+                    if let validation = service.smokeNetworkValidation { stage("network-validation \(validation)") }
                     let counters = service.smokeHelperCounters
                     if !counters.isEmpty { stage("helper-counters \(counters.keys.sorted().map { "\($0):\(counters[$0]!)" }.joined(separator: ","))") }
                 }
@@ -270,17 +288,18 @@ private final class SmokeDNSProbe {
     private var done = false
     private var hold: SmokeDNSProbe?
 
-    static func test() async throws {
+    static func test(identifier: Data) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             do {
-                let probe = try SmokeDNSProbe { continuation.resume(with: $0) }
+                let probe = try SmokeDNSProbe(identifier: identifier) { continuation.resume(with: $0) }
                 probe.start()
             } catch { continuation.resume(throwing: AppError("Native UDP DNS probe initialization failed.")) }
         }
     }
-    private init(completion: @escaping (Result<Void, Error>) -> Void) throws {
+    private init(identifier: Data, completion: @escaping (Result<Void, Error>) -> Void) throws {
+        guard identifier.count == 2 else { throw AppError("Native UDP DNS identifier was invalid.") }
         self.completion = completion
-        identifier = try ProtocolCrypto.random(2)
+        self.identifier = identifier
         var packet = identifier + Data([1, 0, 0, 1, 0, 0, 0, 0, 0, 0])
         for label in ["www", "gstatic", "com"] {
             packet.append(UInt8(label.utf8.count)); packet.append(Data(label.utf8))

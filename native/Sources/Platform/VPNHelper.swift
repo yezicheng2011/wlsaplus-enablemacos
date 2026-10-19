@@ -103,7 +103,10 @@ enum VPNHelper {
         dispatchMain()
     }
     #if NATIVE_INTEGRATION_TESTS
-    static func runReadOnlyDefaultRouteTests() throws { try VPNRuntime.runReadOnlyDefaultRouteTests() }
+    static func runReadOnlyDefaultRouteTests() throws {
+        try VPNRuntime.runReadOnlyDefaultRouteTests()
+        try SmokeDNSWitness.runReadOnlyTests()
+    }
     #endif
 }
 
@@ -171,15 +174,111 @@ private final class HTTPProxyProbe {
     }
 }
 
+#if NATIVE_INTEGRATION_TESTS
+/// Evidence is recorded at three different boundaries: a query emitted by C,
+/// its authenticated proxy response accepted by C, and the resulting datagram
+/// successfully written to utun. Only booleans cross the protected control API.
+private struct SmokeDNSWitness {
+    private let identifier: UInt16
+    private var queryFlows = Set<UInt64>()
+    private(set) var responseObserved = false
+    private(set) var packetWritten = false
+    var queryObserved: Bool { !queryFlows.isEmpty }
+    init(identifier: UInt16) { self.identifier = identifier }
+
+    private var query: Data {
+        Data([UInt8(identifier >> 8), UInt8(identifier & 255), 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
+              3, 119, 119, 119, 7, 103, 115, 116, 97, 116, 105, 99, 3, 99, 111, 109, 0, 0, 1, 0, 1])
+    }
+    mutating func observeQuery(flow: UInt64, port: UInt16, data: Data) {
+        guard port == 53, data == query, queryFlows.count < 128 else { return }
+        queryFlows.insert(flow)
+    }
+    private func matchesResponse(_ bytes: [UInt8]) -> Bool {
+        bytes.count >= 12 && bytes[0] == UInt8(identifier >> 8) && bytes[1] == UInt8(identifier & 255) &&
+        bytes[2] & 0x80 != 0 && bytes[2] & 0x02 == 0 && bytes[3] & 0x0f == 0 &&
+        bytes[4] == 0 && bytes[5] == 1 && (bytes[6] != 0 || bytes[7] != 0)
+    }
+    mutating func observeResponse(flow: UInt64, data: Data) {
+        if queryFlows.contains(flow), matchesResponse(Array(data)) { responseObserved = true }
+    }
+    mutating func observeWritten(packet: Data) {
+        guard responseObserved else { return }
+        let bytes = Array(packet)
+        guard let first = bytes.first else { return }
+        let offset: Int
+        if first >> 4 == 4 {
+            offset = Int(first & 15) * 4
+            guard offset >= 20, bytes.count >= offset + 20, bytes[9] == 17,
+                  bytes[6] & 0x3f == 0, bytes[7] == 0,
+                  Int(bytes[2]) * 256 + Int(bytes[3]) == bytes.count else { return }
+        } else if first >> 4 == 6 {
+            offset = 40
+            guard bytes.count >= 60, bytes[6] == 17,
+                  Int(bytes[4]) * 256 + Int(bytes[5]) + 40 == bytes.count else { return }
+        } else { return }
+        guard bytes[offset] == 0, bytes[offset + 1] == 53,
+              Int(bytes[offset + 4]) * 256 + Int(bytes[offset + 5]) == bytes.count - offset,
+              matchesResponse(Array(bytes.dropFirst(offset + 8))) else { return }
+        packetWritten = true
+    }
+
+    static func runReadOnlyTests() throws {
+        func check(_ value: Bool) throws { guard value else { throw AppError("Native DNS evidence regression failed.") } }
+        let identifier: UInt16 = 0x1234
+        var witness = SmokeDNSWitness(identifier: identifier)
+        let query = witness.query
+        var response = query; response[2] = 0x81; response[3] = 0x80; response[7] = 1
+        let udpLength = response.count + 8
+        let udp = Data([0, 53, 0xc0, 0, UInt8(udpLength >> 8), UInt8(udpLength & 255), 0, 0]) + response
+        var ipv4 = Data(repeating: 0, count: 20); ipv4[0] = 0x45; ipv4[9] = 17
+        ipv4[2] = UInt8((20 + udp.count) >> 8); ipv4[3] = UInt8((20 + udp.count) & 255)
+        let packet = ipv4 + udp
+        witness.observeResponse(flow: 1, data: response); witness.observeWritten(packet: packet)
+        try check(!witness.responseObserved && !witness.packetWritten)
+        witness.observeQuery(flow: 1, port: 443, data: query)
+        var wrongQuery = query; wrongQuery[0] ^= 1
+        witness.observeQuery(flow: 1, port: 53, data: wrongQuery)
+        try check(!witness.queryObserved)
+        witness.observeQuery(flow: 1, port: 53, data: query)
+        witness.observeResponse(flow: 2, data: response)
+        witness.observeResponse(flow: 1, data: query)
+        try check(witness.queryObserved && !witness.responseObserved)
+        witness.observeResponse(flow: 1, data: response)
+        var wrongPacket = packet; wrongPacket[20 + 1] = 54
+        witness.observeWritten(packet: wrongPacket)
+        witness.observeWritten(packet: Data(packet.dropLast()))
+        try check(witness.responseObserved && !witness.packetWritten)
+        witness.observeWritten(packet: packet)
+        try check(witness.packetWritten)
+        var ipv6Witness = SmokeDNSWitness(identifier: identifier)
+        ipv6Witness.observeQuery(flow: 1, port: 53, data: query)
+        ipv6Witness.observeResponse(flow: 1, data: response)
+        var ipv6 = Data(repeating: 0, count: 40); ipv6[0] = 0x60; ipv6[6] = 17
+        ipv6[4] = UInt8(udp.count >> 8); ipv6[5] = UInt8(udp.count & 255)
+        ipv6Witness.observeWritten(packet: ipv6 + udp)
+        try check(ipv6Witness.packetWritten)
+    }
+}
+#endif
+
 private final class VPNFlow {
     let connection: ProxyConnection
     let udp: Bool
+    #if NATIVE_INTEGRATION_TESTS
+    let destinationPort: UInt16
+    #endif
     var pending = [Data]()
     var offset = 0
     var bytes = 0
     var remoteEOF = false
     var paused = false
-    init(connection: ProxyConnection, udp: Bool) { self.connection = connection; self.udp = udp }
+    init(connection: ProxyConnection, udp: Bool, destinationPort: UInt16) {
+        self.connection = connection; self.udp = udp
+        #if NATIVE_INTEGRATION_TESTS
+        self.destinationPort = destinationPort
+        #endif
+    }
 }
 
 private final class VPNRuntime {
@@ -205,6 +304,8 @@ private final class VPNRuntime {
     private var failureReason: String?
     #if NATIVE_INTEGRATION_TESTS
     private var counters = [String: Int]()
+    private var smokeDNS: SmokeDNSWitness?
+    private var networkValidationFailure: String?
     #endif
     private var message = "Checking the VPN server."
     private var networkActive = false
@@ -306,7 +407,15 @@ private final class VPNRuntime {
             guard let context else { return }
             let runtime = Unmanaged<VPNRuntime>.fromOpaque(context).takeUnretainedValue()
             let data = length == 0 ? Data() : Data(bytes: bytes!, count: length)
-            runtime.queue.async { runtime.record("to-proxy-bytes", amount: data.count); runtime.flows[flow]?.connection.send(data) }
+            runtime.queue.async {
+                guard let target = runtime.flows[flow] else { return }
+                runtime.record("to-proxy-bytes", amount: data.count)
+                if !target.udp { runtime.record("to-proxy-tcp-bytes", amount: data.count) }
+                #if NATIVE_INTEGRATION_TESTS
+                if target.udp { runtime.smokeDNS?.observeQuery(flow: flow, port: target.destinationPort, data: data) }
+                #endif
+                target.connection.send(data)
+            }
         }, close: { context, flow in
             guard let context else { return }
             let runtime = Unmanaged<VPNRuntime>.fromOpaque(context).takeUnretainedValue()
@@ -403,9 +512,17 @@ private final class VPNRuntime {
 
     private func open(_ id: UInt64, host: String, port: UInt16, udp: Bool) {
         guard !stopping, !stopped, engine != nil else { return }
+        if port == node.port, let destination = try? ProxyAddress.bytes(host), let pinned = try? ProxyAddress.bytes(node.server),
+           destination.kind != 3, destination.kind == pinned.kind, destination.address == pinned.address {
+            // The pinned proxy endpoint must use its physical bypass. Seeing it
+            // arrive from utun proves that escape route stopped being effective;
+            // abort before another proxy connection can amplify the loop.
+            failAndRecover(AppError("The proxy escape route changed. Reconnect the VPN."), reason: "proxy-escape")
+            return
+        }
         record(udp ? "open-udp" : "open-tcp")
         let connection = ProxyConnection(node: node, destinationHost: host, destinationPort: port, udp: udp, queue: queue)
-        let flow = VPNFlow(connection: connection, udp: udp)
+        let flow = VPNFlow(connection: connection, udp: udp, destinationPort: port)
         flows[id] = flow
         connection.onReady = { [weak self, weak flow] in
             guard let runtime = self, let target = flow else { return }
@@ -420,6 +537,7 @@ private final class VPNRuntime {
             runtime.queue.async {
                 guard runtime.flows[id] === target else { return }
                 runtime.record("from-proxy-bytes", amount: data.count)
+                if !target.udp { runtime.record("from-proxy-tcp-bytes", amount: data.count) }
                 guard target.bytes + data.count <= 512 * 1024, target.pending.count < 2048 else { runtime.abort(id); return }
                 target.pending.append(data); target.bytes += data.count; runtime.pump(id)
             }
@@ -455,6 +573,9 @@ private final class VPNRuntime {
             let data = Data(first.dropFirst(flow.offset).prefix(count))
             let accepted = data.withUnsafeBytes { wlp_remote_data(engine, id, $0.bindMemory(to: UInt8.self).baseAddress, count) }
             guard accepted == 0 else { closeFlow(id); return }
+            #if NATIVE_INTEGRATION_TESTS
+            if flow.udp { smokeDNS?.observeResponse(flow: id, data: data) }
+            #endif
             flow.offset += count; flow.bytes -= count
             if flow.offset == first.count { flow.pending.removeFirst(); flow.offset = 0 }
         }
@@ -514,6 +635,9 @@ private final class VPNRuntime {
             }
             guard count == packet.count else { failAndRecover(AppError("A native tunnel packet was only partially written."), reason: "tun-write"); return }
             record("tun-write")
+            #if NATIVE_INTEGRATION_TESTS
+            smokeDNS?.observeWritten(packet: packet)
+            #endif
             packets.removeFirst(); packetBytes -= packet.count; processed += 1
         }
         if packets.isEmpty { writeSource?.cancel(); writeSource = nil }
@@ -526,6 +650,23 @@ private final class VPNRuntime {
 
     private func request(_ method: String, _ path: String, complete: @escaping (Int, [String: Any], (() -> Void)?) -> Void) {
         if method == "GET", path == "/status" { complete(200, snapshot(), nil); return }
+        #if NATIVE_INTEGRATION_TESTS
+        if method == "POST", path.hasPrefix("/smoke-dns/") {
+            let suffix = path.dropFirst("/smoke-dns/".count)
+            guard state == "connected", suffix.utf8.count == 4, let identifier = UInt16(suffix, radix: 16) else {
+                complete(400, ["message": "Invalid native DNS evidence request."], nil); return
+            }
+            smokeDNS = SmokeDNSWitness(identifier: identifier)
+            complete(200, snapshot(), nil); return
+        }
+        if method == "GET", path == "/smoke-evidence" {
+            var evidence = snapshot()
+            evidence["dnsQueryThroughC"] = smokeDNS?.queryObserved ?? false
+            evidence["dnsResponseThroughC"] = smokeDNS?.responseObserved ?? false
+            evidence["dnsResponseWritten"] = smokeDNS?.packetWritten ?? false
+            complete(200, evidence, nil); return
+        }
+        #endif
         if method == "POST", path == "/stop" {
             do {
                 try cleanup(); state = "stopped"; message = "Routes and DNS were restored."
@@ -550,6 +691,7 @@ private final class VPNRuntime {
         if let failureReason { value["failureReason"] = failureReason }
         #if NATIVE_INTEGRATION_TESTS
         value["counters"] = counters
+        if let failure = networkValidationFailure ?? plan?.verificationFailureClass { value["networkValidation"] = failure }
         #endif
         return value
     }
@@ -581,6 +723,9 @@ private final class VPNRuntime {
         guard !stopped, !stopping else { return }
         failureStage = stage
         failureReason = reason
+        #if NATIVE_INTEGRATION_TESTS
+        networkValidationFailure = plan?.verificationFailureClass
+        #endif
         state = "error"; message = error.localizedDescription
         do { try cleanup() }
         catch { message += " \(error.localizedDescription)" }

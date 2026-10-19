@@ -35,6 +35,7 @@ smoke_trust_added=0
 smoke_system_certificate_added=0
 smoke_searchlist_changed=0
 smoke_original_keychains=()
+smoke_original_keychain_count=0
 identity='764D4389AAFA0C50311E39C17DDFA1981ABEF86C'
 smoke_diagnostics="$smoke_tmp/signing-diagnostics.log"
 mark() { smoke_phase="$1"; printf 'Signed compatibility smoke: %s.\n' "$smoke_phase"; }
@@ -70,7 +71,7 @@ cleanup() {
     bounded sudo -n /usr/bin/security delete-certificate -Z "$identity" /Library/Keychains/System.keychain >/dev/null 2>&1 || echo 'Warning: hosted-runner temporary certificate cleanup failed.' >&2
   fi
   if [[ "$smoke_searchlist_changed" == 1 ]]; then
-    if [[ "${#smoke_original_keychains[@]}" -gt 0 ]]; then
+    if [[ "$smoke_original_keychain_count" -gt 0 ]]; then
       bounded /usr/bin/security list-keychains -d user -s "${smoke_original_keychains[@]}" >/dev/null 2>&1 || echo 'Warning: temporary keychain search-list cleanup failed.' >&2
     else
       bounded /usr/bin/security list-keychains -d user -s >/dev/null 2>&1 || echo 'Warning: temporary keychain search-list cleanup failed.' >&2
@@ -98,9 +99,10 @@ while IFS= read -r smoke_keychain_line; do
   smoke_existing_keychain="${BASH_REMATCH[1]}"
   [[ "$smoke_existing_keychain" != *\\* ]] || { echo 'Cannot safely preserve an escaped keychain path.' >&2; exit 1; }
   smoke_original_keychains+=("$smoke_existing_keychain")
+  smoke_original_keychain_count=$((smoke_original_keychain_count + 1))
 done < "$smoke_tmp/original-keychains.txt"
 smoke_searchlist_changed=1
-if [[ "${#smoke_original_keychains[@]}" -gt 0 ]]; then
+if [[ "$smoke_original_keychain_count" -gt 0 ]]; then
   bounded /usr/bin/security list-keychains -d user -s "$smoke_keychain" "${smoke_original_keychains[@]}" >"$smoke_diagnostics" 2>&1
 else
   bounded /usr/bin/security list-keychains -d user -s "$smoke_keychain" >"$smoke_diagnostics" 2>&1

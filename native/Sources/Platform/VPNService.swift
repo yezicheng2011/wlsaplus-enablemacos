@@ -16,6 +16,7 @@ import Darwin
     private(set) var smokeHelperStage: String?
     private(set) var smokeHelperReason: String?
     private(set) var smokeHelperCounters = [String: Int]()
+    private(set) var smokeNetworkValidation: String?
     #endif
     private let sessionURL: URL
     private(set) var status: [String: Any] = ["state": "disconnected", "connected": false]
@@ -56,6 +57,7 @@ import Darwin
         #if NATIVE_INTEGRATION_TESTS
         smokeHelperStage = nil
         smokeHelperReason = nil; smokeHelperCounters.removeAll()
+        smokeNetworkValidation = nil
         #endif
         defer { busy = false; operation = "" }
         if catalog.isEmpty { _ = try await nodes() }
@@ -101,19 +103,7 @@ import Darwin
                 }
                 if let pid = value["pid"] as? NSNumber { helperPID = pid.int32Value }
                 #if NATIVE_INTEGRATION_TESTS
-                let progress = value["failureStage"] as? String ?? value["stage"] as? String
-                if let progress, ["listener", "resolve", "proxy-probe", "utun", "network-plan", "routed-https", "connected", "cleanup", "recovery"].contains(progress) {
-                    smokeHelperStage = progress
-                }
-                if let reason = value["failureReason"] as? String,
-                   ["setup", "physical-network", "active-plan", "routed-fetch", "proxy-health", "tun-read", "tun-write", "unclassified"].contains(reason) {
-                    smokeHelperReason = reason
-                }
-                if let counters = value["counters"] as? [String: Any] {
-                    for key in ["tun-read", "tun-handled", "tun-rejected", "tun-write", "open-tcp", "open-udp", "proxy-ready", "proxy-error", "proxy-auth-error", "to-proxy-bytes", "from-proxy-bytes"] {
-                        if let number = counters[key] as? NSNumber, (0...1_000_000_000).contains(number.intValue) { smokeHelperCounters[key] = number.intValue }
-                    }
-                }
+                smokeCapture(value)
                 #endif
                 let state = value["state"] as? String ?? ""
                 if state == "connected", value["connected"] as? Bool == true,
@@ -223,6 +213,35 @@ import Darwin
                 candidates.first(where: { $0.tls != true })?.id].compactMap { $0 }
     }
     var smokeHelperPID: Int32? { helperPID }
+
+    /// The random DNS ID stays on the authenticated native control channel.
+    func smokeBeginDNS(identifier: Data) async throws {
+        guard identifier.count == 2, let config = configuration else { throw AppError("Native DNS evidence could not be initialized.") }
+        let suffix = identifier.map { String(format: "%02x", $0) }.joined()
+        let value = try await control("POST", "/smoke-dns/" + suffix, config: config)
+        smokeCapture(value)
+    }
+
+    func smokeRefreshEvidence() async throws -> Bool {
+        guard let config = configuration else { throw AppError("Native packet evidence is unavailable.") }
+        let value = try await control("GET", "/smoke-evidence", config: config)
+        smokeCapture(value)
+        return value["dnsQueryThroughC"] as? Bool == true && value["dnsResponseThroughC"] as? Bool == true && value["dnsResponseWritten"] as? Bool == true
+    }
+
+    private func smokeCapture(_ value: [String: Any]) {
+        let progress = value["failureStage"] as? String ?? value["stage"] as? String
+        if let progress, ["listener", "resolve", "proxy-probe", "utun", "network-plan", "routed-https", "connected", "cleanup", "recovery"].contains(progress) { smokeHelperStage = progress }
+        if let reason = value["failureReason"] as? String,
+           ["setup", "physical-network", "active-plan", "routed-fetch", "proxy-health", "proxy-escape", "tun-read", "tun-write", "unclassified"].contains(reason) { smokeHelperReason = reason }
+        if let validation = value["networkValidation"] as? String,
+           ["transaction", "owned-bypass", "capture-ipv4", "capture-ipv6", "pinned-bypass", "dns"].contains(validation) { smokeNetworkValidation = validation }
+        if let counters = value["counters"] as? [String: Any] {
+            for key in ["tun-read", "tun-handled", "tun-rejected", "tun-write", "open-tcp", "open-udp", "proxy-ready", "proxy-error", "proxy-auth-error", "to-proxy-bytes", "from-proxy-bytes", "to-proxy-tcp-bytes", "from-proxy-tcp-bytes"] {
+                if let number = counters[key] as? NSNumber, (0...1_000_000_000).contains(number.intValue) { smokeHelperCounters[key] = number.intValue }
+            }
+        }
+    }
     #endif
 
     private func publicNodes() -> [[String: Any]] {
@@ -283,6 +302,9 @@ import Darwin
                 guard !Task.isCancelled, let self, let config = self.configuration else { return }
                 do {
                     let value = try await self.control("GET", "/status", config: config)
+                    #if NATIVE_INTEGRATION_TESTS
+                    self.smokeCapture(value)
+                    #endif
                     if value["state"] as? String != "connected" || value["connected"] as? Bool != true {
                         self.publish(["state": "error", "connected": false, "cleanupRequired": value["networkActive"] as? Bool ?? true,
                                       "message": value["message"] as? String ?? "The native VPN connection stopped."])
