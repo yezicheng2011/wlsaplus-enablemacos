@@ -1,76 +1,131 @@
-# WLSAPlus macOS 版本说明书（1.0.9）
+# WLSAPlus macOS 版本说明书（2.0.0）
 
-## 包里有什么
+面向同学的安装方式：**按本文从源码编译**。不需要 Apple 开发者账号，也不需要用官网/GitHub 的一键 DMG 当主路径（那是开发者自测与应用内更新用的）。
 
-下载 **`wlsaplusmac.zip`**，解压后有：
+© daniel.ye
 
-| 文件 | 说明 |
-| --- | --- |
-| `wlsaplus1.0.9.dmg` | 安装包（universal：Intel 与 Apple 芯片 M1/M2/M3/M4… 通用） |
-| `安装wlsaplus.command` | 一键安装 + 解除隔离脚本 |
-| 本说明书 | 安装与使用说明 |
+---
 
-`wlsaplus1.0.9.dmg` 可以和脚本放在一起，也可以放在同级的 `download` 文件夹里，脚本都能找到。
+## 这是什么
+
+- **产品**：WLSAPlus macOS 客户端（课表、成绩、考勤、开课提醒、校园工具、论坛、VPN）
+- **形态**：macOS **原生**应用（Swift / C），与 Windows / Android 版**相互独立、互不相通**
+- **VPN 内核**：**自研开源的 MockMini**（Apache-2.0；说明见 [mockmini.danielye2011.uk](https://mockmini.danielye2011.uk/)），不再使用旧版 mihomo / Clash Meta
+- **当前版本**：2.0.0
 
 ## 系统要求
 
-- macOS 13 或更新；**Intel（x86_64）与 Apple 芯片（arm64）Mac 都支持**（universal 通用应用）。
-- 全新的 Mac 也可以直接装：**不需要**装 Homebrew、Node、Xcode，也**不需要联网**，脚本只用 macOS 自带的工具。
-- 应用之后要联网的部分（同步 PowerSchool、VPN 订阅）走学校和你自己的服务器，不依赖境外下载站。
+- macOS **13** 或更新
+- **Intel（x86_64）与 Apple 芯片（arm64）** 都支持（编译产物为 universal）
+- 需要安装 **Xcode 命令行工具**（不是完整 Xcode App；体积小很多）
+- **不需要**：Homebrew、Node.js、npm、Apple Developer 付费账号
 
-## 安装步骤
+## 安装：从源码编译（推荐）
 
-1. 双击 `wlsaplusmac.zip` 解压。
-2. 双击 **`安装wlsaplus.command`**。
-   - 若提示「无法打开，因为无法验证开发者」：点「完成」→ 打开「系统设置」→「隐私与安全性」→ 拉到最下面点「仍要打开」→ 再点「打开」。
-   - 若提示「没有执行权限」：打开「终端」，输入 `chmod +x ` （后面有个空格），把脚本拖进终端窗口，按回车，再双击脚本。
-3. 脚本会自动：
-   1. 检查系统和芯片；
-   2. 取消解压文件夹的隔离属性；
-   3. 找到 `wlsaplus1.0.9.dmg` 并挂载；
-   4. 把 `WLSAPlus.app` 装进「应用程序」（有旧版会先替换）；
-   5. 解除应用的隔离属性；
-   6. 自动打开 WLSAPlus。
-4. 中途如果要输入密码，输入时屏幕**不会显示任何字符**，输完直接按回车即可。
+### 方式 A：终端复制命令（最清楚）
 
-## 如果还是提示「已损坏」或打不开
-
-本应用是自签名的（不是苹果开发者证书），个别系统仍会拦。任选一种：
-
-- 在「应用程序」里对 WLSAPlus **右键 → 打开 → 打开**；
-- 或在「终端」执行：
+1. 打开「终端」（启动台 → 其他 → 终端）。
+2. 若从未装过命令行工具，先执行（弹出窗口按提示安装，装完再继续）：
 
 ```bash
-sudo xattr -cr /Applications/WLSAPlus.app
+xcode-select --install
 ```
 
-## WLSAPlus 论坛（1.0.9 新增）
+3. 复制执行下面整段：
 
-左侧栏（窗口较窄时为底部栏）新增 **Forum / WLSAPlus 论坛** 标签，论坛直接嵌在应用里打开：
+```bash
+git clone https://github.com/yezicheng2011/wlsaplus-enablemacos.git
+cd wlsaplus-enablemacos/native
+WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+open out/WLSAPlus.app
+```
 
-- **自动登录**：已在应用里同步 PowerSchool 的同学，打开论坛会用当前的 PowerSchool 会话自动登录（密码不会发给论坛）；帖子依旧完全匿名。未同步时以游客身份浏览。
-- **主题跟随**：论坛的浅色 / 深色跟随 WLSAPlus 的主题设置（设置里选「跟随系统」时随系统切换），切换后论坛即时变化，无需刷新。
-- **底部导航**：嵌入模式下论坛的「主页 / AI 助手 / 墙投稿 / 墙查询 / 发布 / 登录」在论坛页面底部；窗口拉宽时内容居中显示。
-- 自动登录偶尔失败时，页面底部会短暂提示错误代码（如 `invalid_session`），可截图反馈；不影响以游客身份浏览。
-- 退出或切换 PowerSchool 账号时，论坛登录状态会一并清除。
+4. （可选）装进「应用程序」：
 
-## 使用 VPN
+```bash
+ditto out/WLSAPlus.app /Applications/WLSAPlus.app
+xattr -cr /Applications/WLSAPlus.app
+open /Applications/WLSAPlus.app
+```
 
-1. 打开 Tools → VPN。
-2. 可先「Refresh」节点列表，需要时点「Test latency」测延迟，再选中节点。
-3. 点 Connect。若弹出管理员授权，输入密码并允许。授权前若短暂提示等待，属正常，不要反复乱点。
-4. 可用「Test WeChat」检测连 VPN / 不连 VPN 时微信相关地址是否可达（仅网络探测，不等于微信能否登录）。
+编译成功后，应用在 `wlsaplus-enablemacos/native/out/WLSAPlus.app`。
 
-## 关闭 VPN（请按顺序）
+### 方式 B：双击一键编译脚本
 
-1. 回到 VPN 页，若有 Disconnect，先点 Disconnect。
-2. 打开「活动监视器」→「网络」，找到 `clash`（或 mihomo 相关进程），选中后点左上角停止（叉），确认退出。
-3. 确认 VPN 页状态回到 Ready / Connect。
+若你已经把本仓库克隆到本机：
 
-## 开课提醒
+1. 在访达中打开仓库里的 `release-kit` 文件夹
+2. 双击 **`编译wlsaplus.command`**
+3. 若提示无法打开：右键 → 打开 → 打开；或先在终端执行 `chmod +x` 后再双击
+4. 脚本会检查命令行工具 → 编译 2.0.0 → 打开应用
 
-设置里可开关「Class reminders」。开启后，开课前约 5 分钟会发 macOS 通知（需已同步课表）。
+> 国内若 `git clone` GitHub 较慢，可用你惯用的镜像 / 代理后再克隆；编译本身**不依赖** npm，也不下载境外 Electron / VPN 内核。
 
-## 课表与成绩
+## 第一次打开：为什么显示「不安全」而不是「已损坏」
 
-Connect / 同步 PowerSchool 后，可在课表与 Progress（成绩、作业、考勤）中查看。数据保存在本地。
+编译产物默认是 **自签名**（ad-hoc），**没有**也不需要 Apple 公证。
+
+- **正常情况**：提示「无法验证开发者」或「不安全」→ 对应用 **右键 → 打开 → 打开**，或到「系统设置 → 隐私与安全性 → 仍要打开」。
+- **若仍显示「已损坏」**：多半是隔离属性（从网盘/浏览器拷过来时常见）。在终端执行：
+
+```bash
+xattr -cr /Applications/WLSAPlus.app
+# 或针对 out 目录里的包：
+# xattr -cr /path/to/wlsaplus-enablemacos/native/out/WLSAPlus.app
+```
+
+然后再右键打开。同学之间互传时，优先传**自己编译好的 `.app`**，并提醒对方用右键打开；不要指望未公证的包像 App Store 应用一样静默通过。
+
+## 使用说明（功能）
+
+### 课表与成绩
+
+在应用内 Connect / 同步 PowerSchool 后，可在课表与 Progress（成绩、作业、考勤）中查看。数据保存在本机；离线可看上次同步结果。首次从旧 Electron 版迁到 2.0.0 时，**账号密码需要重新登录**（旧加密格式不会自动解密迁移）。
+
+### WLSAPlus 论坛
+
+左侧栏（窗口较窄时为底部栏）的 **Forum** 标签：
+
+- 已同步 PowerSchool 时可**自动登录**（只转交会话，密码不发给论坛；帖子仍匿名）
+- 浅色 / 深色跟随应用主题
+- 嵌入模式使用论坛底部导航
+
+### VPN（MockMini）
+
+1. 打开 Tools → VPN
+2. 可先刷新节点、测延迟，再选中节点
+3. 点 Connect；若弹出管理员授权，输入本机密码并允许
+4. 断开时先在 VPN 页点 Disconnect（2.0.0 **没有**旧版 `clash` / mihomo 进程，不必再去活动监视器里杀 clash）
+
+### 开课提醒
+
+设置里可开关 Class reminders。开启后，开课前约 5 分钟发 macOS 通知（需已同步课表）。
+
+## 和 1.1.2 / 旧说明书的差别（一眼看懂）
+
+| | 旧版 1.1.2 及更早 | 现在 2.0.0 |
+| --- | --- | --- |
+| 技术 | Electron + Node + `npm run electron:make` | 原生 Swift/C：`native/scripts/build.sh` |
+| 同学怎么装 | 构建包 / `working.command` / 或自备 Node 编译 | **git clone + build.sh**（或 `编译wlsaplus.command`） |
+| VPN | mihomo（Clash Meta） | **自研开源的 MockMini**（Apache-2.0） |
+| 关 VPN | 还可能要在活动监视器结束 `clash` | 应用内 Disconnect 即可 |
+
+## 常见问题
+
+**Q：可以只下载 DMG、不编译吗？**  
+A：面向同学的正式路径是**源码编译**（本文）。GitHub Release / 应用内更新通道上的包供维护与自测；请以本说明书为准。
+
+**Q：编译报错找不到 `xcrun` / `swiftc`？**  
+A：先执行 `xcode-select --install`，装完重开终端再编。
+
+**Q：要不要 `npm install`？**  
+A：日常装 2.0.0 **不要**。那是旧 Electron 树的命令。
+
+**Q：版权与许可证？**  
+A：应用源码 Apache-2.0，见仓库 `LICENSE` / `NOTICE`。© daniel.ye
+
+## 相关链接
+
+- 源码：<https://github.com/yezicheng2011/wlsaplus-enablemacos>
+- MockMini：<https://mockmini.danielye2011.uk/>
+- 官网：<https://wlsaplus.spacehubxyz.hk/>

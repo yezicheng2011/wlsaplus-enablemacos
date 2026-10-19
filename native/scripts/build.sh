@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ "$(uname -s)" == Darwin ]] || { echo 'A Mac with Xcode command-line tools is required.' >&2; exit 1; }
-version="${WLSAPLUS_VERSION:-2.0.0-beta.1}"
+version="${WLSAPLUS_VERSION:-2.0.0}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || { echo 'Invalid WLSAPLUS_VERSION' >&2; exit 1; }
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 mkdir -p .build out

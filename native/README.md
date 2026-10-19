@@ -6,15 +6,25 @@
 
 ## 构建和检查
 
-在安装 Xcode 命令行工具的 Mac 上运行：
+**普通用户安装请走源码编译**（仓库根 README 与 `release-kit/wlsaplusmac版本说明书.md`）。在已安装 Xcode 命令行工具的 Mac 上：
 
 ```sh
-bash scripts/test.sh
-bash scripts/build.sh
+# 推荐：直接编译 2.0.0（日常装应用不必先跑 test.sh）
+WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
-生成的应用同时包含 arm64 和 x86_64。开发构建使用 ad-hoc 签名；正式更新包必须使用原有固定证书与更新密钥。
+开发者完整检查：
+
+```sh
+bash scripts/test.sh
+WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+open out/WLSAPlus.app
+```
+
+也可双击仓库 `release-kit/编译wlsaplus.command`。生成的应用同时包含 arm64 和 x86_64。默认 ad-hoc 签名（他人打开多为「无法验证开发者」，右键打开即可）；面向更新通道的正式包须使用原有固定证书与更新密钥。
+
+VPN 对外说明：内核为**自研开源的 MockMini**（Apache-2.0）。实现细节见下方「VPN」节与根目录 README。
 
 Linux 可以运行 C 数据包引擎、JavaScript 与 Swift Core 测试。Linux 的 Swift 语法检查不验证 Apple SDK 类型或系统行为，不能代替 macOS 构建。
 
