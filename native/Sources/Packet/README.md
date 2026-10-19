@@ -18,8 +18,10 @@ must finish the transport's write half without discarding its remaining reads.
 Call `wlp_tick` before traffic and every 100 ms using monotonic milliseconds.
 Callback data is borrowed and must be copied before the callback returns.
 
-This is experimental code. It has not passed a TCP conformance suite, live macOS
-VPN tests, sustained throughput tests, or a security audit. Its retransmission
+This is experimental code. A real macOS CI smoke passed with an existing VMess
+node, utun TCP/UDP traffic, routed HTTPS, correlated DNS replies, and route/DNS
+restoration. That is a bounded integration check; it has not passed a TCP
+conformance suite, sustained throughput tests, or a security audit. Its retransmission
 timer is conservative and does not estimate RTT. It does not implement ICMP, path MTU discovery, SACK, window scaling, timestamps, ECN,
 urgent data, IPv6 jumbograms, or IPsec. It is a local proxy endpoint, not a
 production replacement for a mature general-purpose TCP stack. UDP datagrams
@@ -34,4 +36,5 @@ reordering, overlap, windows, sequence wrap, close/reset, UDP, IPv6 extensions,
 resource limits, IPv4/IPv6 fragment ordering/overlap/expiry/cache limits, maximum
 legal UDP payloads, and malformed inputs. They run under address/undefined behavior
 sanitizers. The utun adapter compiles to an unsupported stub outside macOS; its
-native control socket, framing and interface setup require macOS validation.
+native control socket, framing and interface setup are exercised by the Mac smoke.
+Other protocols, networks, failures and sustained workloads still need validation.

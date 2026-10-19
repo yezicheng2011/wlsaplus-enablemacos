@@ -180,8 +180,12 @@ try {
     // target and backup remain inside our throwaway directory; only its stage
     // and marker use the exact path validated by the application at startup.
     const nativeTarget = path.join(temporary, 'native-installed', 'Renamed WLSAPlus.app');
-    const nativeExecutable = path.join(nativeTarget, 'Contents', 'MacOS', 'WLSAPlus');
+    const nativeExecutable = path.join(temporary, 'native-installer-helper');
     assert.ok(within(temporary, await fs.realpath(nativeTarget)));
+    // install() launches a detached copy outside the target .app. Match that
+    // placement so LaunchServices cannot mistake the installer for the app.
+    await fs.copyFile(path.join(nativeTarget, 'Contents', 'MacOS', 'WLSAPlus'), nativeExecutable);
+    await fs.chmod(nativeExecutable, 0o700);
     assert.equal((await exec('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', path.join(nativeTarget, 'Contents', 'Info.plist')])).stdout.trim(), '1.1.2');
     const nativeStage = path.join(markerDirectory, 'native-unpacked', 'WLSAPlus.app');
     await fs.mkdir(path.dirname(nativeStage));
