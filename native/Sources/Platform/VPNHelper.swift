@@ -16,7 +16,7 @@ struct VPNProcessIdentity: Codable, Equatable {
         guard proc_pidinfo(pid, Int32(PROC_PIDTBSDINFO), 0, &info, Int32(size)) == Int32(size), info.pbi_status != 5 else {
             throw AppError("The app process identity could not be verified.")
         }
-        var path = [CChar](repeating: 0, count: Int(PROC_PIDPATHINFO_MAXSIZE))
+        var path = [CChar](repeating: 0, count: Int(WL_PROC_PIDPATH_BUFFER_SIZE))
         guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { throw AppError("The app executable identity could not be verified.") }
         return VPNProcessIdentity(pid: pid, uid: info.pbi_ruid, startedSeconds: info.pbi_start_tvsec,
                                   startedMicroseconds: info.pbi_start_tvusec, executable: String(cString: path))

@@ -69,7 +69,7 @@ final class BundleScheme: NSObject, WKURLSchemeHandler {
         webView.evaluateJavaScript("window.nativeEvent(\(encoded))", completionHandler: nil)
     }
     func parse(_ kind: String, _ value: [String: Any]) async throws -> [String: Any] {
-        let response = try await webView.callAsyncJavaScript("return window.schoolParser(kind, data)", arguments: ["kind": kind, "data": value], in: nil, in: .page)
+        let response = try await webView.callAsyncJavaScript("return window.schoolParser(kind, data)", arguments: ["kind": kind, "data": value], in: nil, contentWorld: .page)
         guard let parsed = response as? [String: Any] else { throw AppError("The school page could not be parsed.") }
         return parsed
     }
