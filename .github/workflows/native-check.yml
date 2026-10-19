@@ -1,0 +1,43 @@
+name: Native macOS checks
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['native/**', '.github/workflows/native-check.yml']
+concurrency:
+  group: native-check-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate native source
+        id: location
+        shell: bash
+        run: |
+          if [[ -f native/scripts/build.sh ]]; then echo 'dir=native' >> "$GITHUB_OUTPUT"; else echo 'dir=.' >> "$GITHUB_OUTPUT"; fi
+      - name: Core and protocol regression checks
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: bash scripts/test.sh
+      - name: Build both Mac architectures
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: bash scripts/build.sh
+      - name: Startup health check
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: |
+          mkdir -p "$HOME/Library/Application Support/WLSAPlus/updates/staging/2.0.0-beta.1"
+          marker="$HOME/Library/Application Support/WLSAPlus/updates/staging/2.0.0-beta.1/launched.marker"
+          python3 - "$marker" <<'PY'
+          import subprocess,sys
+          subprocess.run(['open','-W','out/WLSAPlus.app','--args','--wlsaplus-update-marker='+sys.argv[1],'--wlsaplus-update-verify-only'],check=True,timeout=90)
+          PY
+          test -f "$marker"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WLSAPlus-native-review
+          path: |
+            out/WLSAPlus.app
+            native/out/WLSAPlus.app

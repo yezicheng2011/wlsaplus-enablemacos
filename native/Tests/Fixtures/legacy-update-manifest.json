@@ -1,0 +1,5 @@
+{
+  "format": 1,
+  "payload": "{\"product\":\"wlsaplus-macos\",\"version\":\"1.1.2\",\"tag\":\"v1.1.2\",\"channel\":\"stable\",\"releasedAt\":\"2026-10-10T03:30:13.884Z\",\"minimumSystemVersion\":\"13.0\",\"notes\":\"\",\"files\":{\"arm64\":{\"name\":\"WLSAPlus-1.1.2-mac-arm64.zip\",\"size\":171019480,\"sha256\":\"b53540cb2224ae6865fe5a1ba916e9ea9219d64f1407d3e18002b1d2d3318f17\"},\"x64\":{\"name\":\"WLSAPlus-1.1.2-mac-x64.zip\",\"size\":176762827,\"sha256\":\"38bf6d3adbd9c5349514aa5364469ea5b2bdd7e0b0103f11a813feefb20979ab\"},\"universal\":{\"name\":\"WLSAPlus-1.1.2-macOS-universal.zip\",\"size\":271984144,\"sha256\":\"bead3a46e08ba027c6613f3f4f4371eec042ddc2d6e3dd19a6765365fda5c962\"}}}",
+  "signature": "mwePrdlIxP3OEQG+E7nN4VB2Ls7LBM4RUbhYolBQ3196+VSVrVS4Whh2vAdBs3w/GD4XqlLWj9agp+4oQp9dAw=="
+}

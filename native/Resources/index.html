@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>WLSAPlus</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Application sidebar">
+      <a class="brand" href="#home" aria-label="WLSAPlus home"><span class="brand-mark" aria-hidden="true">W<span>+</span></span><span>WLSA<span class="brand-plus">Plus</span></span></a>
+      <div class="sidebar-label">YOUR WORKSPACE</div>
+      <nav id="navigation" aria-label="Main navigation"></nav>
+      <div class="sidebar-bottom"><div class="local-indicator"><span></span> Saved on your Mac</div><div class="version" id="version">WLSAPlus</div></div>
+    </aside>
+    <div class="main-shell">
+      <header class="topbar"><div class="breadcrumbs"><span>WLSAPlus</span><span aria-hidden="true">/</span><strong id="breadcrumb">Home</strong></div><div class="topbar-actions"><span id="sync-label" class="small muted"></span><button id="sync-button" class="button icon-button" data-action="sync" aria-label="Sync PowerSchool" title="Sync PowerSchool"></button><button id="account-button" class="account-button" data-action="account" aria-label="PowerSchool account" title="PowerSchool account"></button></div></header>
+      <div id="environment-banner" class="environment-banner" hidden></div>
+      <div id="notice" class="notice-container" hidden></div>
+      <main id="main" tabindex="-1"><div id="view" aria-busy="true"><div class="loading-state"><span class="spinner"></span><p>Loading your workspace…</p></div></div></main>
+    </div>
+  </div>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <div id="toast" role="status" aria-live="polite" class="toast" hidden></div>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
+</body>
+</html>
