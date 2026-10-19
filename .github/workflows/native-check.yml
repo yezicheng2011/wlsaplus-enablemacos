@@ -2,7 +2,7 @@ name: Native macOS checks
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['native/**', '.github/workflows/native-check.yml']
+    paths: ['native/**', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
 concurrency:
   group: native-check-${{ github.ref }}
   cancel-in-progress: true
@@ -35,9 +35,14 @@ jobs:
           subprocess.run(['open','-W','out/WLSAPlus.app','--args','--wlsaplus-update-marker='+sys.argv[1],'--wlsaplus-update-verify-only'],check=True,timeout=90)
           PY
           test -f "$marker"
+      - name: Native VPN and network restoration
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: bash scripts/vpn-smoke.sh
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: WLSAPlus-native-review
           path: |
-            out/WLSAPlus.app
-            native/out/WLSAPlus.app
+            out/WLSAPlus-native-review.zip
+            native/out/WLSAPlus-native-review.zip
+          if-no-files-found: warn

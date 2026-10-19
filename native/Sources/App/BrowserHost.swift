@@ -73,6 +73,14 @@ final class BundleScheme: NSObject, WKURLSchemeHandler {
         guard let parsed = response as? [String: Any] else { throw AppError("The school page could not be parsed.") }
         return parsed
     }
+    func verifyInterface() async throws {
+        let kind = try await webView.evaluateJavaScript("typeof window.WLSA?.native") as? String
+        guard kind == "function" else { throw AppError("The local interface did not initialize.") }
+        let result = try await webView.callAsyncJavaScript("return await window.WLSA.native('app.state')", arguments: [:], in: nil, contentWorld: .page)
+        guard let state = result as? [String: Any], state["version"] as? String == AppIdentity.version else { throw AppError("The interface could not communicate with native services.") }
+        let parsed = try await parse("fields", ["html": "<form><input name='account'><input type='hidden' name='serviceTicket' value='local-check'></form>"])
+        guard parsed["signIn"] as? Bool == true else { throw AppError("The local school parser failed its startup check.") }
+    }
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url, url.scheme == "wlsa", url.host == "ui", navigationAction.targetFrame?.isMainFrame != false else { decisionHandler(.cancel); return }
         decisionHandler(.allow)

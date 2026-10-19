@@ -10,6 +10,16 @@ import WebKit
             if arguments.first == "--vpn-helper-recover", arguments.count == 1 { try VPNHelper.recover(); return }
             if arguments.first == "--native-installer" { try UpdateInstaller.perform(arguments); return }
             if arguments.first == "--make-manifest" { try ManifestPublisher.perform(Array(arguments.dropFirst())); return }
+            if arguments.first == "--validate-archive", arguments.count == 2 { try ArchivePolicy.validate(URL(fileURLWithPath: arguments[1])); print("Archive safety checks passed."); return }
+            #if NATIVE_INTEGRATION_TESTS
+            if arguments.first == "--native-vpn-smoke" {
+                Task { @MainActor in
+                    do { try await NativeSmoke.run(); exit(0) }
+                    catch { FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1) }
+                }
+                dispatchMain()
+            }
+            #endif
             let app = NSApplication.shared
             app.setActivationPolicy(.regular)
             let delegate = try ApplicationDelegate()
@@ -55,13 +65,22 @@ import WebKit
             }
             browser.onReady = { [weak self] in
                 guard let self else { return }
-                do { try UpdateInstaller.acknowledge(arguments: CommandLine.arguments) }
-                catch { self.present(error) }
-                self.browser.event("state", self.state())
-                if let migration = self.store.value["migration"] as? [String: Any], migration["status"] as? String == "pending", let message = migration["message"] {
-                    self.browser.event("notification", ["message": message])
+                Task { @MainActor in
+                    do {
+                        try await self.browser.verifyInterface()
+                        try UpdateInstaller.acknowledge(arguments: CommandLine.arguments)
+                        self.browser.event("state", self.state())
+                        if let migration = self.store.value["migration"] as? [String: Any], migration["status"] as? String == "pending", let message = migration["message"] {
+                            self.browser.event("notification", ["message": message])
+                        }
+                        if CommandLine.arguments.contains("--wlsaplus-update-verify-only") { self.quitApproved = true; NSApp.terminate(nil) }
+                    } catch {
+                        if CommandLine.arguments.contains("--wlsaplus-update-verify-only") {
+                            FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1)
+                        }
+                        self.present(error)
+                    }
                 }
-                if CommandLine.arguments.contains("--wlsaplus-update-verify-only") { self.quitApproved = true; NSApp.terminate(nil) }
             }
             vpn.onChange = { [weak self] value in self?.browser.event("vpn", value) }
             updater.onChange = { [weak self] value in self?.browser.event("update", value) }

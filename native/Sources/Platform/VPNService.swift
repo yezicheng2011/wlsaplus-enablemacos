@@ -65,10 +65,16 @@ import Darwin
         do {
             let path = sessionURL.path
             try await Task.detached(priority: .userInitiated) {
-                try elevatedCommand(executable.path, ["--vpn-helper-launch", path])
+                try launchVPNPrivileged(executable.path, ["--vpn-helper-launch", path])
             }.value
             if disconnectRequested { throw CancellationError() }
+            #if NATIVE_INTEGRATION_TESTS
+            // Two hosted-runner attempts must leave time for rollback inside the
+            // external watchdog deadline. Production keeps its full 90 seconds.
+            let deadline = Date().addingTimeInterval(50)
+            #else
             let deadline = Date().addingTimeInterval(90)
+            #endif
             var lastError: Error?
             while Date() < deadline {
                 if disconnectRequested { throw CancellationError() }
@@ -124,7 +130,7 @@ import Darwin
         guard let config = configuration else {
             if status["cleanupRequired"] as? Bool == true {
                 guard let exe = Bundle.main.executableURL else { throw AppError("The app executable is unavailable.") }
-                try await Task.detached { try elevatedCommand(exe.path, ["--vpn-helper-recover"]) }.value
+                try await Task.detached { try launchVPNPrivileged(exe.path, ["--vpn-helper-recover"]) }.value
             }
             publish(["state": "disconnected", "connected": false]); return status
         }
@@ -174,6 +180,19 @@ import Darwin
         } catch { return ["ok": false, "reachable": false, "message": "WeChat's HTTPS website could not be reached: \(error.localizedDescription)"] }
     }
 
+    #if NATIVE_INTEGRATION_TESTS
+    /// Test binary only. Node IDs stay inside native code and never enter logs.
+    func smokeCandidates() -> [String] {
+        let candidates = catalog.filter {
+            $0.type.lowercased() == "vmess" && ($0.alterId ?? 0) > 0 &&
+            ($0.network ?? "tcp").lowercased() == "tcp" && $0.udp == true
+        }
+        return [candidates.first(where: { $0.tls == true })?.id,
+                candidates.first(where: { $0.tls != true })?.id].compactMap { $0 }
+    }
+    var smokeHelperPID: Int32? { helperPID }
+    #endif
+
     private func publicNodes() -> [[String: Any]] {
         catalog.map { node in
             var item: [String: Any] = ["id": node.id, "name": node.name, "type": node.type, "server": node.server, "port": Int(node.port)]
@@ -212,7 +231,7 @@ import Darwin
             if let pid = helperPID, VPNProcessIdentity.exists(pid) { throw error }
             // A crash may have interrupted the rollback. Recover under root using
             // the fixed journal before allowing an update or another connection.
-            try await Task.detached { try elevatedCommand(executable.path, ["--vpn-helper-recover"]) }.value
+            try await Task.detached { try launchVPNPrivileged(executable.path, ["--vpn-helper-recover"]) }.value
             stopped = true
         }
         if let pid = helperPID {
@@ -245,6 +264,16 @@ import Darwin
             }
         }
     }
+}
+
+private func launchVPNPrivileged(_ executable: String, _ arguments: [String]) throws {
+    #if NATIVE_INTEGRATION_TESTS
+    // Hosted test runners already authorize sudo. -n fails if that right is
+    // absent; it never changes system authorization or prompts interactively.
+    _ = try run("/usr/bin/sudo", ["-n", executable] + arguments)
+    #else
+    try elevatedCommand(executable, arguments)
+    #endif
 }
 
 private final class HTTPSRedirectPolicy: NSObject, URLSessionTaskDelegate {

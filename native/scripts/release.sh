@@ -19,7 +19,10 @@ for pair in arm64:arm64 x64:x86_64; do
   COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$stage/WLSAPlus.app" "release-assets/WLSAPlus-$WLSAPLUS_VERSION-mac-$name.zip"
 done
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$app" "release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.zip"
-/usr/bin/hdiutil create -volname WLSAPlus -srcfolder "$app" -ov -format UDZO "release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.dmg"
+mkdir -p .build/dmg
+/usr/bin/ditto "$app" .build/dmg/WLSAPlus.app
+ln -sfn /Applications .build/dmg/Applications
+/usr/bin/hdiutil create -volname WLSAPlus -srcfolder .build/dmg -ov -format UDZO "release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.dmg"
 "$app/Contents/MacOS/WLSAPlus" --make-manifest --version "$WLSAPLUS_VERSION" --tag "v$WLSAPLUS_VERSION" --out release-assets/update-manifest.json \
   --file "arm64=release-assets/WLSAPlus-$WLSAPLUS_VERSION-mac-arm64.zip" \
   --file "x64=release-assets/WLSAPlus-$WLSAPLUS_VERSION-mac-x64.zip" \
