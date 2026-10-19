@@ -68,6 +68,60 @@ describe('parsePowerSchoolProgress', () => {
     ]);
   });
 
+  it('keeps course identity and the selected grade aligned across multiple terms and trailing columns', () => {
+    const home = `
+      <select name="fg"><option value="Q1">Q1</option><option value="Q2" selected>Q2</option></select>
+      <table class="grid"><tr><th>Exp</th><th>Course</th><th>Q1</th><th>Q2</th><th>S1</th><th>Absences</th><th>Tardies</th><th>Actions</th></tr>
+        <tr id="ccid_71"><td>P2(Mon)</td>
+          <td>Calculus<br><a title="Details about Example Teacher"></a><a href="mailto:teacher@example.test">Email Example Teacher</a><span class="display-flex">- Rm: 205</span></td>
+          <td><a href="scores.html?frn=0071&amp;fg=Q1">A-</a></td>
+          <td><a href="scores.html?frn=0071&amp;fg=Q2">B+</a></td>
+          <td><a href="scores.html?frn=0071&amp;fg=S1">[i]</a></td><td>3</td><td>2</td><td>Details</td></tr>
+      </table>`;
+    const result = parsePowerSchoolProgress(home);
+    expect(result.term).toBe('Q2');
+    expect(result.courses).toHaveLength(1);
+    expect(result.courses[0]).toMatchObject({ name: 'Calculus', teacher: 'Example Teacher', room: '205', meetingPattern: 'P2(Mon)',
+      grade: 'B+', term: 'Q2', absences: 3, tardies: 2, detailsPath: '/guardian/scores.html?frn=0071&fg=Q2' });
+  });
+
+  it('resolves grouped headers and keeps an explicitly current unposted term empty', () => {
+    const home = `<table class="grid">
+      <tr><th rowspan="2">Meeting</th><th rowspan="2">Course</th><th colspan="2">Grades</th><th colspan="2">Attendance</th><th rowspan="2">Actions</th></tr>
+      <tr><th>S1</th><th class="current-term" aria-current="true">S2</th><th>Tardies</th><th>Absences</th></tr>
+      <tr id="ccid_72"><td>P3(Tue)</td><td>Physics<br><a href="mailto:teacher@example.test">Email Teacher Two</a><span class="display-flex">Rm: 303</span></td>
+        <td><a href="scores.html?frn=0072&amp;fg=S1">A-</a></td><td>[i]</td><td>1</td><td>4</td><td>View</td></tr>
+      </table>`;
+    const result = parsePowerSchoolProgress(home);
+    expect(result.courses[0]).toMatchObject({ name: 'Physics', teacher: 'Teacher Two', grade: '', term: 'S2', detailsPath: '', absences: 4, tardies: 1 });
+  });
+
+  it('uses course semantics and one real score link when header metadata is unavailable', () => {
+    const home = `<table class="grid"><tr id="ccid_73"><td>P4(Wed)</td><td>Course tools</td>
+      <td>Literature<br><a title="Details about Teacher Three"></a><a href="mailto:teacher@example.test">Email Teacher Three</a><span class="display-flex">Rm: 304</span></td>
+      <td><a href="scores.html?frn=0073&amp;fg=S1">[i]</a></td><td><a href="scores.html?frn=0073&amp;fg=S2">A</a></td>
+      <td>8</td><td>7</td><td>More</td></tr></table>`;
+    expect(parsePowerSchoolProgress(home).courses[0]).toMatchObject({ name: 'Literature', teacher: 'Teacher Three', grade: '', term: 'S1',
+      detailsPath: '/guardian/scores.html?frn=0073&fg=S1', absences: null, tardies: null });
+  });
+
+  it('matches a selected term label when the selector value is a numeric term id', () => {
+    const home = `<select name="termid"><option value="3600">S1</option><option value="3601" selected>S2</option></select>
+      <table class="grid"><tr><th colspan="7">Course grades</th></tr><tr><th>Period</th><th>Course Name</th><th>S1</th><th>S2</th><th>Absences</th><th>Tardies</th><th>Extra</th></tr>
+      <tr id="ccid_74"><td>P5</td><td>Biology</td><td><a href="scores.html?frn=0074&amp;fg=S1">B</a></td>
+      <td><a href="scores.html?frn=0074&amp;fg=S2">A-</a></td><td>0</td><td>0</td><td>GPA</td></tr></table>`;
+    expect(parsePowerSchoolProgress(home).courses[0]).toMatchObject({ name: 'Biology', grade: 'A-', term: 'S2', absences: 0, tardies: 0 });
+  });
+
+  it('ignores lookalike score URLs and never treats grade-only cells as a course', () => {
+    const home = `<table class="grid"><tr><th>Meeting</th><th>Course</th><th>Q1</th><th>Q2</th><th>Absences</th><th>Tardies</th><th>Extra</th></tr>
+      <tr id="ccid_75"><td>P6</td><td>Chemistry</td><td><a href="javascript:scores.html">Wrong</a></td>
+        <td><a href="scores.html?frn=0075&amp;fg=Q2">B+</a></td><td>0</td><td>0</td><td>Help</td></tr>
+      </table><table class="grid"><tr id="ccid_bad"><td>P1</td><td>A-</td><td>B+</td><td>0</td><td>0</td></tr></table>`;
+    expect(parsePowerSchoolProgress(home).courses[0]).toMatchObject({ name: 'Chemistry', grade: 'B+', term: 'Q2', detailsPath: '/guardian/scores.html?frn=0075&fg=Q2' });
+    expect(parsePowerSchoolProgress('<table class="grid"><tr id="ccid_bad"><td>P1</td><td>A-</td><td>B+</td><td>0</td><td>0</td></tr></table>').courses).toHaveLength(0);
+  });
+
   it('returns safe empty states when progress tables are unavailable', () => {
     expect(parsePowerSchoolProgress('<html></html>')).toMatchObject({
       term: '', absenceTotal: null, tardyTotal: null, courses: [], attendanceEvents: [],

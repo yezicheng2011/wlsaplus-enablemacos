@@ -55,7 +55,7 @@ import { PowerSchoolService } from '../core/powerschool.service';
                   <span><small>Absent</small><strong>{{ valueOrDash(course.absences) }}</strong></span>
                   <span><small>Tardy</small><strong>{{ valueOrDash(course.tardies) }}</strong></span>
                 </span>
-                <span class="expand-icon material-symbols-rounded">{{ selectedCourseId() === course.id ? 'expand_less' : 'expand_more' }}</span>
+                <span class="expand-icon" [class.is-expanded]="selectedCourseId() === course.id" aria-hidden="true"></span>
               </button>
 
               @if (selectedCourseId() === course.id) {
@@ -114,7 +114,7 @@ import { PowerSchoolService } from '../core/powerschool.service';
           <label class="course-filter"><span class="screen-reader-only">Filter attendance by course</span><select [value]="attendanceCourse()" (change)="setAttendanceCourse($event)">
             <option value="all">All courses</option>
             @for (name of attendanceCourses(); track name) { <option [value]="name">{{ name }}</option> }
-          </select><span class="material-symbols-rounded">expand_more</span></label>
+          </select><span class="filter-chevron" aria-hidden="true"></span></label>
         </div>
 
         <div class="section-heading attendance-heading">
@@ -153,7 +153,9 @@ import { PowerSchoolService } from '../core/powerschool.service';
     .course-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 8px; background: var(--app-accent-soft); color: var(--app-accent); font-weight: 700; }
     .course-copy { min-width: 0; display: grid; gap: 5px; } .course-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; } .course-copy > span { overflow: hidden; color: var(--app-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
     .course-results { display: grid; grid-template-columns: minmax(100px, 1.5fr) repeat(2, minmax(62px, 1fr)); gap: 8px; } .course-results > span { min-width: 0; display: grid; gap: 4px; } .course-results small { color: var(--app-muted); font-size: 10px; text-transform: uppercase; } .course-results strong { overflow-wrap: anywhere; font-size: 14px; font-variant-numeric: tabular-nums; } .course-results .unposted { color: var(--app-muted); font-size: 12px; font-weight: 500; }
-    .expand-icon { color: var(--app-muted); }
+    .expand-icon, .filter-chevron { width: 20px; height: 20px; display: inline-grid; place-items: center; color: var(--app-muted); }
+    .expand-icon::before, .filter-chevron::before { content: ''; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+    .expand-icon.is-expanded::before { transform: rotate(225deg); }
     .course-detail { padding: 18px 24px 24px 80px; border-top: 1px solid var(--app-border); background: color-mix(in srgb, var(--app-surface-raised) 45%, transparent); }
     .detail-loading { min-height: 86px; display: flex; align-items: center; gap: 12px; color: var(--app-muted); font-size: 13px; } .detail-error { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 14px; color: #a62b2b; font-size: 13px; }
     .course-facts { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 18px; color: var(--app-muted); font-size: 12px; } .course-facts span { display: inline-flex; align-items: center; gap: 5px; } .course-facts .material-symbols-rounded { font-size: 17px; }
@@ -165,7 +167,7 @@ import { PowerSchoolService } from '../core/powerschool.service';
     .status-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; } .status-list span { padding: 2px 5px; border-radius: 4px; background: #ffedcc; color: #754500; font-size: 10px; font-weight: 700; }
     .compact { min-height: 110px; } .compact .material-symbols-rounded, .attendance-empty .material-symbols-rounded, .course-list > .empty-state .material-symbols-rounded { font-size: 34px; } .empty-state p { margin: 8px 0 12px; }
     .attendance-controls { margin: 26px 0 0; display: flex; justify-content: space-between; align-items: center; gap: 12px; } .attendance-heading { margin-top: 14px; }
-    .course-filter { position: relative; min-width: 180px; } .course-filter select { width: 100%; height: 40px; padding: 0 36px 0 12px; appearance: none; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-surface); color: var(--app-text); cursor: pointer; } .course-filter > .material-symbols-rounded { position: absolute; right: 9px; top: 10px; pointer-events: none; color: var(--app-muted); font-size: 20px; }
+    .course-filter { position: relative; min-width: 180px; } .course-filter select { width: 100%; height: 40px; padding: 0 36px 0 12px; appearance: none; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-surface); color: var(--app-text); cursor: pointer; } .course-filter > .filter-chevron { position: absolute; right: 9px; top: 10px; pointer-events: none; }
     .screen-reader-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .attendance-list { overflow: hidden; } .attendance-row { min-height: 72px; padding: 10px 18px; display: grid; grid-template-columns: 42px 38px minmax(0,1fr) auto; align-items: center; gap: 13px; border-bottom: 1px solid var(--app-border); } .attendance-row:last-child { border-bottom: 0; }
     .attendance-row time { display: grid; justify-items: center; line-height: 1; } .attendance-row time strong { font-size: 19px; } .attendance-row time span { margin-top: 3px; color: var(--app-muted); font-size: 10px; text-transform: uppercase; }

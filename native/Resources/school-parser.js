@@ -8,10 +8,24 @@
     doc.querySelectorAll('script,style,template,.screen_readers_only').forEach(node => node.remove());
     return doc;
   };
-  const text = node => words(node?.textContent);
-  const lines = node => {
-    if (!node) return [];
+  const textNoise = '.screen_readers_only,.screen-readers-only,.sr-only,[hidden]';
+  const hiddenText = node => Boolean(node?.matches?.(textNoise)) || node?.style?.display === 'none' || ['hidden','collapse'].includes(node?.style?.visibility);
+  const readable = node => {
+    if (!node || hiddenText(node)) return null;
+    // Prune a clone only: hidden inputs and data attributes still belong to the form/lookup contract.
     const copy = node.cloneNode(true);
+    copy.querySelectorAll(`${textNoise},[style]`).forEach(child => { if (hiddenText(child)) child.remove(); });
+    return copy;
+  };
+  const text = node => {
+    const copy = readable(node);
+    // HTML block/line boundaries are visible whitespace, even though textContent omits them.
+    copy?.querySelectorAll('br,p,div,li').forEach(child => { child.before(' '); child.after(' '); });
+    return words(copy?.textContent);
+  };
+  const lines = node => {
+    const copy = readable(node);
+    if (!copy) return [];
     copy.querySelectorAll('br').forEach(n => n.replaceWith('\n'));
     return copy.textContent.split('\n').map(words).filter(Boolean);
   };
@@ -63,19 +77,106 @@
     if (classCells.length && !sessions.length) throw Error('The school returned no supported weekly schedule.');
     return { courses, schedule: sessions.sort((a,b) => a.start.localeCompare(b.start)) };
   }
+  const tableCells = row => [...row.children].filter(cell => /^(TD|TH)$/u.test(cell.tagName));
+  const termKey = value => words(value).toUpperCase();
+  const termFields = new Set(['fg','storecode','term','termid']);
+  const termLabel = value => {
+    const label = termKey(value);
+    const short = /(?:^|[\s(])([QSTFY])\s*(\d{1,2})(?=$|[\s)])/u.exec(label);
+    if (short) return short[1]+short[2];
+    const long = /(?:^|\s)(QUARTER|SEMESTER|TRIMESTER|TERM)\s*(\d{1,2})(?=$|\s)/u.exec(label);
+    return long ? ({QUARTER:'Q',SEMESTER:'S',TRIMESTER:'T',TERM:'T'}[long[1]]+long[2]) : '';
+  };
+  const nodeTerms = node => {
+    const terms = [];
+    for (const key of ['data-fg','data-storecode','data-term','data-termid']) {
+      const value = termKey(node.getAttribute(key)); if (value) terms.push(value);
+    }
+    const label = termLabel(text(node)); if (label) terms.push(label);
+    return terms;
+  };
+  const currentColumn = node => ['true','page'].includes(node.getAttribute('aria-current')) || node.getAttribute('aria-selected') === 'true' || node.getAttribute('data-current') === 'true' || [...node.classList].some(name => /^(?:current|selected|active)(?:[-_]?(?:term|grade))?$/iu.test(name));
+  function columnHeaders(table) {
+    const grid = [], rows = [...table.rows].filter(row => row.closest('table') === table);
+    let line = 0;
+    // Header spans describe logical columns; nested attendance mini-tables do not.
+    for (const row of rows) {
+      if (row.id.startsWith('ccid_')) break;
+      const cells = tableCells(row);
+      if (!cells.some(cell => cell.tagName === 'TH') && !row.closest('thead')) continue;
+      if (line >= 16) break;
+      grid[line] ||= [];
+      let column = 0;
+      for (const cell of cells) {
+        while (grid[line][column] && column < 128) column++;
+        const width = Math.min(Math.max(cell.colSpan,1),128-column), height = Math.min(Math.max(cell.rowSpan,1),16-line);
+        for (let y = line; y < line+height; y++) {
+          grid[y] ||= [];
+          for (let x = column; x < column+width; x++) grid[y][x] = cell;
+        }
+        column += width;
+        if (column >= 128) break;
+      }
+      line++;
+    }
+    return Array.from({length: Math.max(0,...grid.map(line => line.length))}, (_, column) => [...new Set(grid.map(line => line[column]).filter(Boolean))]);
+  }
+  function scoreLink(anchor) {
+    const raw = words(anchor.getAttribute('href')); if (!raw) return null;
+    let url;
+    try { url = new URL(raw,'https://powerschool.invalid/guardian/home.html'); } catch (_) { return null; }
+    if (url.protocol !== 'https:' || url.pathname !== '/guardian/scores.html') return null;
+    const terms = [];
+    for (const [key,value] of url.searchParams) if (termFields.has(key.toLowerCase()) && termKey(value)) terms.push(termKey(value));
+    // The native service resolves paths against the account origin and enforces same-origin HTTPS.
+    return { anchor, terms, path: url.origin === 'https://powerschool.invalid' ? url.pathname+url.search : url.href };
+  }
   function progress(html, attendanceHTML) {
     const doc = documentFrom(html), courses = [];
+    const headers = new WeakMap(), selections = [];
+    doc.querySelectorAll('select[name],input[name]').forEach(field => {
+      if (!termFields.has(field.name.toLowerCase()) || !termKey(field.value) || (['radio','checkbox'].includes(field.type) && !field.checked)) return;
+      const label = field.selectedOptions?.[0]?.label || '', alias = termLabel(label);
+      selections.push({ terms: [termKey(field.value),...(alias ? [alias] : [])], year: /^(?:(?:school\s+)?year\s*)?\d{4}\s*[-–/]\s*\d{4}(?:\s*(?:school\s+)?year)?$/iu.test(words(label)) });
+    });
     doc.querySelectorAll('tr[id^="ccid_"]').forEach(row => {
-      const cells = [...row.children].filter(c => c.tagName === 'TD'); if (cells.length < 5) return;
-      const course = cells.at(-4), grade = cells.at(-3), bits = lines(course), mail = course.querySelector('a[href^="mailto:"]');
-      const scorePath = grade.querySelector('a[href*="scores.html"]')?.getAttribute('href') ?? '';
-      const room = text(course.querySelector('.display-flex')).replace(/^[-\s]*Rm:\s*/iu,'');
-      const teacher = text(mail), teacherTitle = course.querySelector('a[title^="Details about "]')?.getAttribute('title')?.replace(/^Details about /u,'') || '';
-      let name = bits.find(s => s !== teacher && !/^[-\s]*Rm:/iu.test(s)) || '';
-      if (teacher && name.endsWith(teacher)) name = words(name.slice(0, -teacher.length));
+      const cells = tableCells(row), table = row.closest('table'); if (!table || !cells.length) return;
+      if (!headers.has(table)) headers.set(table,columnHeaders(table));
+      const header = headers.get(table); let column = 0;
+      const columns = cells.map(cell => {
+        const width = Math.min(Math.max(cell.colSpan,1),128), labels = [...new Set(header.slice(column,column+width).flat())]; column += width;
+        const links = [...cell.querySelectorAll('a[href]')].map(scoreLink).filter(Boolean);
+        return { cell, labels, title: labels.map(text).join(' '), terms: new Set([...labels.flatMap(nodeTerms),...nodeTerms(cell),...links.flatMap(link => link.terms)]), links };
+      });
+      const courseColumn = columns.find(item => /^(?:course(?: name)?|subject|class(?: name)?|课程(?:名称)?|科目)$/iu.test(text(item.labels.at(-1)))) || columns.find(item => item.cell.querySelector('a[href^="mailto:"],a[title^="Details about "]')) || columns.find(item => [...item.cell.querySelectorAll('.display-flex,.room,[data-room]')].some(node => /^[-–—\s]*(?:Rm|Room)\s*:/iu.test(text(node)))) || columns.find(item => /\b(?:course|subject)\b|课程|科目/iu.test(item.title) && !/\bgrades?\b/iu.test(item.title));
+      if (!courseColumn) return;
+      const course = courseColumn.cell, mail = course.querySelector('a[href^="mailto:"]'), teacherLink = course.querySelector('a[title^="Details about "]');
+      const roomNode = [...course.querySelectorAll('.display-flex,.room,[data-room]')].find(node => /^[-–—\s]*(?:Rm|Room)\s*:/iu.test(text(node)));
+      const roomLine = text(roomNode) || lines(course).find(line => /^[-–—\s]*(?:Rm|Room)\s*:/iu.test(line)) || '';
+      const room = roomLine.replace(/^[-–—\s]*(?:Rm|Room)\s*:\s*/iu,'');
+      const teacher = text(mail), teacherTitle = words(teacherLink?.getAttribute('title')?.replace(/^Details about /u,'') || '');
+      const nameNode = course.cloneNode(true);
+      nameNode.querySelectorAll('a[href^="mailto:"],a[title^="Details about "]').forEach(node => node.remove());
+      nameNode.querySelectorAll('.display-flex,.room,[data-room]').forEach(node => { if (/^[-–—\s]*(?:Rm|Room)\s*:/iu.test(text(node))) node.remove(); });
+      const named = nameNode.querySelector('.course-name,.courseName,[data-course-name]');
+      let name = text(named) || lines(nameNode).find(line => !/^[-–—\s]*(?:Rm|Room)\s*:/iu.test(line)) || '';
+      if (teacher && name.endsWith(teacher)) name = words(name.slice(0,-teacher.length));
       if (!name) return;
+      const gradeColumns = columns.filter(item => item !== courseColumn && (item.links.length || /\b(?:grades?|marks?)\b|成绩|分数/iu.test(item.title) || item.terms.size));
+      // A school-year selector may share the termid name without selecting a grade column.
+      const selectedTerms = new Set(selections.filter(selection => !selection.year || gradeColumns.some(item => selection.terms.some(term => item.terms.has(term)))).flatMap(selection => selection.terms));
+      let chosen;
+      if (selectedTerms.size) chosen = gradeColumns.find(item => [...item.terms].some(term => selectedTerms.has(term)));
+      else chosen = gradeColumns.find(item => currentColumn(item.cell) || item.labels.some(currentColumn)) || gradeColumns.find(item => item.links.length) || gradeColumns[0];
+      const selectedLink = chosen?.links.find(link => !selectedTerms.size || link.terms.some(term => selectedTerms.has(term))) || chosen?.links[0];
+      const grade = text(selectedLink?.anchor || chosen?.cell).replace(/^\[\s*i\s*\]$/iu,'');
+      const gradeEnd = Math.max(-1,...gradeColumns.map(item => columns.indexOf(item)));
+      const trailing = columns.slice(gradeEnd+1);
+      const absenceColumn = columns.find(item => /\b(?:absences?|absent)\b|缺席|旷课/iu.test(item.title)) || trailing[0];
+      const tardyColumn = columns.find(item => /\b(?:tardies|tardy|lates?)\b|迟到/iu.test(item.title)) || trailing[1];
+      const expression = columns.find(item => /\b(?:exp|expression|period)\b/iu.test(item.title)) || (columns[0] !== courseColumn ? columns[0] : null);
       const id = row.id.substring(5);
-      courses.push({ id, name, teacher: teacherTitle || teacher, room, meetingPattern: text(cells[0]), grade: text(grade).replace(/^\[\s*i\s*\]$/iu,''), absences: count(text(cells.at(-2))), tardies: count(text(cells.at(-1))), detailsPath: scorePath });
+      courses.push({ id, name, teacher: teacherTitle || teacher, room, meetingPattern: text(expression?.cell), grade, absences: count(text(absenceColumn?.cell)), tardies: count(text(tardyColumn?.cell)), detailsPath: selectedLink?.path || '' });
     });
     const attendance = [], adoc = documentFrom(attendanceHTML || '');
     adoc.querySelectorAll('table.grid').forEach(table => {

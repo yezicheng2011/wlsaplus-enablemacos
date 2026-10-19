@@ -66,6 +66,7 @@ function powerSchoolPath(value: string): string {
   if (!value) return '';
   try {
     const url = new URL(value, 'https://powerschool.invalid/guardian/home.html');
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/guardian/scores.html') return '';
     return `${url.pathname}${url.search}`;
   } catch {
     return '';
@@ -170,41 +171,129 @@ function parseAttendanceHistory(html: string): { events: AttendanceEvent[]; star
 }
 
 function courseCellDetails(cell: Element): { name: string; teacher: string; room: string } {
-  const name = elementLines(withoutScreenReaderText(cell))[0] ?? '';
   const contact = cell.querySelector('a[href^="mailto:"]');
   const contactTitle = cell.querySelector('a[title^="Details about "]')?.getAttribute('title') ?? '';
   const teacher = clean(contactTitle.replace(/^Details about\s+/i, ''))
     || clean(contact?.textContent).replace(/^Email\s+/i, '');
   const room = clean(cell.querySelector('.display-flex')?.textContent).replace(/^[-\s]*Rm:\s*/i, '');
+  const copy = withoutScreenReaderText(cell);
+  copy.querySelectorAll('a[href^="mailto:"], a[title^="Details about "]').forEach((item) => item.remove());
+  copy.querySelectorAll('.display-flex').forEach((item) => { if (/^[-\s]*Rm:/i.test(clean(item.textContent))) item.remove(); });
+  const name = elementLines(copy)[0] ?? '';
   return { name, teacher, room };
+}
+
+function progressCells(row: Element): Element[] {
+  return Array.from(row.children).filter((cell) => cell.matches('td, th')).flatMap((cell) =>
+    Array.from({ length: Math.max(1, Math.min(64, Number(cell.getAttribute('colspan')) || 1)) }, () => cell));
+}
+
+/** Resolve logical columns across grouped/row-spanning headers, rather than
+ * counting backwards from optional GPA, attendance and action columns. */
+function progressHeaders(table: Element): Element[][] {
+  const grid: Element[][] = [];
+  let y = 0;
+  for (const row of Array.from(table.querySelectorAll('tr'))) {
+    if (row.closest('table') !== table) continue;
+    if (row.id.startsWith('ccid_')) break;
+    const cells = Array.from(row.children).filter((cell) => cell.matches('td, th'));
+    if (!cells.some((cell) => cell.tagName === 'TH')) continue;
+    if (y >= 16) break;
+    grid[y] ??= [];
+    let x = 0;
+    for (const cell of cells) {
+      while (grid[y][x] && x < 128) x += 1;
+      const width = Math.max(1, Math.min(64, Number(cell.getAttribute('colspan')) || 1));
+      const height = Math.max(1, Math.min(16 - y, Number(cell.getAttribute('rowspan')) || 1));
+      for (let down = 0; down < height; down += 1) {
+        grid[y + down] ??= [];
+        for (let across = 0; across < width && x + across < 128; across += 1) grid[y + down][x + across] = cell;
+      }
+      x += width;
+    }
+    y += 1;
+  }
+  const width = Math.max(0, ...grid.map((row) => row.length));
+  return Array.from({ length: width }, (_, column) => [...new Set(grid.map((row) => row[column]).filter(Boolean))]);
+}
+
+function progressTerm(value: string | null | undefined): string {
+  return clean(value).toUpperCase().match(/^([A-Z]{1,3}\d{1,2}|FY|YR)(?:$|\s|[-:])/i)?.[1] ?? '';
+}
+
+function selectedProgressTerm(doc: Document, headers: Element[][]): string {
+  for (const select of Array.from(doc.querySelectorAll('select'))) {
+    if (!/(term|storecode|^fg$)/i.test(select.name || select.id)) continue;
+    const option = select.selectedOptions[0];
+    const term = progressTerm(option?.value) || progressTerm(option?.textContent);
+    if (term) return term;
+  }
+  for (const column of headers) {
+    for (const header of column) {
+      if (!header.matches('[aria-current="true"], [aria-current="page"], .current-term, .currentTerm, .selected')
+        && !header.querySelector('[aria-current="true"], [aria-current="page"], .current-term, .currentTerm, .selected')) continue;
+      const term = progressTerm(header.textContent);
+      if (term) return term;
+    }
+  }
+  return '';
+}
+
+function progressScore(cell: Element): { path: string; term: string } | null {
+  for (const anchor of Array.from(cell.querySelectorAll('a[href]'))) {
+    const path = powerSchoolPath(anchor.getAttribute('href') ?? '');
+    if (!path) continue;
+    return { path, term: new URL(path, 'https://powerschool.invalid').searchParams.get('fg') ?? '' };
+  }
+  return null;
 }
 
 export function parsePowerSchoolProgress(homeHtml: string, attendanceHtml = ''): ProgressSnapshot {
   const doc = new DOMParser().parseFromString(homeHtml, 'text/html');
   const table = Array.from(doc.querySelectorAll('table.linkDescList, table.grid'))
     .find((item) => item.querySelector('tr[id^="ccid_"]'));
+  const headers = table ? progressHeaders(table) : [];
+  const column = (pattern: RegExp): number => {
+    const leaf = headers.findIndex((items) => pattern.test(clean(items.at(-1)?.textContent)));
+    return leaf >= 0 ? leaf : headers.findIndex((items) => items.some((header) => pattern.test(clean(header.textContent))));
+  };
+  const courseColumn = column(/^(course|class|subject)(?:\s|$)|^(课程|科目)/i);
+  const meetingColumn = column(/^(meeting|period|expression|exp)(?:\s|$)|^(节次|课时)/i);
+  const absenceColumn = column(/^(absences?|absent)(?:\s|$)|^缺勤/i);
+  const tardyColumn = column(/^(tard(?:y|ies)|late)(?:\s|$)|^迟到/i);
+  const selectedTerm = selectedProgressTerm(doc, headers);
   const courses = table ? Array.from(table.querySelectorAll('tr[id^="ccid_"]')).flatMap((row, index) => {
-    const cells = Array.from(row.querySelectorAll(':scope > td'));
-    if (cells.length < 5) return [];
-    const courseCell = cells.at(-4)!;
-    const gradeCell = cells.at(-3)!;
+    if (row.closest('table') !== table) return [];
+    const cells = progressCells(row);
+    const courseCell = cells.find((cell) => cell.querySelector('a[href^="mailto:"], a[title^="Details about "]')
+      || Array.from(cell.querySelectorAll('.display-flex')).some((item) => /^[-\s]*Rm:/i.test(clean(item.textContent))))
+      ?? cells[courseColumn];
+    if (!courseCell) return [];
     const details = courseCellDetails(courseCell);
-    const detailsPath = powerSchoolPath(gradeCell.querySelector('a[href*="scores.html"]')?.getAttribute('href') ?? '');
-    if (!details.name) return [];
-    const gradeText = clean(withoutScreenReaderText(gradeCell).textContent);
-    let term = '';
-    try { term = new URL(detailsPath, 'https://powerschool.invalid').searchParams.get('fg') ?? ''; } catch { /* Keep it empty. */ }
+    if (!details.name || /^\[\s*i\s*\]$/i.test(details.name)) return [];
+    const grades = cells.flatMap((cell, position) => {
+      if (cell === courseCell || cells.indexOf(cell) !== position) return [];
+      const score = progressScore(cell);
+      const term = score?.term || headers[position]?.map((header) => progressTerm(header.textContent)).find(Boolean) || '';
+      return score || term ? [{ cell, path: score?.path ?? '', term }] : [];
+    });
+    // An explicit term remains authoritative even if unposted. Otherwise use
+    // one real score link and keep its displayed grade, fg and details together.
+    const grade = selectedTerm ? grades.find((item) => item.term.toUpperCase() === selectedTerm)
+      : grades.find((item) => item.path) ?? grades[0];
+    const gradeText = grade ? clean(withoutScreenReaderText(grade.cell).textContent) : '';
+    const term = grade?.term || selectedTerm;
     return [{
       id: row.id.replace(/^ccid_/, '') || `progress-course-${index}`,
       name: details.name,
       teacher: details.teacher,
       room: details.room,
-      meetingPattern: clean(cells[0].textContent),
+      meetingPattern: clean(cells[meetingColumn]?.textContent),
       term,
       grade: /^\[\s*i\s*\]$/i.test(gradeText) ? '' : gradeText,
-      absences: numberOrNull(cells.at(-2)?.textContent),
-      tardies: numberOrNull(cells.at(-1)?.textContent),
-      detailsPath,
+      absences: numberOrNull(cells[absenceColumn]?.textContent),
+      tardies: numberOrNull(cells[tardyColumn]?.textContent),
+      detailsPath: grade?.path ?? '',
       details: null,
     }];
   }) : [];
