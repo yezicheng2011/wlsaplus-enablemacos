@@ -162,7 +162,7 @@
       let name = text(named) || lines(nameNode).find(line => !/^[-–—\s]*(?:Rm|Room)\s*:/iu.test(line)) || '';
       if (teacher && name.endsWith(teacher)) name = words(name.slice(0,-teacher.length));
       if (!name) return;
-      const gradeColumns = columns.filter(item => item !== courseColumn && (item.links.length || /\b(?:grades?|marks?)\b|成绩|分数/iu.test(item.title) || item.terms.size));
+      const gradeColumns = columns.filter(item => item !== courseColumn && (item.links.length || /\b(?:grades?|marks?)\b|成绩|分数/iu.test(text(item.labels.at(-1))) || item.terms.size));
       // A school-year selector may share the termid name without selecting a grade column.
       const selectedTerms = new Set(selections.filter(selection => !selection.year || gradeColumns.some(item => selection.terms.some(term => item.terms.has(term)))).flatMap(selection => selection.terms));
       let chosen;

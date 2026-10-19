@@ -22,6 +22,6 @@ test('real inert DOM accepts recognized empty weeks while rejecting unsupported 
     assert.ok(result,'Browser did not finish running the parser DOM checks.');
     const report=JSON.parse(result[1]);
     assert.deepEqual(report.failures,[]);
-    assert.equal(report.passed,19);
+    assert.equal(report.passed,20);
   } finally { await rm(profile,{recursive:true,force:true,maxRetries:3,retryDelay:100}); }
 });

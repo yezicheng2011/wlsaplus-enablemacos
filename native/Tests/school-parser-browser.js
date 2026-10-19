@@ -102,6 +102,14 @@
     check(course.grade==='B+' && course.detailsPath.includes('fg=Q2'),'Grouped rowspan headers shifted the selected grade column.');
     check(course.meetingPattern==='2(A)' && course.absences===2 && course.tardies===0,'Exp or attendance column mapping shifted.');
   });
+  test('a broad Course grades group cannot turn Exp into an unposted grade', () => {
+    const grouped=multiTermHome({explicit:false,q1:'[i]',q2:'[i]',noCurrentLink:true})
+      .replace('<thead>','<thead><tr><th colspan="9">Course grades</th></tr>')
+      .replace(/<a href="scores\.html[^"]*">\[i\]<\/a>/gu,'[i]');
+    const course=schoolParser('snapshot',{week:emptyWeek,matrix,home:grouped,attendance:''}).courses[0];
+    check(course.grade==='' && course.detailsPath==='','An unposted grade became the Exp value: '+course.grade);
+    check(course.meetingPattern==='2(A)' && course.absences===2 && course.tardies===0,'Ungraded terms must retain independent meeting/attendance data.');
+  });
   test('numeric selected term IDs use their selected semester label', () => {
     const selector='<select name="termid"><option value="3600">2026-2027</option><option value="3601" selected>S2</option></select>';
     const semesters=multiTermHome({explicit:false,q2:'B+'}).replaceAll('Q1','S1').replaceAll('Q2','S2');
