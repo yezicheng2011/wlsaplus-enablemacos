@@ -272,6 +272,12 @@ final class NetworkPlan {
         let mask = current.fields["mask"] ?? current.fields["netmask"] ?? ""
         return prefix == 1 && equivalent(mask, family == 4 ? "128.0.0.0" : "8000::")
     }
+    #if NATIVE_INTEGRATION_TESTS || NETWORK_PLAN_TESTS
+    static func isExactSplitSnapshot(_ values: [String: String], family: Int, upper: Bool) -> Bool {
+        let destination = family == 4 ? (upper ? "128.0.0.0" : "0.0.0.0") : (upper ? "8000::" : "::")
+        return exact(RouteInfo(fields: values), destination: destination, prefix: 1, family: family)
+    }
+    #endif
     private static func defaultRoute(family: Int) throws -> RouteInfo? {
         guard let route = try lookup(family: family, target: "default") else { return nil }
         guard validInterface(route.interface), !route.interface.hasPrefix("utun") else {
@@ -397,6 +403,10 @@ final class NetworkPlan {
         try expect(owns(good6, route: split6))
         let cidr6 = RouteInfo(fields: good6.fields.merging(["destination": "::/1", "mask": ""]) { _, new in new })
         try expect(owns(cidr6, route: split6))
+        try expect(isExactSplitSnapshot(good4.fields, family: 4, upper: false))
+        try expect(isExactSplitSnapshot(good6.fields, family: 6, upper: false))
+        try expect(!isExactSplitSnapshot(fields("destination: default\nmask: default\ninterface: en0\nflags: <UP,GATEWAY,DONE>\n"), family: 4, upper: false))
+        try expect(!isExactSplitSnapshot(fields("destination: default\nmask: ::\ninterface: en0\nflags: <UP,GATEWAY,DONE>\n"), family: 6, upper: false))
         let host = Route(family: 4, destination: "203.0.113.9", prefix: 32, gateway: "192.0.2.1", interface: "en0")
         let physical = RouteInfo(fields: fields("destination: 203.0.113.9\ngateway: 192.0.2.1\ninterface: en0\nflags: <UP,GATEWAY,HOST,DONE,STATIC,PROTO2>\n"))
         try expect(owns(physical, route: host))

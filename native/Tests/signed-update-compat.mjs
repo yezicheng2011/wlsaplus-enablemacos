@@ -152,7 +152,9 @@ try {
     const args = [...hostStage.launch.args];
     const replace = (flag, value) => { const index = args.indexOf(flag); assert.ok(index >= 0); args[index + 1] = value; };
     replace('--marker', marker); replace('--backup', path.join(temporary, 'backup', 'WLSAPlus.app'));
-    replace('--result', resultFile); replace('--log', helperLog); replace('--timeout', '90'); replace('--wait', '10');
+    replace('--result', resultFile); replace('--log', helperLog); replace('--timeout', '90');
+    // The original helper supports --wait, but updater.helperArgs omits it.
+    args.push('--wait', '10');
     assert.equal(args[args.indexOf('--mode') + 1], 'quit');
     assert.equal(args[args.indexOf('--admin') + 1], '0', 'CI helper smoke must never request administrator permission');
     for (const directory of [normalSupport, path.join(normalSupport, 'updates'), path.join(normalSupport, 'updates', 'staging')]) {

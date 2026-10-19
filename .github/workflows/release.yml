@@ -51,15 +51,23 @@ jobs:
           : "${WLSAPLUS_CODESIGN_P12_PASSWORD:?Existing certificate password is required}"
           umask 077
           cert="$RUNNER_TEMP/native-signing.p12"
+          certificate="$RUNNER_TEMP/native-signing.cer"
           keychain="$RUNNER_TEMP/native-signing.keychain-db"
           password="$(uuidgen)"
           printf '%s' "$WLSAPLUS_CODESIGN_P12_BASE64" | base64 -D > "$cert"
           security create-keychain -p "$password" "$keychain"
           security unlock-keychain -p "$password" "$keychain"
           security set-keychain-settings -lut 7200 "$keychain"
-          security import "$cert" -k "$keychain" -P "$WLSAPLUS_CODESIGN_P12_PASSWORD" -T /usr/bin/codesign
+          security import "$cert" -k "$keychain" -P "$WLSAPLUS_CODESIGN_P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
           security list-keychains -d user -s "$keychain"
+          security find-certificate -c 'WLSAPlus Self-Signed Code Signing' -p "$keychain" > "$certificate"
+          node - "$certificate" <<'JS'
+          const fs = require('node:fs'), {X509Certificate} = require('node:crypto');
+          const cert = new X509Certificate(fs.readFileSync(process.argv[2]));
+          if (cert.fingerprint.replace(/:/g, '').toUpperCase() !== '764D4389AAFA0C50311E39C17DDFA1981ABEF86C') throw Error('Unexpected signing certificate');
+          JS
+          sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$certificate"
           rm -f "$cert"
       - name: Test, build and prepare compatible signed packages
         env:
@@ -76,7 +84,12 @@ jobs:
           if-no-files-found: error
       - name: Remove temporary keychain
         if: always()
-        run: security delete-keychain "$RUNNER_TEMP/native-signing.keychain-db" || true
+        run: |
+          if [[ -f "$RUNNER_TEMP/native-signing.cer" ]]; then
+            sudo -n security remove-trusted-cert -d "$RUNNER_TEMP/native-signing.cer" || true
+          fi
+          security delete-keychain "$RUNNER_TEMP/native-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/native-signing.p12" "$RUNNER_TEMP/native-signing.cer"
   publish:
     needs: build
     runs-on: ubuntu-latest

@@ -102,6 +102,9 @@ enum VPNHelper {
         runtime.start()
         dispatchMain()
     }
+    #if NATIVE_INTEGRATION_TESTS
+    static func runReadOnlyDefaultRouteTests() throws { try VPNRuntime.runReadOnlyDefaultRouteTests() }
+    #endif
 }
 
 /// Authenticated protocol egress test. A TCP connect alone never passes this test.
@@ -199,6 +202,10 @@ private final class VPNRuntime {
     private var state = "starting"
     private var stage = "listener"
     private var failureStage: String?
+    private var failureReason: String?
+    #if NATIVE_INTEGRATION_TESTS
+    private var counters = [String: Int]()
+    #endif
     private var message = "Checking the VPN server."
     private var networkActive = false
     private var probeAuthenticated = false
@@ -276,9 +283,9 @@ private final class VPNRuntime {
                         self.originalDefault = try Self.defaultFingerprint()
                         try self.configureTunnel(addresses: [successful.0.server])
                         self.verifyTunnel()
-                    } catch { self.failAndRecover(error) }
+                    } catch { self.failAndRecover(error, reason: "setup") }
                 }
-            } catch { queue.async { self.failAndRecover(error) } }
+            } catch { queue.async { self.failAndRecover(error, reason: "setup") } }
         }
     }
 
@@ -299,7 +306,7 @@ private final class VPNRuntime {
             guard let context else { return }
             let runtime = Unmanaged<VPNRuntime>.fromOpaque(context).takeUnretainedValue()
             let data = length == 0 ? Data() : Data(bytes: bytes!, count: length)
-            runtime.queue.async { runtime.flows[flow]?.connection.send(data) }
+            runtime.queue.async { runtime.record("to-proxy-bytes", amount: data.count); runtime.flows[flow]?.connection.send(data) }
         }, close: { context, flow in
             guard let context else { return }
             let runtime = Unmanaged<VPNRuntime>.fromOpaque(context).takeUnretainedValue()
@@ -344,9 +351,9 @@ private final class VPNRuntime {
                         self.state = "connected"; self.message = "Native VPN is active."
                         self.stage = "connected"
                         self.connectedAt = ISO8601DateFormatter().string(from: Date())
-                    } catch { self.failAndRecover(error) }
+                    } catch { self.failAndRecover(error, reason: "active-plan") }
                 }
-            } catch { queue.async { self.failAndRecover(AppError("Traffic through the native tunnel could not be verified: \(error.localizedDescription)")) } }
+            } catch { queue.async { self.failAndRecover(AppError("Traffic through the native tunnel could not be verified: \(error.localizedDescription)"), reason: "routed-fetch") } }
         }
     }
 
@@ -370,9 +377,11 @@ private final class VPNRuntime {
         if tickNumber % 100 == 0, networkActive, !stopping {
             do {
                 guard try Self.defaultFingerprint() == originalDefault else { throw AppError("The physical network changed; reconnect the VPN.") }
+            } catch { failAndRecover(error, reason: "physical-network"); return }
+            do {
                 guard let plan else { throw AppError("The active VPN network transaction is missing.") }
                 try plan.verifyActive()
-            } catch { failAndRecover(error); return }
+            } catch { failAndRecover(error, reason: "active-plan"); return }
         }
         if tickNumber % 300 == 0, state == "connected", !healthRunning {
             healthRunning = true
@@ -385,7 +394,7 @@ private final class VPNRuntime {
                     if let result { self.latency = Int(result); self.healthFailures = 0 }
                     else {
                         self.healthFailures += 1
-                        if self.healthFailures >= 2 { self.failAndRecover(AppError("The VPN server stopped passing authenticated egress checks.")) }
+                        if self.healthFailures >= 2 { self.failAndRecover(AppError("The VPN server stopped passing authenticated egress checks."), reason: "proxy-health") }
                     }
                 }
             }
@@ -394,6 +403,7 @@ private final class VPNRuntime {
 
     private func open(_ id: UInt64, host: String, port: UInt16, udp: Bool) {
         guard !stopping, !stopped, engine != nil else { return }
+        record(udp ? "open-udp" : "open-tcp")
         let connection = ProxyConnection(node: node, destinationHost: host, destinationPort: port, udp: udp, queue: queue)
         let flow = VPNFlow(connection: connection, udp: udp)
         flows[id] = flow
@@ -401,6 +411,7 @@ private final class VPNRuntime {
             guard let runtime = self, let target = flow else { return }
             runtime.queue.async {
                 guard runtime.flows[id] === target, let engine = runtime.engine else { return }
+                runtime.record("proxy-ready")
                 wlp_remote_open(engine, id); runtime.pump(id)
             }
         }
@@ -408,13 +419,19 @@ private final class VPNRuntime {
             guard let runtime = self, let target = flow else { return }
             runtime.queue.async {
                 guard runtime.flows[id] === target else { return }
+                runtime.record("from-proxy-bytes", amount: data.count)
                 guard target.bytes + data.count <= 512 * 1024, target.pending.count < 2048 else { runtime.abort(id); return }
                 target.pending.append(data); target.bytes += data.count; runtime.pump(id)
             }
         }
-        connection.onError = { [weak self, weak flow] _ in
+        connection.onError = { [weak self, weak flow] error in
             guard let runtime = self, let target = flow else { return }
-            runtime.queue.async { guard runtime.flows[id] === target else { return }; runtime.abort(id) }
+            runtime.queue.async {
+                guard runtime.flows[id] === target else { return }
+                runtime.record("proxy-error")
+                if let protocolError = error as? ProxyError, case .authentication = protocolError { runtime.record("proxy-auth-error") }
+                runtime.abort(id)
+            }
         }
         connection.onClose = { [weak self, weak flow] in
             guard let runtime = self, let target = flow else { return }
@@ -469,17 +486,19 @@ private final class VPNRuntime {
                 if errno == EINTR { continue }
                 if errno == EAGAIN || errno == EWOULDBLOCK { break }
                 if errno == EMSGSIZE || errno == EPROTO { continue }
-                failAndRecover(AppError("Reading the native tunnel failed.")); return
+                failAndRecover(AppError("Reading the native tunnel failed."), reason: "tun-read"); return
             }
-            if count == 0 { failAndRecover(AppError("The native tunnel closed unexpectedly.")); return }
-            _ = bytes.withUnsafeBufferPointer { wlp_input(engine, $0.baseAddress, count) }
+            if count == 0 { failAndRecover(AppError("The native tunnel closed unexpectedly."), reason: "tun-read"); return }
+            record("tun-read")
+            let accepted = bytes.withUnsafeBufferPointer { wlp_input(engine, $0.baseAddress, count) }
+            record(accepted == 0 ? "tun-handled" : "tun-rejected")
         }
         pumpAll()
     }
     private func writePacket(_ packet: Data) {
         guard descriptor >= 0, !stopping else { return }
         guard packetBytes + packet.count <= 4 * 1024 * 1024, packets.count < 4096 else {
-            failAndRecover(AppError("The native tunnel's output queue overflowed.")); return
+            failAndRecover(AppError("The native tunnel's output queue overflowed."), reason: "tun-write"); return
         }
         packets.append(packet); packetBytes += packet.count; drainPackets()
     }
@@ -491,9 +510,10 @@ private final class VPNRuntime {
             if count < 0 {
                 if errno == EINTR { continue }
                 if errno == EAGAIN || errno == EWOULDBLOCK { break }
-                failAndRecover(AppError("Writing to the native tunnel failed.")); return
+                failAndRecover(AppError("Writing to the native tunnel failed."), reason: "tun-write"); return
             }
-            guard count == packet.count else { failAndRecover(AppError("A native tunnel packet was only partially written.")); return }
+            guard count == packet.count else { failAndRecover(AppError("A native tunnel packet was only partially written."), reason: "tun-write"); return }
+            record("tun-write")
             packets.removeFirst(); packetBytes -= packet.count; processed += 1
         }
         if packets.isEmpty { writeSource?.cancel(); writeSource = nil }
@@ -527,7 +547,16 @@ private final class VPNRuntime {
             "message": message, "interface": interface, "connectedAt": connectedAt]
         if let latency { value["latency"] = latency }
         if let failureStage { value["failureStage"] = failureStage }
+        if let failureReason { value["failureReason"] = failureReason }
+        #if NATIVE_INTEGRATION_TESTS
+        value["counters"] = counters
+        #endif
         return value
+    }
+    private func record(_ name: String, amount: Int = 1) {
+        #if NATIVE_INTEGRATION_TESTS
+        counters[name] = min(1_000_000_000, (counters[name] ?? 0) + max(0, amount))
+        #endif
     }
     private func cleanup() throws {
         stage = "cleanup"
@@ -548,9 +577,10 @@ private final class VPNRuntime {
         if descriptor >= 0 { Darwin.close(descriptor); descriptor = -1 }
         stopped = true
     }
-    private func failAndRecover(_ error: Error) {
+    private func failAndRecover(_ error: Error, reason: String = "unclassified") {
         guard !stopped, !stopping else { return }
         failureStage = stage
+        failureReason = reason
         state = "error"; message = error.localizedDescription
         do { try cleanup() }
         catch { message += " \(error.localizedDescription)" }
@@ -594,16 +624,62 @@ private final class VPNRuntime {
     }
     private static func defaultFingerprint() throws -> String {
         var parts = [String]()
-        for family in ["-inet", "-inet6"] {
-            let output = (try? run("/sbin/route", ["-n", "get", family, "default"])) ?? ""
-            parts.append(output.components(separatedBy: .newlines).filter {
-                let line = $0.trimmingCharacters(in: .whitespaces)
-                return line.hasPrefix("gateway:") || line.hasPrefix("interface:")
-            }.joined(separator: "\n"))
+        for family in ["inet", "inet6"] {
+            let output = try run("/usr/sbin/netstat", ["-rn", "-f", family])
+            parts.append(try exactDefaultRows(output).joined(separator: "\n"))
         }
         guard parts.contains(where: { !$0.isEmpty }) else { throw AppError("No physical default route is available.") }
         return parts.joined(separator: "\n")
     }
+    /// Routing-table rows identify exact default entries. A longest-prefix GET
+    /// for the unspecified address can resolve the VPN's new /1 routes instead.
+    private static func exactDefaultRows(_ output: String) throws -> [String] {
+        let lines = output.components(separatedBy: .newlines)
+        var columns: [String]?
+        var result = Set<String>()
+        for line in lines {
+            let values = line.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+            if values.contains("Destination"), values.contains("Gateway"), values.contains("Netif") {
+                columns = values; continue
+            }
+            guard let columns, values.first == "default" else { continue }
+            guard let gateway = columns.firstIndex(of: "Gateway"), let flags = columns.firstIndex(of: "Flags"),
+                  let interface = columns.firstIndex(of: "Netif"), values.count > max(gateway, flags, interface) else {
+                throw AppError("Unknown default routing-table row.")
+            }
+            let name = values[interface]
+            guard !name.isEmpty, name.utf8.count < 16,
+                  name.utf8.allSatisfy({ ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) }) else {
+                throw AppError("Unknown default routing-table interface.")
+            }
+            if !name.hasPrefix("utun"), values[flags].contains("G") { result.insert(values[gateway] + "\t" + name) }
+        }
+        if columns == nil {
+            let nonempty = lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            guard !nonempty.isEmpty, nonempty.allSatisfy({ ["Routing tables", "Internet:", "Internet6:"].contains($0) }) else {
+                throw AppError("Unknown routing-table response.")
+            }
+        }
+        return result.sorted()
+    }
+    #if NATIVE_INTEGRATION_TESTS
+    static func runReadOnlyDefaultRouteTests() throws {
+        let header = "Routing tables\nInternet:\nDestination Gateway Flags Netif Expire\n"
+        let original = header + "default 192.0.2.1 UGScg en0\n"
+        let active = original + "0/1 link#9 UCS utun7\n128.0/1 link#9 UCS utun7\n"
+        guard try exactDefaultRows(original) == exactDefaultRows(active) else { throw AppError("Default route parser included split routes.") }
+        let v6 = "Routing tables\nInternet6:\nDestination Gateway Flags Netif Expire\n"
+        guard try exactDefaultRows(v6).isEmpty,
+              try exactDefaultRows(v6 + "::/1 link#9 UCS utun7\n8000::/1 link#9 UCS utun7\n").isEmpty else {
+            throw AppError("Default route parser invented an IPv6 physical default.")
+        }
+        let older = "Destination Gateway Flags Refs Use Netif Expire\ndefault 192.0.2.1 UGSc 3 0 en0\n"
+        guard try exactDefaultRows(older) == exactDefaultRows(original) else { throw AppError("Default route parser rejected legacy columns.") }
+        var accepted = false
+        do { _ = try exactDefaultRows("unexpected response\n"); accepted = true } catch { }
+        guard !accepted else { throw AppError("Default route parser accepted an unknown response.") }
+    }
+    #endif
 }
 
 /// A bounded one-request HTTP/1.1 control connection, bound only to IPv4 loopback.

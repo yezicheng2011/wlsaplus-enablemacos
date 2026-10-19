@@ -41,6 +41,8 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         guard geteuid() != 0 else { throw Failure.blocked("unprivileged parent required") }
         do { _ = try await Task.detached { try smokeSystemCommand("/usr/bin/sudo", ["-n", "/usr/bin/true"]) }.value }
         catch { throw Failure.blocked("preauthorized sudo") }
+        try VPNHelper.runReadOnlyDefaultRouteTests()
+        stage("exact-default parser pass")
 
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("wlsaplus-native-smoke-\(UUID().uuidString)", isDirectory: true)
@@ -95,6 +97,9 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
                     // paths. Only this fixed stage class reaches CI logs.
                     stage("\(failureStage) failed")
                     if let helperStage = service.smokeHelperStage { stage("helper-stage \(helperStage)") }
+                    if let reason = service.smokeHelperReason { stage("helper-reason \(reason)") }
+                    let counters = service.smokeHelperCounters
+                    if !counters.isEmpty { stage("helper-counters \(counters.keys.sorted().map { "\($0):\(counters[$0]!)" }.joined(separator: ","))") }
                 }
 
                 stage("restore")
@@ -184,6 +189,13 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
                     }
                     stage("snapshot-route \(label) exit-0 fields-\(identity.keys.sorted().joined(separator: ","))")
                     guard identity["interface"]?.isEmpty == false else { throw Failure.blocked("route snapshot interface field") }
+                    if label.hasSuffix("-split"), !NetworkPlan.isExactSplitSnapshot(identity, family: family == "-inet" ? 4 : 6, upper: label.contains("high")) {
+                        // Longest-prefix GET can return the physical default
+                        // when this /1 entry does not exist. Cache behavior may
+                        // change after deleting a route; only exact entries count.
+                        stage("snapshot-route \(label) fallback")
+                        continue
+                    }
                     routes[key] = identity
                 } else {
                     let text = result.output.lowercased()
@@ -227,7 +239,21 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         }
 
         func assertRestored() throws {
-            guard try Self.capture() == self else { throw Failure.assertion("exact route and DNS restoration") }
+            let current = try Self.capture()
+            if current.routes != routes {
+                for (key, label) in [("-inet default", "ipv4-default"), ("-inet6 default", "ipv6-default"),
+                                     ("-inet 0.0.0.0/1", "ipv4-low-split"), ("-inet 128.0.0.0/1", "ipv4-high-split"),
+                                     ("-inet6 ::/1", "ipv6-low-split"), ("-inet6 8000::/1", "ipv6-high-split")] where current.routes[key] != routes[key] {
+                    let keys = Set((routes[key] ?? [:]).keys).union((current.routes[key] ?? [:]).keys)
+                    let changed = keys.filter { routes[key]?[$0] != current.routes[key]?[$0] }.sorted()
+                    stage("restore-diff \(label) fields-\(changed.joined(separator: ","))")
+                }
+            }
+            if current.dns != dns {
+                let keys = Set(dns.keys).union(current.dns.keys)
+                stage("restore-diff DNS changed-services-\(keys.filter { dns[$0] != current.dns[$0] }.count)")
+            }
+            guard current == self else { throw Failure.assertion("exact route and DNS restoration") }
         }
     }
 }

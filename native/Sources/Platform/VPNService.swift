@@ -14,6 +14,8 @@ import Darwin
     private var disconnectRequested = false
     #if NATIVE_INTEGRATION_TESTS
     private(set) var smokeHelperStage: String?
+    private(set) var smokeHelperReason: String?
+    private(set) var smokeHelperCounters = [String: Int]()
     #endif
     private let sessionURL: URL
     private(set) var status: [String: Any] = ["state": "disconnected", "connected": false]
@@ -53,6 +55,7 @@ import Darwin
         busy = true; operation = "connect"; disconnectRequested = false
         #if NATIVE_INTEGRATION_TESTS
         smokeHelperStage = nil
+        smokeHelperReason = nil; smokeHelperCounters.removeAll()
         #endif
         defer { busy = false; operation = "" }
         if catalog.isEmpty { _ = try await nodes() }
@@ -101,6 +104,15 @@ import Darwin
                 let progress = value["failureStage"] as? String ?? value["stage"] as? String
                 if let progress, ["listener", "resolve", "proxy-probe", "utun", "network-plan", "routed-https", "connected", "cleanup", "recovery"].contains(progress) {
                     smokeHelperStage = progress
+                }
+                if let reason = value["failureReason"] as? String,
+                   ["setup", "physical-network", "active-plan", "routed-fetch", "proxy-health", "tun-read", "tun-write", "unclassified"].contains(reason) {
+                    smokeHelperReason = reason
+                }
+                if let counters = value["counters"] as? [String: Any] {
+                    for key in ["tun-read", "tun-handled", "tun-rejected", "tun-write", "open-tcp", "open-udp", "proxy-ready", "proxy-error", "proxy-auth-error", "to-proxy-bytes", "from-proxy-bytes"] {
+                        if let number = counters[key] as? NSNumber, (0...1_000_000_000).contains(number.intValue) { smokeHelperCounters[key] = number.intValue }
+                    }
                 }
                 #endif
                 let state = value["state"] as? String ?? ""
