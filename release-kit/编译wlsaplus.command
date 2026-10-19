@@ -2,6 +2,10 @@
 # ============================================
 # WLSAPlus 2.0.0 一键从源码编译（macOS）
 # 依赖：Xcode 命令行工具；不需要 Node / Homebrew / 开发者账号
+# 若尚未克隆仓库，脚本会按序尝试国内镜像：
+#   gh-proxy.com → ghproxy.net → ghfast.top
+# （勿用常被墙的 ghproxy.com；失败则 zip 回退）
+# © daniel.ye
 # ============================================
 
 echo -ne "\033]0;编译 WLSAPlus\007"
@@ -40,7 +44,67 @@ if ! xcode-select -p >/dev/null 2>&1; then
 fi
 xcrun --sdk macosx --show-sdk-path >/dev/null 2>&1 || fail "命令行工具不完整，请执行：xcode-select --install"
 
-[[ -d "$NATIVE/scripts" ]] || fail "找不到 native/scripts。请确认本脚本位于仓库的 release-kit/ 目录（先 git clone 本仓库）。"
+if [[ ! -d "$NATIVE/scripts" ]]; then
+  echo "    未检测到完整仓库，尝试用国内镜像克隆…"
+  CLONE_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)/wlsaplus-enablemacos"
+  # If script was copied out of repo, clone next to it
+  if [[ "$(basename "$REPO_ROOT")" != "wlsaplus-enablemacos" ]] || [[ ! -d "$REPO_ROOT/.git" && ! -d "$REPO_ROOT/native" ]]; then
+    CLONE_PARENT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    CLONE_DIR="$CLONE_PARENT/wlsaplus-enablemacos"
+  else
+    CLONE_DIR="$REPO_ROOT"
+  fi
+  MIRRORS=(
+    "https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git"
+    "https://ghproxy.net/https://github.com/yezicheng2011/wlsaplus-enablemacos.git"
+    "https://ghfast.top/https://github.com/yezicheng2011/wlsaplus-enablemacos.git"
+  )
+  ZIP_MIRRORS=(
+    "https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip"
+    "https://ghproxy.net/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip"
+    "https://ghfast.top/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip"
+  )
+  cloned=0
+  if [[ ! -d "$CLONE_DIR/native/scripts" ]]; then
+    for url in "${MIRRORS[@]}"; do
+      echo "    git clone $url"
+      if git clone --depth 1 "$url" "$CLONE_DIR" 2>/tmp/wlsaplus-clone.err; then
+        cloned=1
+        break
+      fi
+      rm -rf "$CLONE_DIR" 2>/dev/null || true
+      echo "    该镜像失败，试下一个…"
+    done
+  else
+    cloned=1
+  fi
+  if [[ "$cloned" -ne 1 ]]; then
+    echo "    git clone 均失败，尝试 zip 回退…"
+    TMPZIP="$(mktemp -t wlsaplusXXXX).zip"
+    for zurl in "${ZIP_MIRRORS[@]}"; do
+      echo "    curl $zurl"
+      if curl -fsSL -o "$TMPZIP" "$zurl" && unzip -q "$TMPZIP" -d "$(dirname "$CLONE_DIR")"; then
+        rm -f "$TMPZIP"
+        # GitHub zip extracts to wlsaplus-enablemacos-main
+        EXTRACTED="$(dirname "$CLONE_DIR")/wlsaplus-enablemacos-main"
+        if [[ -d "$EXTRACTED" ]]; then
+          mv "$EXTRACTED" "$CLONE_DIR"
+          cloned=1
+          break
+        fi
+      fi
+      rm -f "$TMPZIP" 2>/dev/null || true
+    done
+  fi
+  [[ "$cloned" -eq 1 && -d "$CLONE_DIR/native/scripts" ]] || fail "无法获取源码。请手动执行：
+  git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
+  （备选主机：ghproxy.net / ghfast.top；勿用 ghproxy.com）
+  或 zip：curl -L -o w.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'"
+  REPO_ROOT="$CLONE_DIR"
+  NATIVE="$REPO_ROOT/native"
+fi
+[[ -d "$NATIVE/scripts" ]] || fail "找不到 native/scripts。请确认本脚本位于仓库的 release-kit/，或先用镜像克隆：
+  git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git"
 [[ -x "$NATIVE/scripts/build.sh" ]] || chmod +x "$NATIVE/scripts/build.sh" 2>/dev/null || true
 
 echo "==> [2/4] 编译原生应用（版本 $VERSION，universal）..."

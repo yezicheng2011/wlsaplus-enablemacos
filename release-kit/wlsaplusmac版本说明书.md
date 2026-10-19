@@ -31,14 +31,26 @@
 xcode-select --install
 ```
 
-3. 复制执行下面整段：
+3. 复制执行下面整段（**推荐国内镜像 gh-proxy.com**；勿与常被墙的 `ghproxy.com` 混淆。备选把主机换成 `ghproxy.net` 或 `ghfast.top`）：
 
 ```bash
-git clone https://github.com/yezicheng2011/wlsaplus-enablemacos.git
+git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
 cd wlsaplus-enablemacos/native
 WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
+
+若 `git clone` 失败，用同一镜像下载 zip 再编译：
+
+```bash
+curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
+unzip wlsaplus-enablemacos.zip
+cd wlsaplus-enablemacos-main/native
+WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+open out/WLSAPlus.app
+```
+
+能直连 GitHub 时也可改用 `https://github.com/yezicheng2011/wlsaplus-enablemacos.git`。
 
 4. （可选）装进「应用程序」：
 
@@ -59,7 +71,7 @@ open /Applications/WLSAPlus.app
 3. 若提示无法打开：右键 → 打开 → 打开；或先在终端执行 `chmod +x` 后再双击
 4. 脚本会检查命令行工具 → 编译 2.0.0 → 打开应用
 
-> 国内若 `git clone` GitHub 较慢，可用你惯用的镜像 / 代理后再克隆；编译本身**不依赖** npm，也不下载境外 Electron / VPN 内核。
+> **国内镜像（推荐顺序）**：`gh-proxy.com` → `ghproxy.net` → `ghfast.top`（把 clone / zip URL 里的主机名换成对应即可）。勿用常被墙的 `ghproxy.com`（无连字符）。编译本身**不依赖** npm，也不下载境外 Electron / VPN 内核。
 
 ## 第一次打开：为什么显示「不安全」而不是「已损坏」
 

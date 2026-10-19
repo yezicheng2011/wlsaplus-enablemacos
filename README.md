@@ -68,9 +68,11 @@ WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, 
 
 ### 推荐命令（复制整段）· Commands
 
+国内网络优先用 **gh-proxy.com** 镜像克隆（勿与常被墙的 `ghproxy.com` 混淆）。备选把主机换成 `ghproxy.net` 或 `ghfast.top`（路径不变）。
+
 ```bash
-# 1) 克隆仓库
-git clone https://github.com/yezicheng2011/wlsaplus-enablemacos.git
+# 1) 克隆仓库（推荐国内镜像）
+git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
 cd wlsaplus-enablemacos
 
 # 2) 进入原生工程并编译（universal：arm64 + x86_64）
@@ -80,6 +82,27 @@ WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 # 3) 打开刚编好的应用
 open out/WLSAPlus.app
 ```
+
+同学可复制的核心四行（镜像 clone + 编译 + 打开）：
+
+```bash
+git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
+cd wlsaplus-enablemacos/native
+WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+open out/WLSAPlus.app
+```
+
+若 `git clone` 仍失败，用同一镜像下载 zip：
+
+```bash
+curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
+unzip wlsaplus-enablemacos.zip
+cd wlsaplus-enablemacos-main/native
+WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+open out/WLSAPlus.app
+```
+
+能直连 GitHub 时也可改用 `https://github.com/yezicheng2011/wlsaplus-enablemacos.git`。
 
 可选：装进「应用程序」，并去掉隔离标记（减少「已损坏」误报）：
 
