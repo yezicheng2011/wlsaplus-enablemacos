@@ -10,9 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest">下载 / Download</a> ·
+  <a href="https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/tag/v2.0.0">下载 2.0.0 DMG / Download</a> ·
+  <a href="https://wlsaplus.spacehubxyz.hk/#download">官网下载 / Official site</a> ·
   <a href="#安装--install">安装 / Install</a> ·
-  <a href="#从源码构建--build-from-source">从源码构建 / Build</a> ·
   <a href="native/README.md">原生工程说明 / Native docs</a>
 </p>
 
@@ -29,9 +29,9 @@
 > The VPN and network core have also been rewritten natively (system utun + Network.framework + CryptoKit/CommonCrypto). They no longer use the former shared core (e.g. mihomo / Clash Meta) or a third-party VPN runtime.  
 >  
 > **发布通道 · Releases**  
-> 原生重写已合入 [`main`](https://github.com/yezicheng2011/wlsaplus-enablemacos/tree/main)；正式安装包与应用内更新由 `native/` 构建并发布（见根目录 release workflow）。在新稳定版上线前，[Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest) 上最新公开包仍可能是 1.x Electron 构建。  
-> The native rewrite is on `main`; installers and in-app updates ship from `native/` via the root release workflow. Until a new stable native release is published, the latest public asset on Releases may still be a 1.x Electron build.  
->  
+> 原生重写已合入 [`main`](https://github.com/yezicheng2011/wlsaplus-enablemacos/tree/main)；正式安装包与应用内更新由 `native/` 构建并发布（见根目录 release workflow）。当前稳定版为 **[v2.0.0](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/tag/v2.0.0)**（原生自签安装包，约 1.7MB）。普通用户请直接下载 DMG，**无需自行编译**。
+> > The native rewrite is on `main`; installers and in-app updates ship from `native/` via the root release workflow. Current stable is **v2.0.0** (native self-signed installer, ~1.7MB). End users should download the DMG — **no need to compile from source**.
+> >  
 > 细节、验收范围与来源记录见 [native/README.md](native/README.md) 与 [native/PROVENANCE.md](native/PROVENANCE.md)。  
 > Details, acceptance scope, and provenance: [native/README.md](native/README.md) and [native/PROVENANCE.md](native/PROVENANCE.md).
 
@@ -83,7 +83,11 @@ Dev and some release builds are ad-hoc or project-certificate signed and **may n
 sudo xattr -cr /Applications/WLSAPlus.app
 ```
 
-## 从源码构建 · Build from source
+## 从源码构建 · Build from source（仅开发者 / developers only）
+
+> 普通用户请用上方 **Download 2.0.0 DMG**，不要走源码编译。
+> End users: use the DMG download above — do not build from source.
+
 
 ### 原生应用（当前支持路径）· Native app (supported path)
 
