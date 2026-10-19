@@ -1,3 +1,11 @@
+> **原生重写分支**：新应用源码、构建方法、更新兼容和验收限制见 [native/README.md](native/README.md)，代码来源见 [native/PROVENANCE.md](native/PROVENANCE.md)。
+>
+> 在 macOS 上构建新版：`cd native && bash scripts/build.sh`。新版使用 Swift/C、系统 AppKit/WebKit/网络与加密接口，沿用现有订阅、节点和更新信任配置。根目录发布工作流已改为构建原生应用；`npm` 和 Electron 构建命令仍指向历史实现。
+>
+> 当前是待验收的重写版本，尚未发布。下面的 1.x 文档和原实现保留作迁移、更新兼容测试及历史权利记录，新应用不打包旧内核或旧运行时。
+
+---
+
 <p align="center">
   <img src="public/icons/app-icon.svg" width="96" alt="WLSAPlus">
 </p>

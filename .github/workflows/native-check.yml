@@ -1,0 +1,61 @@
+name: Native macOS checks
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['native/Sources/**', 'native/Resources/**', 'native/Tests/**', 'native/scripts/**', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
+concurrency:
+  group: native-check-v2-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate native source
+        id: location
+        shell: bash
+        run: |
+          if [[ -f native/scripts/build.sh ]]; then echo 'dir=native' >> "$GITHUB_OUTPUT"; else echo 'dir=.' >> "$GITHUB_OUTPUT"; fi
+      - name: Core and protocol regression checks
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: bash scripts/test.sh
+      - name: Build both Mac architectures
+        id: build
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: bash scripts/build.sh
+      - name: Startup health check
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: |
+          mkdir -p "$HOME/Library/Application Support/WLSAPlus/updates/staging/2.0.0-beta.1"
+          marker="$HOME/Library/Application Support/WLSAPlus/updates/staging/2.0.0-beta.1/launched.marker"
+          python3 - "$marker" <<'PY'
+          import subprocess,sys
+          subprocess.run(['open','-W','out/WLSAPlus.app','--args','--wlsaplus-update-marker='+sys.argv[1],'--wlsaplus-update-verify-only'],check=True,timeout=90)
+          PY
+          test -f "$marker"
+      - name: Signed legacy updater compatibility
+        timeout-minutes: 3
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: ${{ steps.location.outputs.dir }}
+        env:
+          WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE: '1'
+          WLSAPLUS_NATIVE_UPDATE_LAUNCH_SMOKE: '1'
+          WLSAPLUS_CODESIGN_P12_BASE64: ${{ secrets.WLSAPLUS_CODESIGN_P12_BASE64 }}
+          WLSAPLUS_CODESIGN_P12_PASSWORD: ${{ secrets.WLSAPLUS_CODESIGN_P12_PASSWORD }}
+          WLSAPLUS_UPDATE_ED25519_KEY: ${{ secrets.WLSAPLUS_UPDATE_ED25519_KEY }}
+        run: bash scripts/signed-update-compat.sh
+      - name: Native VPN and network restoration
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: bash scripts/vpn-smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WLSAPlus-native-review
+          path: |
+            out/WLSAPlus-native-review.zip
+            native/out/WLSAPlus-native-review.zip
+          if-no-files-found: warn
