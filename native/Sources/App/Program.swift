@@ -32,9 +32,9 @@ import WebKit
     var browser: BrowserHost!
     private var quitting = false
     private var quitApproved = false
-    init() throws {
+    init(stateDirectory: URL = AppIdentity.support) throws {
         let previousRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == AppIdentity.bundle && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
-        store = try LocalState(allowLegacyMigration: !previousRunning)
+        store = try LocalState(directory: stateDirectory, allowLegacyMigration: !previousRunning)
         school = SchoolService(store: store)
         updater = NativeUpdater(store: store)
         vpn = VPNService(store: store)
@@ -70,6 +70,7 @@ import WebKit
                 if let name = value["name"] as? String, let data = value["value"] { self?.browser.event(name, data) }
             }
             window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
             window.title = "WLSAPlus"; window.minSize = NSSize(width: 520, height: 580); window.center()
             window.contentView = browser.webView; window.setFrameAutosaveName("WLSAPlus.main")
             createMenu()
@@ -104,7 +105,9 @@ import WebKit
         switch method {
         case "app.state": return state()
         case "settings.save":
+            let previousChannel = updater.beta
             let settings = try await services.saveSettings(args)
+            if previousChannel != updater.beta { updater.channelChanged() }
             browser.event("state", state()); return settings
         case "school.login", "school.sync":
             let previous = school.account["username"] as? String

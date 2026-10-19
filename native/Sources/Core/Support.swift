@@ -86,6 +86,11 @@ final class LocalState {
         if value["appearance"] == nil { value["appearance"] = "system" }
         if value["accent"] == nil { value["accent"] = "default" }
         if value["reminders"] == nil { value["reminders"] = true }
+        if value["channel"] == nil {
+            let legacySettings = directory.appendingPathComponent("updates/settings.json")
+            let saved = (try? jsonObject(Data(contentsOf: legacySettings), maximum: 65536))?["channel"] as? String
+            value["channel"] = ["stable", "beta"].contains(saved ?? "") ? saved! : (AppIdentity.version.contains("-") ? "beta" : "stable")
+        }
         if value["todos"] == nil { value["todos"] = [[String: Any]]() }
         if value["snapshot"] == nil { value["snapshot"] = ["courses": [], "schedule": [], "assignments": [], "attendance": []] as [String: Any] }
         let legacy = directory.appendingPathComponent("Local Storage/leveldb", isDirectory: true)

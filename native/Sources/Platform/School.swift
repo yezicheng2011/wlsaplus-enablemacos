@@ -121,6 +121,7 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
         try store.set("snapshot", ["courses": [], "schedule": [], "assignments": [], "attendance": []])
     }
     func course(_ id: String) async throws -> [String: Any] {
+        guard !busy else { throw AppError("Wait for the school synchronization to finish before loading course details.") }
         let epoch = generation
         guard let session, let base = account["baseURL"] as? String, let origin = URL(string: base),
               var snapshot = store.value["snapshot"] as? [String: Any],
@@ -135,6 +136,7 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
             details = try await parser("details", ["html": html, "assignments": assignments])
         }
         guard generation == epoch else { throw CancellationError() }
+        if let latest = store.value["snapshot"] as? [String: Any] { snapshot = latest }
         if var assignments = details["assignments"] as? [[String: Any]] {
             for i in assignments.indices { assignments[i]["course"] = course["name"]; assignments[i]["courseId"] = id }
             let old = snapshot["assignments"] as? [[String: Any]] ?? []

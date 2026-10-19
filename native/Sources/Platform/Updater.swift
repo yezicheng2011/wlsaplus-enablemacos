@@ -61,6 +61,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
     private var staged: URL?
     private var manifest: UpdateManifest?
     private var timer: Timer?
+    private var channelGeneration = 0
     init(store: LocalState) { self.store = store }
     var beta: Bool { store.value["channel"] as? String == "beta" }
     var architecture: String {
@@ -93,6 +94,17 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
         guard operation == nil, staged == nil else { return }
         operation = Task { await performCheck(); operation = nil }
     }
+    func channelChanged() {
+        channelGeneration += 1
+        staged = nil; manifest = nil
+        set("idle", "Update channel changed. Check for updates again.")
+    }
+    private func failedVersions() -> [String] {
+        let file = directory.appendingPathComponent("failed-versions.json")
+        var failed = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String]) ?? []
+        if let legacy = try? jsonObject(Data(contentsOf: directory.appendingPathComponent("settings.json")), maximum: 65536), let old = legacy["failedVersions"] as? [String] { failed += old }
+        return Array(Set(failed))
+    }
     private func assetURLs(tag: String, name: String) -> [URL] {
         let host = "https://wlsaplus.spacehubxyz.hk"
         let path = "yezicheng2011/wlsaplus-enablemacos/releases/download/\(tag)/\(name)"
@@ -112,6 +124,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
         throw last
     }
     private func performCheck() async {
+        let epoch = channelGeneration, wantedBeta = beta
         set("checking", "Checking for updates…")
         do {
             var candidates: [UpdateManifest] = []
@@ -120,16 +133,21 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
                 let latest = try jsonObject(await small([URL(string: "https://wlsaplus.spacehubxyz.hk/api/latest")!]), maximum: 65536)
                 guard let tag = latest["tag_name"] as? String ?? latest["tag"] as? String, matches(tag, #"^[A-Za-z0-9][A-Za-z0-9._+\-]{0,63}$"#) else { throw AppError("Update server returned an invalid release tag.") }
                 candidates.append(try UpdateManifest.verified(await small(assetURLs(tag: tag, name: "update-manifest.json"))))
-            } catch { failure = error }
-            if beta {
+            } catch {
+                failure = error
+                let urls = ["https://gh-proxy.com/", "https://edgeone.gh-proxy.org/"].compactMap { URL(string: $0 + "https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest/download/update-manifest.json") }
+                do { candidates.append(try UpdateManifest.verified(await small(urls))) }
+                catch { failure = error }
+            }
+            if wantedBeta {
                 do { candidates.append(try UpdateManifest.verified(await small(assetURLs(tag: "channel-beta", name: "update-manifest.json")))) }
                 catch { failure = error }
             }
             guard !candidates.isEmpty else { throw failure ?? AppError("No signed update manifest found.") }
             let os = ProcessInfo.processInfo.operatingSystemVersion
-            let failedURL = directory.appendingPathComponent("failed-versions.json")
-            let failed = (try? JSONSerialization.jsonObject(with: Data(contentsOf: failedURL)) as? [String]) ?? []
-            let eligible = try candidates.filter { try $0.eligible(current: AppIdentity.version, beta: beta, failed: failed, os: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)") }
+            let failed = failedVersions()
+            guard epoch == channelGeneration else { throw CancellationError() }
+            let eligible = try candidates.filter { try $0.eligible(current: AppIdentity.version, beta: wantedBeta, failed: failed, os: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)") }
             let ordered = try eligible.sorted { try SemanticVersion($0.version) > SemanticVersion($1.version) }
             guard let selected = ordered.first else {
                 set("up-to-date", "WLSAPlus is up to date."); return
@@ -144,7 +162,10 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
             for url in assetURLs(tag: selected.tag, name: file.name) {
                 do {
                     let job = PackageDownload(expected: file.size, destination: archive) { [weak self] progress in
-                        Task { @MainActor in self?.set("downloading", "Downloading WLSAPlus \(selected.version)…", percent: progress) }
+                        Task { @MainActor in
+                            guard let self, self.channelGeneration == epoch else { return }
+                            self.set("downloading", "Downloading WLSAPlus \(selected.version)…", percent: progress)
+                        }
                     }
                     _ = try await job.fetch(url)
                     try Self.verifyArchive(archive, file: file)
@@ -152,6 +173,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
                 } catch { log("package attempt failed: \(error.localizedDescription)"); try? FileManager.default.removeItem(at: archive) }
             }
             guard downloaded else { throw AppError("Could not download and verify the update. Check the update log.") }
+            guard epoch == channelGeneration else { throw CancellationError() }
             try ArchivePolicy.validate(archive)
             let unpacked = staging.appendingPathComponent("unpacked", isDirectory: true)
             try? FileManager.default.removeItem(at: unpacked)
@@ -161,7 +183,10 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
             try Self.verifyApp(candidate, version: selected.version, architecture: architecture)
             staged = candidate
             set("ready", "Update ready — restart to install WLSAPlus \(selected.version).", percent: 100)
-        } catch { set("error", error.localizedDescription) }
+        } catch {
+            if error is CancellationError || epoch != channelGeneration { set("idle", "Update channel changed. Check for updates again.") }
+            else { set("error", error.localizedDescription) }
+        }
     }
     nonisolated static func verifyArchive(_ url: URL, file: UpdateFile) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
@@ -184,7 +209,14 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
     }
     func install(restart: Bool = true) async throws {
         guard let staged, let manifest else { throw AppError("No verified update is ready.") }
+        let epoch = channelGeneration
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        guard try manifest.eligible(current: AppIdentity.version, beta: beta, failed: failedVersions(), os: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)") else {
+            self.staged = nil; self.manifest = nil; set("idle", "The selected update no longer matches this channel.")
+            throw AppError("Check for updates again on the selected channel.")
+        }
         try await disconnect?()
+        guard epoch == channelGeneration else { throw AppError("The update channel changed. Check again before installing.") }
         try Self.verifyApp(staged, version: manifest.version, architecture: architecture)
         let target = Bundle.main.bundleURL
         guard target.pathExtension == "app", !target.path.hasPrefix("/Volumes/"), !target.path.contains("/AppTranslocation/") else { throw AppError("Move WLSAPlus to Applications before updating.") }

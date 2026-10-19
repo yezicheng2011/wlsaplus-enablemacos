@@ -324,8 +324,12 @@ private final class VPNRuntime {
                 guard response.statusCode == 204 else { throw AppError("The routed HTTPS verification returned an unexpected response.") }
                 queue.async {
                     guard !self.stopping, !self.stopped else { return }
-                    self.state = "connected"; self.message = "Native VPN is active."
-                    self.connectedAt = ISO8601DateFormatter().string(from: Date())
+                    do {
+                        guard let plan = self.plan else { throw AppError("The tunnel network transaction is missing.") }
+                        try plan.verifyActive()
+                        self.state = "connected"; self.message = "Native VPN is active."
+                        self.connectedAt = ISO8601DateFormatter().string(from: Date())
+                    } catch { self.failAndRecover(error) }
                 }
             } catch { queue.async { self.failAndRecover(AppError("Traffic through the native tunnel could not be verified: \(error.localizedDescription)")) } }
         }
@@ -351,6 +355,8 @@ private final class VPNRuntime {
         if tickNumber % 100 == 0, networkActive, !stopping {
             do {
                 guard try Self.defaultFingerprint() == originalDefault else { throw AppError("The physical network changed; reconnect the VPN.") }
+                guard let plan else { throw AppError("The active VPN network transaction is missing.") }
+                try plan.verifyActive()
             } catch { failAndRecover(error); return }
         }
         if tickNumber % 300 == 0, state == "connected", !healthRunning {

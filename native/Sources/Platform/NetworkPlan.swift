@@ -100,6 +100,42 @@ final class NetworkPlan {
         storage = nil
     }
 
+    /// Read-only validation of the committed lease. This never repairs routes
+    /// or DNS: an external change ends the session, and restore() preserves
+    /// settings which no longer match the transaction's ownership record.
+    func verifyActive() throws {
+        guard let journal, storage != nil, journal.interface == interface,
+              journal.routes.allSatisfy({ $0.state == 2 }),
+              journal.services.allSatisfy({ $0.state == 2 }),
+              journal.routes.filter({ !$0.host }).count == 4,
+              !journal.services.isEmpty, !nodeAddresses.isEmpty else {
+            throw AppError("The VPN network transaction is not fully committed.")
+        }
+        for route in journal.routes {
+            guard let current = try Self.lookup(family: route.family, target: route.target), Self.owns(current, route: route), Self.usable(current) else {
+                throw AppError("A VPN capture or server bypass route changed. Reconnect the VPN.")
+            }
+        }
+        // Preexisting physical host routes are deliberately not owned/deleted by
+        // us. They still must remain exact physical bypasses for the pinned node.
+        for address in nodeAddresses {
+            guard let family = Self.family(address),
+                  let route = try Self.lookup(family: family, target: address),
+                  Self.exact(route, destination: address, prefix: family == 4 ? 32 : 128, family: family),
+                  Self.validInterface(route.interface), route.interface != interface,
+                  !route.interface.hasPrefix("utun"), !route.interface.hasPrefix("tun"),
+                  Self.usable(route) else {
+                throw AppError("The pinned VPN server no longer has a physical bypass route.")
+            }
+        }
+        let names = Set(try Self.serviceNames(includeDisabled: true))
+        for service in journal.services {
+            guard names.contains(service.name), try Self.dns(service.name) == Self.tunnelDNS else {
+                throw AppError("VPN DNS ownership changed. Reconnect the VPN.")
+            }
+        }
+    }
+
     static func recover(journal: URL) throws {
         let transaction = NetworkPlan(interface: "utun0", nodeAddresses: [], journal: journal)
         try transaction.restore()
@@ -216,6 +252,9 @@ final class NetworkPlan {
         else { arguments += ["-interface", route.interface] }
         _ = try execute("/sbin/route", arguments)
     }
+    private static func usable(_ route: RouteInfo) -> Bool {
+        route.flags.contains("UP") && !route.flags.contains("REJECT") && !route.flags.contains("BLACKHOLE")
+    }
     private static func owns(_ current: RouteInfo, route: Route) -> Bool {
         guard current.flags.contains("PROTO2"), current.interface == route.interface,
               exact(current, destination: route.destination, prefix: route.prefix, family: route.family) else { return false }
@@ -324,6 +363,36 @@ final class NetworkPlan {
         }
         return value
     }
+
+    #if NETWORK_PLAN_TESTS
+    /// Exercises the same route parser and ownership decision used by active
+    /// verification and cleanup, without executing any system command.
+    static func runReadOnlyVerificationTests() throws {
+        func expect(_ condition: Bool) throws {
+            if !condition { throw AppError("Network route ownership parser test failed.") }
+        }
+        let split4 = Route(family: 4, destination: "0.0.0.0", prefix: 1, gateway: nil, interface: "utun7")
+        let good4 = RouteInfo(fields: fields("destination: 0.0.0.0\nmask: 128.0.0.0\ninterface: utun7\nflags: <UP,DONE,STATIC,PROTO2>\n"))
+        try expect(owns(good4, route: split4) && usable(good4))
+        for flags in ["<UP,STATIC,PROTO2,REJECT>", "<UP,STATIC,PROTO2,BLACKHOLE>", "<STATIC,PROTO2>"] {
+            try expect(!usable(RouteInfo(fields: good4.fields.merging(["flags": flags]) { _, new in new })))
+        }
+        for patch in [["flags": "<UP,DONE,STATIC>"], ["interface": "en0"], ["mask": "0.0.0.0"], ["flags": "<UP,GATEWAY,STATIC,PROTO2>"]] {
+            try expect(!owns(RouteInfo(fields: good4.fields.merging(patch) { _, new in new }), route: split4))
+        }
+        let split6 = Route(family: 6, destination: "::", prefix: 1, gateway: nil, interface: "utun7")
+        let good6 = RouteInfo(fields: fields("destination: default\nmask: 8000::\ninterface: utun7\nflags: <UP,DONE,STATIC,PROTO2>\n"))
+        try expect(owns(good6, route: split6))
+        let cidr6 = RouteInfo(fields: good6.fields.merging(["destination": "::/1", "mask": ""]) { _, new in new })
+        try expect(owns(cidr6, route: split6))
+        let host = Route(family: 4, destination: "203.0.113.9", prefix: 32, gateway: "192.0.2.1", interface: "en0")
+        let physical = RouteInfo(fields: fields("destination: 203.0.113.9\ngateway: 192.0.2.1\ninterface: en0\nflags: <UP,GATEWAY,HOST,DONE,STATIC,PROTO2>\n"))
+        try expect(owns(physical, route: host))
+        try expect(!owns(RouteInfo(fields: physical.fields.merging(["gateway": "192.0.2.2"]) { _, new in new }), route: host))
+        try expect(!owns(RouteInfo(fields: physical.fields.merging(["flags": "<UP,GATEWAY,DONE,STATIC,PROTO2>"]) { _, new in new }), route: host))
+        print("network route parser tests passed without system mutation")
+    }
+    #endif
 
     private static func execute(_ executable: String, _ arguments: [String]) throws -> String {
         let result = try executeResult(executable, arguments)

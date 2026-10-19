@@ -56,6 +56,9 @@ import Foundation
             }
         }
         try LegacyStoreTests.run()
+        #if NETWORK_PLAN_TESTS
+        try NetworkPlan.runReadOnlyVerificationTests()
+        #endif
         #if os(macOS)
         let legacy = URL(fileURLWithPath: "Tests/Fixtures/legacy-update-manifest.json")
         if FileManager.default.fileExists(atPath: legacy.path) { _ = try UpdateManifest.verified(Data(contentsOf: legacy)); assertions += 1 }

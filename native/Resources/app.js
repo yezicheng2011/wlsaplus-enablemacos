@@ -469,7 +469,7 @@
       const result = await native('updates.log');
       if (ui.dialogNonce!==nonce || !$('#dialog').open) return;
       const log = typeof result==='string' ? result : Array.isArray(result?.entries) ? result.entries.map(entry=>typeof entry==='string'?entry:[entry.date,entry.message].filter(Boolean).join(' · ')).join('\n') : result?.text || result?.log || '';
-      $('#dialog .dialog-body').innerHTML = `<p class="small whitespace">${h(log || 'No update activity has been recorded.')}</p><div class="dialog-actions">${btn('Done','dialog-close')}</div>`;
+      $('#dialog .dialog-body').innerHTML = `<p class="small whitespace">${h(log || (result?.ok ? 'The update log was revealed in Finder. Open update.log to view its contents.' : 'No update activity has been recorded.'))}</p><div class="dialog-actions">${btn('Done','dialog-close')}</div>`;
     } catch(error) { if(ui.dialogNonce===nonce && $('#dialog').open) $('#dialog .dialog-body').innerHTML=`<div class="error-message" role="alert">${h(errorText(error))}</div><div class="dialog-actions">${btn('Close','dialog-close')}</div>`; }
   }
 
