@@ -29,7 +29,8 @@ are preserved. IP reassembly is bounded to sixteen partial datagrams (about
 1.2 MiB) and fifteen seconds. Overlaps and inconsistent fragments reject the
 entire datagram until expiry. IPv6 atomic fragments bypass the cache; IPv6
 unfragmentable headers longer than 2048 bytes are rejected. An idle UDP flow expires
-after one minute and an idle TCP flow after ten minutes.
+after one minute and a normally open idle TCP flow after ten minutes. Half-closed
+TCP flows expire after two minutes; TIME_WAIT lasts one minute.
 
 The portable tests construct and checksum packets independently, exercise loss,
 reordering, overlap, windows, sequence wrap, close/reset, UDP, IPv6 extensions,
