@@ -28,7 +28,7 @@ Mac CI 已通过双架构构建和实际 WebKit 界面、原生桥接及课表�
 
 提权辅助进程只有在协议出口验证、utun 配置、路由/DNS 事务及经隧道的 HTTPS 验证完成后才报告已连接。它监测父进程和物理网络变化，断开时恢复路由与 DNS；恢复失败会保留恢复日志并阻止安装更新。首次启动和连接会需要 macOS 管理员授权。
 
-真实节点抽测使用独立测试实现验证了 4 个现有 VMess TCP/TLS 节点接受主 UUID 的旧版认证。抽测的 SS/WS 节点未连通，尚不能确认原因。新 macOS 客户端本身的真实节点验证仍是发布前要求。
+真实节点抽测使用独立测试实现验证了 4 个现有 VMess TCP/TLS 节点接受主 UUID 的旧版认证。抽测的 SS 节点及订阅中的两个 WS 节点均在 TCP 建连阶段超时，尚未进入协议协商；不能据此判断这些协议实现是否互通。新 macOS 客户端本身的真实节点验证仍是发布前要求。
 
 ## 应用内更新兼容
 
@@ -44,7 +44,7 @@ WLSAPLUS_VERSION=2.0.0-beta.1 bash scripts/release.sh
 
 需要先导入原固定代码签名证书，并设置 `WLSAPLUS_UPDATE_ED25519_KEY`。输出文件名和清单格式保持旧版兼容。`release.sh` 只在本地准备产物；仓库根目录的发布工作流取代原 Electron 产物流程，稳定版生成草稿，测试版更新现有 beta 通道。稳定草稿验收后发布时须选中「Set as the latest release」（CLI：`gh release edit v版本 --draft=false --latest`），旧版和新版的稳定更新按钮才能发现它。必须在真实 Mac 上验证旧版 1.1.2 → 新版、下次原生版本升级、取消授权、非可写 Applications 目录、断点续传与强制回滚。
 
-`scripts/signed-update-compat.sh` 是可选的签名兼容测试。Mac CI 在原 secrets 可用时，用临时钥匙串签名测试副本、生成原公钥可验证的清单，再调用原仓库未修改的更新器检查下载、解包、签名、架构及就绪状态；托管 CI 还运行原安装辅助脚本并检查新原生应用的启动确认。测试不发布产物，使用的是原更新器模块和临时目标，不能替代完整旧 Electron 应用的升级验收。单独运行本目录时需将 `WLSAPLUS_LEGACY_ELECTRON_DIR` 指向原仓库的 `electron` 目录，并显式设置 `WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`。
+`scripts/signed-update-compat.sh` 是可选的签名兼容测试。Mac CI 已用原 secrets 签名测试副本、生成原公钥可验证的清单，并通过原仓库未修改的 1.1.2 更新器完成 arm64/x64 下载、解包、签名、架构及就绪检查；原安装辅助脚本也已通过临时目标替换与新原生应用启动确认。测试还包含原生安装辅助进程自身的安装与启动确认检查。测试不发布产物，使用的是更新器模块和临时目标，不能替代完整旧 Electron 应用的升级验收。单独运行本目录时需将 `WLSAPLUS_LEGACY_ELECTRON_DIR` 指向原仓库的 `electron` 目录，并显式设置 `WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`。
 
 ## 功能与数据
 

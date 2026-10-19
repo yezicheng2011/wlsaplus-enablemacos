@@ -306,6 +306,9 @@ private final class VPNRuntime {
     private var counters = [String: Int]()
     private var smokeDNS: SmokeDNSWitness?
     private var networkValidationFailure: String?
+    private var networkSetupStage: String?
+    private var networkSetupFlags = [String]()
+    private var networkSetupInterfaceClass: String?
     #endif
     private var message = "Checking the VPN server."
     private var networkActive = false
@@ -692,6 +695,9 @@ private final class VPNRuntime {
         #if NATIVE_INTEGRATION_TESTS
         value["counters"] = counters
         if let failure = networkValidationFailure ?? plan?.verificationFailureClass { value["networkValidation"] = failure }
+        if let setup = networkSetupStage ?? plan?.setupStage { value["networkSetup"] = setup }
+        value["networkSetupFlags"] = networkSetupStage == nil ? (plan?.setupRouteFlags ?? []) : networkSetupFlags
+        if let name = networkSetupInterfaceClass ?? plan?.setupInterfaceClass { value["networkSetupInterfaceClass"] = name }
         #endif
         return value
     }
@@ -725,6 +731,9 @@ private final class VPNRuntime {
         failureReason = reason
         #if NATIVE_INTEGRATION_TESTS
         networkValidationFailure = plan?.verificationFailureClass
+        networkSetupStage = plan?.setupStage
+        networkSetupFlags = plan?.setupRouteFlags ?? []
+        networkSetupInterfaceClass = plan?.setupInterfaceClass
         #endif
         state = "error"; message = error.localizedDescription
         do { try cleanup() }

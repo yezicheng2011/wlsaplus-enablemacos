@@ -159,6 +159,8 @@ bounded /usr/bin/codesign --verify "-R=$requirement" "$new_app"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.1.2' "$old_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 1.1.2' "$old_app/Contents/Info.plist"
 bounded /usr/bin/codesign --force --sign "$identity" --keychain "$smoke_keychain" --timestamp=none "$old_app" >"$smoke_diagnostics" 2>&1
+mkdir -p "$smoke_tmp/native-installed"
+/usr/bin/ditto "$old_app" "$smoke_tmp/native-installed/Renamed WLSAPlus.app"
 mark 'creating the signed native update fixture'
 archive="$smoke_tmp/WLSAPlus-$version-macOS-universal.zip"
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$new_app" "$archive"

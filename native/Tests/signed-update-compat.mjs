@@ -67,9 +67,10 @@ async function deadPID() {
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('PID fixture failed'))); });
   return child.pid;
 }
-async function killOnlyThrowawayNative() {
+async function killOnlyThrowawayNative(bundle = target) {
   // CI-only cleanup. The unique absolute throwaway executable path narrows pgrep.
-  const executable = path.join(target, 'Contents', 'MacOS', 'WLSAPlus');
+  assert.ok(within(temporary, bundle));
+  const executable = path.join(bundle, 'Contents', 'MacOS', 'WLSAPlus');
   let stdout;
   try { ({ stdout } = await exec('/usr/bin/pgrep', ['-f', executable])); } catch (error) { if (error.code === 1) return; throw error; }
   for (const value of stdout.trim().split(/\s+/)) {
@@ -174,6 +175,32 @@ try {
     await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', target]);
     await exec('/usr/bin/codesign', ['--verify', `-R=${config.CODESIGN_REQUIREMENT}`, target]);
     console.log('PASS unchanged original shell helper: writable throwaway swap, native verify-only startup, normal marker, helper updated outcome');
+
+    // Exercise the replacement installer too, through its production CLI. Its
+    // target and backup remain inside our throwaway directory; only its stage
+    // and marker use the exact path validated by the application at startup.
+    const nativeTarget = path.join(temporary, 'native-installed', 'Renamed WLSAPlus.app');
+    const nativeExecutable = path.join(nativeTarget, 'Contents', 'MacOS', 'WLSAPlus');
+    assert.ok(within(temporary, await fs.realpath(nativeTarget)));
+    assert.equal((await exec('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', path.join(nativeTarget, 'Contents', 'Info.plist')])).stdout.trim(), '1.1.2');
+    const nativeStage = path.join(markerDirectory, 'native-unpacked', 'WLSAPlus.app');
+    await fs.mkdir(path.dirname(nativeStage));
+    await exec('/usr/bin/ditto', [path.join(temporary, 'package', 'WLSAPlus.app'), nativeStage]);
+    await fs.rm(marker);
+    const nativeResult = path.join(normalSupport, 'updates', 'install-result.json');
+    assert.ok(await absent(nativeResult), 'Never overwrite an existing installer result');
+    const failedVersions = path.join(normalSupport, 'updates', 'failed-versions.json');
+    const previousFailures = (await absent(failedVersions)) ? null : await fs.readFile(failedVersions);
+    await exec(nativeExecutable, ['--native-installer', String(await deadPID()), nativeTarget, nativeStage, marker, version, 'quit'], { timeout: 110_000 });
+    assert.equal((await exec('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', path.join(nativeTarget, 'Contents', 'Info.plist')])).stdout.trim(), version);
+    await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', nativeTarget]);
+    await exec('/usr/bin/codesign', ['--verify', `-R=${config.CODESIGN_REQUIREMENT}`, nativeTarget]);
+    assert.ok((await fs.readFile(marker, 'utf8')).trim().length > 0, 'Production native installer must observe native startup acknowledgment');
+    assert.deepEqual((await fs.readdir(path.dirname(nativeTarget))).sort(), ['Renamed WLSAPlus.app'], 'Successful native installer must remove its backup and preparation copy');
+    assert.ok(await absent(nativeResult), 'Successful native installer must not report an error');
+    if (previousFailures === null) assert.ok(await absent(failedVersions));
+    else assert.deepEqual(await fs.readFile(failedVersions), previousFailures, 'Successful install must preserve the blacklist');
+    console.log('PASS production native installer: signed 1.1.2 to 2.0.0, renamed throwaway app, swap, native startup acknowledgment and backup cleanup');
   } else {
     console.log('SKIP original shell-helper launch: WLSAPLUS_NATIVE_UPDATE_LAUNCH_SMOKE=1 is not enabled (staging/trust smoke passed)');
   }
@@ -191,6 +218,7 @@ try {
   if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   if (process.env.WLSAPLUS_NATIVE_UPDATE_LAUNCH_SMOKE === '1') {
     await killOnlyThrowawayNative();
+    await killOnlyThrowawayNative(path.join(temporary, 'native-installed', 'Renamed WLSAPlus.app'));
     // Remove only the unique marker directory created above; never remove or
     // rewrite native state, cookies, other stages, or existing parent directories.
     if (touchedNormalDirectories.includes(markerDirectory)) await fs.rm(markerDirectory, { recursive: true });

@@ -17,9 +17,12 @@ import Darwin
     private(set) var smokeHelperReason: String?
     private(set) var smokeHelperCounters = [String: Int]()
     private(set) var smokeNetworkValidation: String?
+    private(set) var smokeNetworkSetup: String?
+    private(set) var smokeNetworkFlags = [String]()
+    private(set) var smokeNetworkInterfaceClass: String?
     #endif
     private let sessionURL: URL
-    private(set) var status: [String: Any] = ["state": "disconnected", "connected": false]
+    private(set) var status: [String: Any] = ["state": "disconnected", "connected": false, "canDisconnect": false]
     var onChange: (([String: Any]) -> Void)?
 
     init(store: LocalState) {
@@ -29,7 +32,7 @@ import Darwin
         // helper. It is never part of the state returned to JavaScript.
         if let saved = try? VPNHelperConfiguration.readPrivate(sessionURL, privileged: false) {
             configuration = saved
-            status = ["state": "recovering", "connected": false, "message": "Recovering the previous VPN session."]
+            status = ["state": "recovering", "connected": false, "canDisconnect": true, "message": "Recovering the previous VPN session."]
             Task { [weak self] in
                 guard let self else { return }
                 do { _ = try await self.disconnect() }
@@ -58,6 +61,7 @@ import Darwin
         smokeHelperStage = nil
         smokeHelperReason = nil; smokeHelperCounters.removeAll()
         smokeNetworkValidation = nil
+        smokeNetworkSetup = nil; smokeNetworkFlags = []; smokeNetworkInterfaceClass = nil
         #endif
         defer { busy = false; operation = "" }
         if catalog.isEmpty { _ = try await nodes() }
@@ -236,6 +240,16 @@ import Darwin
            ["setup", "physical-network", "active-plan", "routed-fetch", "proxy-health", "proxy-escape", "tun-read", "tun-write", "unclassified"].contains(reason) { smokeHelperReason = reason }
         if let validation = value["networkValidation"] as? String,
            ["transaction", "owned-bypass", "capture-ipv4", "capture-ipv6", "pinned-bypass", "dns"].contains(validation) { smokeNetworkValidation = validation }
+        if let setup = value["networkSetup"] as? String {
+            let plain = ["storage", "snapshot-default", "snapshot-host", "snapshot-host-classify", "snapshot-gateway", "snapshot-conflict", "snapshot-dns", "persist", "dns-set", "committed"]
+            let commands = ["bypass", "capture-ipv4", "capture-ipv6"].flatMap { prefix in ["add-command", "clone-check", "clone-remove", "clone-retry", "readback"].map { prefix + "-" + $0 } }
+            if (plain + commands).contains(setup) { smokeNetworkSetup = setup }
+        }
+        if let flags = value["networkSetupFlags"] as? [String] {
+            let allowed = Set(["UP", "GATEWAY", "HOST", "DONE", "STATIC", "WASCLONED", "CLONING", "PRCLONING", "IFSCOPE", "IFREF", "PROTO1", "PROTO2", "PROTO3", "DYNAMIC", "MODIFIED", "REJECT", "BLACKHOLE", "LOCAL", "LLINFO", "ROUTER", "GLOBAL"])
+            smokeNetworkFlags = flags.filter { allowed.contains($0) }.sorted()
+        }
+        if let name = value["networkSetupInterfaceClass"] as? String, ["physical", "tunnel", "loopback", "missing"].contains(name) { smokeNetworkInterfaceClass = name }
         if let counters = value["counters"] as? [String: Any] {
             for key in ["tun-read", "tun-handled", "tun-rejected", "tun-write", "open-tcp", "open-udp", "proxy-ready", "proxy-error", "proxy-auth-error", "to-proxy-bytes", "from-proxy-bytes", "to-proxy-tcp-bytes", "from-proxy-tcp-bytes"] {
                 if let number = counters[key] as? NSNumber, (0...1_000_000_000).contains(number.intValue) { smokeHelperCounters[key] = number.intValue }
@@ -251,7 +265,11 @@ import Darwin
             return item
         }
     }
-    private func publish(_ next: [String: Any]) { status = next; onChange?(next) }
+    private func publish(_ next: [String: Any]) {
+        var value = next
+        value["canDisconnect"] = configuration != nil || next["cleanupRequired"] as? Bool == true
+        status = value; onChange?(value)
+    }
     private func publicStatus(_ helper: [String: Any], node: ProxyNode) -> [String: Any] {
         var value: [String: Any] = ["state": "connected", "connected": true, "nodeId": node.id, "nodeName": node.name,
                                   "connectedAt": helper["connectedAt"] ?? ISO8601DateFormatter().string(from: Date())]

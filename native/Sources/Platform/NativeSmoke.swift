@@ -116,6 +116,9 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
                     if let helperStage = service.smokeHelperStage { stage("helper-stage \(helperStage)") }
                     if let reason = service.smokeHelperReason { stage("helper-reason \(reason)") }
                     if let validation = service.smokeNetworkValidation { stage("network-validation \(validation)") }
+                    if let setup = service.smokeNetworkSetup { stage("network-setup \(setup)") }
+                    if !service.smokeNetworkFlags.isEmpty { stage("network-flags \(service.smokeNetworkFlags.joined(separator: ","))") }
+                    if let name = service.smokeNetworkInterfaceClass { stage("network-interface-class \(name)") }
                     let counters = service.smokeHelperCounters
                     if !counters.isEmpty { stage("helper-counters \(counters.keys.sorted().map { "\($0):\(counters[$0]!)" }.joined(separator: ","))") }
                 }
