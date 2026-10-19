@@ -2,7 +2,7 @@ name: Native macOS checks
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['native/**', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
+    paths: ['native/Sources/**', 'native/Resources/**', 'native/Tests/**', 'native/scripts/**', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
 concurrency:
   group: native-check-${{ github.ref }}
   cancel-in-progress: true
@@ -23,6 +23,7 @@ jobs:
         working-directory: ${{ steps.location.outputs.dir }}
         run: bash scripts/test.sh
       - name: Build both Mac architectures
+        id: build
         working-directory: ${{ steps.location.outputs.dir }}
         run: bash scripts/build.sh
       - name: Startup health check
@@ -38,6 +39,16 @@ jobs:
       - name: Native VPN and network restoration
         working-directory: ${{ steps.location.outputs.dir }}
         run: bash scripts/vpn-smoke.sh
+      - name: Signed legacy updater compatibility
+        if: always() && steps.build.outcome == 'success'
+        working-directory: ${{ steps.location.outputs.dir }}
+        env:
+          WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE: '1'
+          WLSAPLUS_NATIVE_UPDATE_LAUNCH_SMOKE: '1'
+          WLSAPLUS_CODESIGN_P12_BASE64: ${{ secrets.WLSAPLUS_CODESIGN_P12_BASE64 }}
+          WLSAPLUS_CODESIGN_P12_PASSWORD: ${{ secrets.WLSAPLUS_CODESIGN_P12_PASSWORD }}
+          WLSAPLUS_UPDATE_ED25519_KEY: ${{ secrets.WLSAPLUS_UPDATE_ED25519_KEY }}
+        run: bash scripts/signed-update-compat.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

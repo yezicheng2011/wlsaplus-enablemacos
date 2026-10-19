@@ -167,6 +167,10 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
                 let result: (status: Int32, output: String)
                 do { result = try smokeReadOnlyResult("/sbin/route", ["-n", "get", family, target]) }
                 catch { throw Failure.blocked("route snapshot command launch") }
+                if NetworkPlan.isMissingRouteDiagnostic(result.output) {
+                    stage("snapshot-route \(label) exit-\(result.status) missing")
+                    continue
+                }
                 if result.status == 0 {
                     var identity = [String: String]()
                     // Exclude mutable counters/timers; preserve the complete
@@ -183,8 +187,7 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
                     routes[key] = identity
                 } else {
                     let text = result.output.lowercased()
-                    let category = text.contains("usage:") ? "usage" :
-                        (["not in table", "not found", "unreachable", "no route"].contains(where: text.contains) ? "missing" : "failure")
+                    let category = text.contains("usage:") ? "usage" : "failure"
                     stage("snapshot-route \(label) exit-\(result.status) \(category)")
                 }
             }

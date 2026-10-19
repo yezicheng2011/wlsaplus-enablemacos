@@ -18,6 +18,8 @@ open out/WLSAPlus.app
 
 Linux 可以运行 C 数据包引擎、JavaScript 与 Swift Core 测试。Linux 的 Swift 语法检查不验证 Apple SDK 类型或系统行为，不能代替 macOS 构建。
 
+Mac CI 已通过双架构构建和实际 WebKit 界面、原生桥接及课表解析器的启动检查。真实隧道测试与正式签名更新测试的结果须单独核对，构建成功不代表这些场景已验收。
+
 ## VPN
 
 继续从原有订阅地址读取节点，支持该订阅声明的 Shadowsocks AES-256-GCM、VMess 旧版与 AEAD 认证，以及 TCP、TLS、WebSocket 和 UDP。加密调用 CryptoKit/CommonCrypto，网络调用 Network.framework，隧道使用系统 utun。协议与数据包处理代码为本工程新写，没有链接或分发 mihomo、gVisor、sing-box、WireGuard 等实现。
@@ -42,9 +44,11 @@ WLSAPLUS_VERSION=2.0.0-beta.1 bash scripts/release.sh
 
 需要先导入原固定代码签名证书，并设置 `WLSAPLUS_UPDATE_ED25519_KEY`。输出文件名和清单格式保持旧版兼容。`release.sh` 只在本地准备产物；仓库根目录的发布工作流取代原 Electron 产物流程，稳定版生成草稿，测试版更新现有 beta 通道。稳定草稿验收后发布时须选中「Set as the latest release」（CLI：`gh release edit v版本 --draft=false --latest`），旧版和新版的稳定更新按钮才能发现它。必须在真实 Mac 上验证旧版 1.1.2 → 新版、下次原生版本升级、取消授权、非可写 Applications 目录、断点续传与强制回滚。
 
+`scripts/signed-update-compat.sh` 是可选的签名兼容测试。Mac CI 在原 secrets 可用时，用临时钥匙串签名测试副本、生成原公钥可验证的清单，再调用原仓库未修改的更新器检查下载、解包、签名、架构及就绪状态；托管 CI 还运行原安装辅助脚本并检查新原生应用的启动确认。测试不发布产物，使用的是原更新器模块和临时目标，不能替代完整旧 Electron 应用的升级验收。单独运行本目录时需将 `WLSAPLUS_LEGACY_ELECTRON_DIR` 指向原仓库的 `electron` 目录，并显式设置 `WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`。
+
 ## 功能与数据
 
-PowerSchool 登录使用原服务器公开的 HTML/JSON 接口，密码只存入系统 Keychain，网页解析通过 inert DOM 执行，不运行服务器脚本。课表、成绩、作业、考勤、任务与设置保存在本机。通知以真实时间在上课前五分钟触发，不受显示时间模拟影响。
+PowerSchool 登录使用原服务器公开的 HTML/JSON 接口，密码只存入系统 Keychain，网页解析通过 inert DOM 执行，不运行服务器脚本。保存账号后在启动和每 15 分钟自动同步，后台失败保留缓存，手动操作优先。可识别的假期空课表不会阻止成绩刷新。课表、成绩、作业、考勤、任务与设置保存在本机。通知以真实时间在上课前五分钟触发，不受显示时间模拟影响。
 
 论坛使用隔离的 WebKit 数据存储与主机白名单，支持主题/嵌入协议，以及仅转交允许的 PowerSchool 会话 Cookie 的一次性 SSO。密码不会转交论坛。翻译继续使用现有在线服务接口。校园地图重新绘制为楼宇示意图，包含楼宇资料和教室楼号定位，不声称是精确测绘的楼层平面图。
 

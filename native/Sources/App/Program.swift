@@ -104,7 +104,8 @@ import WebKit
                 window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
             }
             updater.begin()
-            Task { await services.fetchNotice(); try? await services.scheduleReminders() }
+            Task { await services.fetchNotice() }
+            Task { try? await services.scheduleReminders() }
         } catch { present(error); quitApproved = true; NSApp.terminate(nil) }
     }
     private func createMenu() {

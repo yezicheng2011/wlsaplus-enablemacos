@@ -141,6 +141,7 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
     }
     func sync() async throws -> [String: Any] {
         cancelAutomaticAttempt()
+        guard active == nil else { throw AppError("A school connection is already in progress.") }
         guard let password = try PasswordVault.read(), let base = account["baseURL"], let user = account["username"] else { throw AppError("Connect to PowerSchool first.") }
         return try await login(["baseURL": base, "username": user, "password": password])
     }

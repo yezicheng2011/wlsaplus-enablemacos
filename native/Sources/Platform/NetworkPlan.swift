@@ -281,12 +281,24 @@ final class NetworkPlan {
     }
     private static func lookup(family: Int, target: String) throws -> RouteInfo? {
         let result = try executeResult("/sbin/route", ["-n", "get", family == 4 ? "-inet" : "-inet6", target])
-        if result.status != 0 {
-            // Missing routes are expected on networks without one address family.
-            if result.output.contains("not in table") || result.output.contains("not found") || result.output.contains("Network is unreachable") || result.output.contains("No route to host") { return nil }
-            throw AppError("Could not inspect the existing routing table.")
+        return try parseLookup(status: result.status, output: result.output)
+    }
+    /// Darwin route(8) can report a missing IPv6 route while returning exit 0.
+    /// The native smoke snapshot shares this exact diagnostic classification.
+    static func isMissingRouteDiagnostic(_ output: String) -> Bool {
+        let text = output.lowercased()
+        return ["not in table", "not found", "route has not been found", "network is unreachable", "no route to host"]
+            .contains(where: text.contains)
+    }
+    private static func parseLookup(status: Int32, output: String) throws -> RouteInfo? {
+        if isMissingRouteDiagnostic(output) { return nil }
+        guard status == 0 else { throw AppError("Could not inspect the existing routing table.") }
+        let value = RouteInfo(fields: fields(output))
+        guard validInterface(value.interface), value.fields["destination"]?.isEmpty == false,
+              value.fields["flags"]?.isEmpty == false else {
+            throw AppError("The routing utility returned an unknown route response.")
         }
-        return RouteInfo(fields: fields(result.output))
+        return value
     }
     private static func fields(_ text: String) -> [String: String] {
         var result: [String: String] = [:]
@@ -390,6 +402,23 @@ final class NetworkPlan {
         try expect(owns(physical, route: host))
         try expect(!owns(RouteInfo(fields: physical.fields.merging(["gateway": "192.0.2.2"]) { _, new in new }), route: host))
         try expect(!owns(RouteInfo(fields: physical.fields.merging(["flags": "<UP,GATEWAY,DONE,STATIC,PROTO2>"]) { _, new in new }), route: host))
+        // Missing IPv6 defaults are normal on IPv4-only networks. Darwin does
+        // not consistently communicate absence through its process exit code.
+        for status: Int32 in [0, 1] {
+            for diagnostic in ["route: route has not been found\n", "route: writing to routing socket: not in table\n",
+                               "route: Network is unreachable\n", "route: No route to host\n"] {
+                try expect(try parseLookup(status: status, output: diagnostic) == nil)
+            }
+        }
+        let parsed = try parseLookup(status: 0, output: "destination: default\ngateway: 192.0.2.1\ninterface: en0\nflags: <UP,GATEWAY,DONE,STATIC>\n")
+        try expect(parsed?.interface == "en0" && parsed?.gateway == "192.0.2.1")
+        for (status, output): (Int32, String) in [(0, ""), (0, "route: permission denied\n"),
+                                                  (0, "route: unexpected response\n"),
+                                                  (1, "route: permission denied\n")] {
+            var accepted = false
+            do { _ = try parseLookup(status: status, output: output); accepted = true } catch { }
+            try expect(!accepted)
+        }
         print("network route parser tests passed without system mutation")
     }
     #endif

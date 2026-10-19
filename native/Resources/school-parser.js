@@ -38,14 +38,18 @@
   }
   function schedule(week, matrix) {
     const matrixDoc = documentFrom(matrix), weekDoc = documentFrom(week), courses = [], sessions = [];
+    const weeklyTable = weekDoc.querySelector('table#tableStudentSchedMatrix');
+    if (!weeklyTable || weekDoc.querySelector('input[name="account"]') || matrixDoc.querySelector('input[name="account"]')) throw Error('The school returned no supported weekly schedule.');
+    const scheduleCells = [...weeklyTable.querySelectorAll('[name^="attCell"]')];
+    const classCells = scheduleCells.filter(cell => text(cell) && [...cell.classList].some(name => name.startsWith('scheduleClass')));
     matrixDoc.querySelectorAll('#schedMatrixTable td').forEach((cell, i) => {
       const name = text(cell.querySelector('.sched-course-name')); if (!name) return;
       const course = { id: text(cell.querySelector('.sched-section-number')) || `matrix-${i}`, name,
         teacher: text(cell.querySelector('.sched-teacher-name')), room: text(cell.querySelector('.sched-room')).replace(/^Room:\s*/iu,''), meetingPattern: text(cell.querySelector('.sched-term')) };
       if (!courses.some(c => c.id === course.id)) courses.push(course);
     });
-    weekDoc.querySelectorAll('#tableStudentSchedMatrix [name^="attCell"]').forEach((cell, i) => {
-      if (![...cell.classList].some(c => c.startsWith('scheduleClass'))) return;
+    scheduleCells.forEach((cell, i) => {
+      if (![...cell.classList].some(name => name.startsWith('scheduleClass'))) return;
       const code = /\d{8}/u.exec(cell.getAttribute('name') || '')?.[0], content = lines(cell);
       const time = content.findIndex(s => /\d:\d{2}.*[-–—].*\d:\d{2}/u.test(s));
       if (!code || time < 1) return;
@@ -54,7 +58,9 @@
       const course = courses.find(c => c.name.toLocaleLowerCase() === content[0].toLocaleLowerCase());
       sessions.push({ id: `${code}.${i}`, title: content[0], courseId: course?.id ?? null, teacher: course?.teacher || content[1] || '', room: course?.room || content[2] || '', start, end });
     });
-    if (!sessions.length) throw Error('The school returned no supported weekly schedule.');
+    // A recognized weekly table with no class entries is a legitimate holiday/empty week.
+    // Class entries with no parseable sessions remain a contract error, rather than a false empty result.
+    if (classCells.length && !sessions.length) throw Error('The school returned no supported weekly schedule.');
     return { courses, schedule: sessions.sort((a,b) => a.start.localeCompare(b.start)) };
   }
   function progress(html, attendanceHTML) {
