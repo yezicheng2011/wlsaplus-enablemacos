@@ -208,6 +208,39 @@ import Darwin
 
     #if NATIVE_INTEGRATION_TESTS
     /// Test binary only. Node IDs stay inside native code and never enter logs.
+
+    func softProbeCandidates(kind: String) -> [String] {
+        switch kind {
+        case "ss":
+            return catalog.filter {
+                ["ss", "shadowsocks"].contains($0.type.lowercased()) &&
+                ($0.cipher ?? "").lowercased() == "aes-256-gcm" &&
+                $0.password != nil
+            }.prefix(2).map(\.id)
+        case "ws":
+            return catalog.filter {
+                $0.type.lowercased() == "vmess" &&
+                ($0.network ?? "tcp").lowercased() == "ws" &&
+                UUID(uuidString: $0.uuid ?? "") != nil
+            }.prefix(2).map(\.id)
+        default: return []
+        }
+    }
+    func softProbe(nodeId: String, timeout: TimeInterval) async throws -> Double {
+        guard let node = catalog.first(where: { $0.id == nodeId }) else {
+            throw AppError("Soft probe node is unavailable.")
+        }
+        var attempt = node
+        if attempt.tls == true, attempt.serverName?.isEmpty != false {
+            attempt.serverName = node.server
+        }
+        if (attempt.network ?? "tcp").lowercased() == "ws", attempt.wsHost?.isEmpty != false {
+            let host = node.server.contains(":") ? "[\(node.server)]" : node.server
+            attempt.wsHost = "\(host):\(node.port)"
+        }
+        return try await VPNProxyProbe.test(node: attempt, timeout: timeout)
+    }
+
     func smokeCandidates() -> [String] {
         let candidates = catalog.filter {
             $0.type.lowercased() == "vmess" && ($0.alterId ?? 0) > 0 &&

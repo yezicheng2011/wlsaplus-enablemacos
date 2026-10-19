@@ -756,25 +756,8 @@ private final class VPNRuntime {
 
     private static func monotonicMilliseconds() -> UInt64 { DispatchTime.now().uptimeNanoseconds / 1_000_000 }
     private static func resolve(_ host: String, port: UInt16) throws -> [String] {
-        var hints = addrinfo()
-        hints.ai_family = AF_UNSPEC; hints.ai_socktype = Int32(SOCK_STREAM); hints.ai_protocol = Int32(IPPROTO_TCP)
-        var answer: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, String(port), &hints, &answer) == 0, let first = answer else { throw AppError("The VPN server name could not be resolved.") }
-        defer { freeaddrinfo(first) }
-        var result = [String](); var cursor: UnsafeMutablePointer<addrinfo>? = first
-        while let current = cursor {
-            var text = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            let entry = current.pointee
-            if (entry.ai_family == AF_INET || entry.ai_family == AF_INET6),
-               getnameinfo(entry.ai_addr, entry.ai_addrlen, &text, socklen_t(text.count), nil, 0, NI_NUMERICHOST) == 0 {
-                let address = String(cString: text)
-                if !address.contains("%"), !result.contains(address) { result.append(address) }
-            }
-            cursor = entry.ai_next
-        }
-        result.sort { !$0.contains(":") && $1.contains(":") }
-        guard !result.isEmpty, result.count <= 64 else { throw AppError("The VPN server has no usable IP endpoint.") }
-        return result
+        do { return try ProxyEndpointResolver.addresses(host: host, port: port) }
+        catch { throw AppError("The VPN server name could not be resolved.") }
     }
     private static func defaultFingerprint() throws -> String {
         var parts = [String]()

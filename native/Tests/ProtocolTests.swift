@@ -16,6 +16,7 @@ enum ProtocolTests {
         try vmessFrames()
         try websocketFrames()
         try configurationValidation()
+        try endpointResolver()
     }
     private static func check(_ condition: Bool, _ message: String) throws {
         if !condition { throw Failure(description: message) }
@@ -180,5 +181,13 @@ enum ProtocolTests {
         try fails("Too large alterId") { try node.validate() }
         node.alterId = 0; node.cipher = "unknown"
         try fails("Unsupported VMess cipher") { try node.validate() }
+    }
+
+    private static func endpointResolver() throws {
+        try check(ProxyEndpointResolver.literalAddress("192.0.2.10") == "192.0.2.10", "IPv4 literal")
+        try check(ProxyEndpointResolver.literalAddress("2001:db8::1") == "2001:db8::1", "IPv6 literal")
+        try check(ProxyEndpointResolver.literalAddress("proxy.example.test") == nil, "hostname is not literal")
+        let ordered = try ProxyEndpointResolver.addresses(host: "127.0.0.1", port: 443)
+        try check(ordered == ["127.0.0.1"], "loopback resolve stays IPv4 literal")
     }
 }

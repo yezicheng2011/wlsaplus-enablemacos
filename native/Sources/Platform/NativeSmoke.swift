@@ -154,6 +154,10 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         switch outcome {
         case .success:
             stage("pass VMess native utun TCP UDP DNS rollback")
+            // Soft authenticated probes for SS / WS. Failures are logged only; they must
+            // not fail the VMess smoke after the dial failover fix lands.
+            await softProbe(service, kind: "ss")
+            await softProbe(service, kind: "ws")
         case .failure(let error): throw error
         }
     }
@@ -165,6 +169,22 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
             throw Failure.assertion("disconnected state")
         }
     }
+
+    private static func softProbe(_ service: VPNService, kind: String) async {
+        let nodes = service.softProbeCandidates(kind: kind)
+        guard let id = nodes.first else {
+            stage("soft-probe \(kind) skipped-no-candidate")
+            return
+        }
+        stage("soft-probe \(kind)")
+        do {
+            _ = try await service.softProbe(nodeId: id, timeout: 16)
+            stage("soft-probe \(kind) pass")
+        } catch {
+            stage("soft-probe \(kind) failed")
+        }
+    }
+
     private nonisolated static func stage(_ value: String) {
         print("native-smoke: \(value)")
         fflush(stdout)

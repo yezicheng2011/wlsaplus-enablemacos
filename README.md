@@ -162,8 +162,12 @@ Passwords and cookies are redacted, but captures may still contain personal data
 
 ## 许可证 · License
 
-源代码以 **GNU GPL v3** 发布，见 [`LICENSE`](LICENSE)。第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。  
-Source code is released under **GNU GPL v3** ([`LICENSE`](LICENSE)). Third-party notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+源代码以 **Apache License 2.0** 发布，见 [`LICENSE`](LICENSE) 与 [`NOTICE`](NOTICE)。第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。  
+Source code is released under **Apache License 2.0** ([`LICENSE`](LICENSE), [`NOTICE`](NOTICE)). Third-party notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 原生工程的来源与权利边界说明见 [`native/PROVENANCE.md`](native/PROVENANCE.md)。历史 Electron 树中仍可能引用随旧版分发的组件许可证（例如 [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)）；**原生应用不再分发该内核**。  
 Provenance for the native tree: [`native/PROVENANCE.md`](native/PROVENANCE.md). The legacy Electron tree may still reference licenses for components that shipped with older builds (e.g. [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)); **the native app does not redistribute that core**.
+
+## License
+
+Apache License 2.0. See `LICENSE`. The native VPN/packet stack is original Swift/C and is not derived from mihomo, clash, sing-box, or gVisor.
