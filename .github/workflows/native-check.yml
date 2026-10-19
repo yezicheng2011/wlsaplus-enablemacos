@@ -40,6 +40,7 @@ jobs:
         working-directory: ${{ steps.location.outputs.dir }}
         run: bash scripts/vpn-smoke.sh
       - name: Signed legacy updater compatibility
+        timeout-minutes: 3
         if: always() && steps.build.outcome == 'success'
         working-directory: ${{ steps.location.outputs.dir }}
         env:
