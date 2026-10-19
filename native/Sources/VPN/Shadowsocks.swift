@@ -55,6 +55,9 @@ final class ShadowsocksSession {
     private var headerSent = false
 
     init(password: String, destinationHost: String, destinationPort: UInt16, udp: Bool) throws {
+        guard !password.isEmpty else {
+            throw ProxyError.configuration("Shadowsocks requires a non-empty password")
+        }
         master = ShadowsocksKeys.master(password: password)
         destination = try ProxyAddress.socks(destinationHost, destinationPort)
         self.udp = udp

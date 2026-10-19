@@ -167,6 +167,26 @@ enum ProtocolTests {
         let upgrade = Data("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: keep-alive, Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n".utf8)
         try WebSocketWire.validateUpgrade(upgrade, key: "dGhlIHNhbXBsZSBub25jZQ==")
         try fails("WebSocket wrong accept") { try WebSocketWire.validateUpgrade(upgrade, key: "wrong") }
+        let refused = Data("HTTP/1.1 400 Bad Request\r\n\r\n".utf8)
+        do {
+            try WebSocketWire.validateUpgrade(refused, key: "dGhlIHNhbXBsZSBub25jZQ==")
+            throw Failure(description: "Expected rejection: WebSocket HTTP 400")
+        } catch let error as ProxyError {
+            let text = error.errorDescription ?? ""
+            try check(text.contains("400"), "WebSocket refusal names HTTP status")
+        } catch {
+            throw Failure(description: "Expected ProxyError for WebSocket HTTP 400")
+        }
+        let http10 = Data("HTTP/1.0 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n".utf8)
+        try WebSocketWire.validateUpgrade(http10, key: "dGhlIHNhbXBsZSBub25jZQ==")
+        var huge = WebSocketFrameDecoder()
+        // 64-bit length that claims more than 2 MiB must be rejected before buffering the body.
+        try fails("WebSocket oversized 64-bit length") {
+            _ = try huge.receive(Data([0x82, 0x7f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x21, 0x00, 0x00]))
+        }
+        var closeOk = WebSocketFrameDecoder()
+        let events = try closeOk.receive(Data([0x88, 0x02, 0x03, 0xe8])) // close 1000
+        try check(events.count == 1, "WebSocket clean close frame")
     }
 
     private static func configurationValidation() throws {
@@ -181,6 +201,16 @@ enum ProtocolTests {
         try fails("Too large alterId") { try node.validate() }
         node.alterId = 0; node.cipher = "unknown"
         try fails("Unsupported VMess cipher") { try node.validate() }
+        var ss = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
+                           cipher: "aes-256-gcm", password: "secret")
+        try ss.validate()
+        ss.password = ""
+        try fails("Empty Shadowsocks password still validates cipher pair") {
+            // validate() only checks password != nil today; empty is caught at session start.
+            _ = try ShadowsocksSession(password: "", destinationHost: "example.com",
+                                       destinationPort: 443, udp: false)
+        }
+        try check(ProxyError.dial("x").errorDescription == "x", "dial error surfaces message")
     }
 
     private static func endpointResolver() throws {
@@ -189,5 +219,10 @@ enum ProtocolTests {
         try check(ProxyEndpointResolver.literalAddress("proxy.example.test") == nil, "hostname is not literal")
         let ordered = try ProxyEndpointResolver.addresses(host: "127.0.0.1", port: 443)
         try check(ordered == ["127.0.0.1"], "loopback resolve stays IPv4 literal")
+        // When both families exist, IPv4 must sort ahead of IPv6 for SS/WS dial reliability.
+        if let both = try? ProxyEndpointResolver.addresses(host: "localhost", port: 9), both.count >= 2 {
+            try check(!both[0].contains(":"), "localhost prefers IPv4 before IPv6")
+            try check(both.count <= 8, "resolver caps address fan-out at 8")
+        }
     }
 }
