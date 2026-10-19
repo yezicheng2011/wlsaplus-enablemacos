@@ -1,6 +1,6 @@
 # WLSAPlus 原生重写
 
-这是独立编写的新工程，使用 macOS 13+ 系统框架与 Apple 编译工具。当前处于验证阶段，不能把通过离线测试等同于完成了所有真实 Mac 场景验收。
+这是 **当前支持的 macOS 产品路径**：独立编写的原生工程，使用 macOS 13+ 系统框架与 Apple 编译工具。与 Windows / Android 版本不共用代码与运行时；VPN / 网络栈亦为全新原生实现，不链接或分发 mihomo、gVisor、sing-box、WireGuard 等第三方内核。正式安装包与应用内更新从本目录构建发布（见仓库根目录 release workflow）。当前仍有列明场景的验证限制，不能把通过离线或 CI 抽测等同于完成了所有真实 Mac 场景验收。
 
 界面保持 Home、Schedule、Progress、Forum、Tools、Settings 的功能入口。WebKit 仅显示本地 HTML/CSS/JavaScript；账号、文件、网络、通知、VPN 与更新由 Swift/C 实现。没有 npm、Swift Package、第三方 VPN 内核或第三方运行时依赖。
 

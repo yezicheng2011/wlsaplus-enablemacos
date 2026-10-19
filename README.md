@@ -1,28 +1,39 @@
-> **原生重写分支**：新应用源码、构建方法、更新兼容和验收限制见 [native/README.md](native/README.md)，代码来源见 [native/PROVENANCE.md](native/PROVENANCE.md)。
->
-> 在 macOS 上构建新版：`cd native && bash scripts/build.sh`。新版使用 Swift/C、系统 AppKit/WebKit/网络与加密接口，沿用现有订阅、节点和更新信任配置。根目录发布工作流已改为构建原生应用；`npm` 和 Electron 构建命令仍指向历史实现。
->
-> 当前是待验收的重写版本，尚未发布。下面的 1.x 文档和原实现保留作迁移、更新兼容测试及历史权利记录，新应用不打包旧内核或旧运行时。
-
----
+# WLSAPlus · macOS
 
 <p align="center">
   <img src="public/icons/app-icon.svg" width="96" alt="WLSAPlus">
 </p>
 
-<h1 align="center">WLSAPlus · macOS</h1>
-
 <p align="center">
   面向 WLSA 学生的本地优先课表与学业工具 · A local-first schedule &amp; study app for WLSA students<br>
-  <b>macOS 13+ · Universal（Intel x86_64 + Apple 芯片 arm64）</b> · Electron + Angular Material · GPL-3.0
+  <b>macOS 13+ · Universal（Intel x86_64 + Apple silicon arm64）</b> · 原生 Swift / C · Native Swift / C
 </p>
 
 <p align="center">
   <a href="https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest">下载 / Download</a> ·
   <a href="#安装--install">安装 / Install</a> ·
-  <a href="#从源码构建国内镜像--build-from-source-china-mirrors">从源码构建 / Build</a> ·
-  <a href="#开发--development">开发 / Development</a>
+  <a href="#从源码构建--build-from-source">从源码构建 / Build</a> ·
+  <a href="native/README.md">原生工程说明 / Native docs</a>
 </p>
+
+> **当前产品形态 · Current product**  
+> macOS 客户端已完成全面重构，主线为独立原生实现（Swift / C，系统 AppKit、WebKit、Network、CryptoKit 等）。  
+> The macOS client has been fully re-architected as an **independent native** implementation (Swift / C; system AppKit, WebKit, Network, CryptoKit, and related frameworks).  
+>  
+> **与其他平台 · Other platforms**  
+> macOS 版为独立原生实现，与 Windows / Android 版本不共用代码与运行时。  
+> This is an independent native macOS implementation that does not share code or runtime with the Windows or Android editions.  
+>  
+> **网络与 VPN 核心 · Network & VPN core**  
+> VPN / 网络栈亦为全新原生实现（系统 utun + Network.framework + CryptoKit/CommonCrypto），不再使用旧版共用内核（如 mihomo / Clash Meta）或第三方 VPN 运行时。  
+> The VPN and network core have also been rewritten natively (system utun + Network.framework + CryptoKit/CommonCrypto). They no longer use the former shared core (e.g. mihomo / Clash Meta) or a third-party VPN runtime.  
+>  
+> **发布通道 · Releases**  
+> 原生重写已合入 [`main`](https://github.com/yezicheng2011/wlsaplus-enablemacos/tree/main)；正式安装包与应用内更新由 `native/` 构建并发布（见根目录 release workflow）。在新稳定版上线前，[Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest) 上最新公开包仍可能是 1.x Electron 构建。  
+> The native rewrite is on `main`; installers and in-app updates ship from `native/` via the root release workflow. Until a new stable native release is published, the latest public asset on Releases may still be a 1.x Electron build.  
+>  
+> 细节、验收范围与来源记录见 [native/README.md](native/README.md) 与 [native/PROVENANCE.md](native/PROVENANCE.md)。  
+> Details, acceptance scope, and provenance: [native/README.md](native/README.md) and [native/PROVENANCE.md](native/PROVENANCE.md).
 
 ---
 
@@ -32,39 +43,39 @@ WLSAPlus 把 PowerSchool 课表、成绩、考勤、开课提醒、校园工具�
 
 WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, campus tools and the WLSAPlus forum into one native Mac app. Data stays on your Mac, and the last sync is available offline.
 
-> 本仓库仅支持 **macOS**。
-> This fork supports **macOS only**.
+> 本仓库仅提供 **macOS** 客户端；macOS 工程与 Windows / Android 版本相互独立。  
+> This repository ships the **macOS** client only; the macOS codebase is independent of the Windows and Android editions.
 
 ## 功能 · Features
 
 | | 中文 | English |
 |---|---|---|
-| 💬 **WLSAPlus 论坛**（1.0.9 新增） | 论坛内嵌在应用里；已同步 PowerSchool 时**自动登录**（只转交当前会话，密码不出本机，帖子仍匿名）；**浅色/深色跟随应用主题**并即时切换；嵌入模式使用论坛**底部导航**，宽窗口内容居中 | Embedded forum tab; **auto sign-in** with your current PowerSchool session (password never leaves the Mac, posts stay anonymous); **light/dark follows the app theme** live; embed mode with the forum's **bottom navigation** |
+| 💬 **WLSAPlus 论坛** | 论坛内嵌在应用里；已同步 PowerSchool 时**自动登录**（只转交当前会话，密码不出本机，帖子仍匿名）；**浅色/深色跟随应用主题**；嵌入模式使用论坛**底部导航** | Embedded forum; **auto sign-in** with the current PowerSchool session (password never leaves the Mac; posts stay anonymous); **light/dark follows the app theme**; embed mode with the forum **bottom navigation** |
 | 📅 **课表 Schedule** | 从 PowerSchool 同步，本地缓存，离线可看 | Synced from PowerSchool, cached locally, works offline |
 | 📈 **成绩 Progress** | 课程等级、作业分数、考勤 | Course grades, assignment scores, attendance |
 | 🔔 **开课提醒 Reminders** | 开课前约 5 分钟 macOS 通知（可关） | macOS notification ~5 min before class (optional) |
-| 🛡️ **VPN** | 订阅节点选择、延迟测速、全设备隧道、微信连通检测 | Subscription nodes, latency test, full-device tunnel, WeChat reachability check |
+| 🛡️ **VPN** | 订阅节点、延迟测速、全设备隧道；**原生网络栈**（非旧版共用内核） | Subscription nodes, latency test, full-device tunnel; **native network stack** (not the former shared core) |
 | 🧰 **工具 Tools** | 校园地图、翻译、待办 | Campus map, translator, to-dos |
 | 🎨 **外观 Appearance** | 跟随系统 / 浅色 / 深色，多种主题色 | System / light / dark, multiple accent colours |
 
 ## 安装 · Install
 
-**系统要求 / Requirements:** macOS 13 或更新；**universal（通用）构建**，同一个 WLSAPlus.app 同时支持 **Intel（x86_64）与 Apple 芯片（arm64）** Mac。
-macOS 13+; a single **universal** WLSAPlus.app runs natively on **both Intel (x86_64) and Apple-silicon (arm64)** Macs.
+**系统要求 / Requirements:** macOS 13 或更新；**universal（通用）构建**，同一个 `WLSAPlus.app` 同时支持 **Intel（x86_64）与 Apple 芯片（arm64）**。  
+macOS 13+; a single **universal** `WLSAPlus.app` runs on **both Intel (x86_64) and Apple silicon (arm64)**.
 
-1. 到 [Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest) 下载最新版本。
-   Download the latest version from [Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest).
-2. 有 DMG 时：打开 DMG，把 **WLSAPlus** 拖进「应用程序」；有 `安装wlsaplus.command` 时直接双击它一键安装。
-   With a DMG: open it and drag **WLSAPlus** into Applications, or double-click `安装wlsaplus.command` if provided.
-3. 只有构建包 `wlsaplus1.0.9.zip` 时：见下方「从源码构建」。
-   With the build kit `wlsaplus1.0.9.zip`: see *Build from source* below.
+1. 到 [Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest) 下载最新版本。  
+   Download the latest build from [Releases](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest).
+2. 有 DMG 时：打开 DMG，把 **WLSAPlus** 拖进「应用程序」；若带有安装脚本，可按说明一键安装。  
+   With a DMG: open it and drag **WLSAPlus** into Applications, or follow any install script included in the release.
+3. 原生正式包发布后，应用内「检查更新」也会走同一通道。  
+   After a native stable release is published, in-app “Check for updates” uses the same channel.
 
 ### 关于自签名 · About the self-signed build
 
-应用使用 ad-hoc 自签名，**未经过 Apple 公证**。首次打开若提示「无法验证开发者」或「已损坏」：
-The app is ad-hoc self-signed and **not notarized**. If macOS says it "can't be verified" or "is damaged":
+开发与部分发布构建使用 ad-hoc 或项目固定证书签名，**未必经过 Apple 公证**。首次打开若提示「无法验证开发者」或「已损坏」：  
+Dev and some release builds are ad-hoc or project-certificate signed and **may not be notarized**. If macOS says it "can't be verified" or "is damaged":
 
-- 在「应用程序」里对 WLSAPlus **右键 → 打开 → 打开**；或「系统设置 → 隐私与安全性 → 仍要打开」。
+- 在「应用程序」里对 WLSAPlus **右键 → 打开 → 打开**；或「系统设置 → 隐私与安全性 → 仍要打开」。  
   **Right-click → Open** in Applications, or *System Settings → Privacy & Security → Open Anyway*.
 - 或在终端执行 / or run in Terminal:
 
@@ -72,63 +83,65 @@ The app is ad-hoc self-signed and **not notarized**. If macOS says it "can't be 
 sudo xattr -cr /Applications/WLSAPlus.app
 ```
 
-## 从源码构建（国内镜像）· Build from source (China mirrors)
+## 从源码构建 · Build from source
 
-Release 中的 **`wlsaplus1.0.9.zip`** 是一键构建包，解压后包含：
-The **`wlsaplus1.0.9.zip`** build kit in Releases contains:
+### 原生应用（当前支持路径）· Native app (supported path)
 
-| 文件 File | 说明 Description |
-|---|---|
-| `working.command` | 双击即可：安装依赖 → 构建 → 签名 → 解除隔离 · Double-click: install deps → build → sign → unquarantine |
-| `note.pdf` / `note.md` | 中文说明书 · Chinese guide |
-| `wlsaplusformacos/` | 本仓库源码（git 克隆）· This repo (git clone) |
+在安装了 Xcode 命令行工具的 Mac 上：
 
-`working.command` 在全新的 Mac（Intel 或 Apple 芯片，macOS 13+）上会自动：
-On a fresh Mac (Intel or Apple silicon, macOS 13+), `working.command` will:
+```bash
+cd native
+bash scripts/test.sh
+bash scripts/build.sh
+open out/WLSAPlus.app
+```
 
-1. 检查/安装 Xcode 命令行工具（Apple 官方）· Check / install Xcode Command Line Tools (from Apple)
-2. 从 **Gitee**（`gitee.com/mirrors/nvm`，固定版本）安装 nvm，从 **npmmirror** 安装 Node.js 22 · nvm (pinned tag) via **Gitee**, Node.js 22 via **npmmirror**
-3. 仅当 nvm 失败时才安装 Homebrew（**清华 TUNA**，失败换 **中科大 USTC**）· Homebrew only as a fallback if nvm fails (**TUNA**, then **USTC**)
-4. npm / Electron 均走 **npmmirror** · npm and Electron downloads via **npmmirror**
-5. 构建 universal（Intel + Apple 芯片）应用（`electron-forge package --arch universal`，校验 `lipo -archs` 同时含 `x86_64` 与 `arm64`）→ ad-hoc 签名 → `xattr -cr` → 生成 `wlsaplus<版本>.dmg` 并打开
-   Build the universal (Intel + Apple silicon) app (`--arch universal`, verified with `lipo -archs` to contain both `x86_64` and `arm64`) → ad-hoc sign → `xattr -cr` → create `wlsaplus<version>.dmg` and open it
+生成的应用为 universal（arm64 + x86_64）。发布与更新清单准备见 [native/README.md](native/README.md) 中的 `scripts/release.sh` 与根目录 GitHub Actions **Build and release native macOS app**。
 
-macOS 版的 VPN 内核是 **mihomo（Clash Meta）universal 通用二进制**（同时含 arm64 与 x86_64），已在源码 `electron/bin/mac-vpn.tar.gz` 中，构建时不下载任何 VPN 内核，也无需访问境外网站。
-The macOS VPN core is a **universal mihomo (Clash Meta) binary** (arm64 + x86_64), already in the source at `electron/bin/mac-vpn.tar.gz`; the build downloads no VPN cores and needs no overseas sites.
+On a Mac with Xcode Command Line Tools: run the commands above. The app is universal (arm64 + x86_64). Packaging and update-manifest prep are documented in [native/README.md](native/README.md) (`scripts/release.sh` and the root **Build and release native macOS app** workflow).
 
-## 开发 · Development
+### 历史 Electron 树（仅迁移 / 兼容 / 权利记录）· Legacy Electron tree (migration / compat / history only)
+
+仓库根目录仍保留旧版 Electron + Angular Material 源码与 `npm` 脚本，供**数据迁移、更新兼容测试与历史权利记录**使用。**新应用不打包旧 Electron 运行时或旧 VPN 内核**；日常构建与发布请走 `native/`。
+
+The repo root still keeps the former Electron + Angular Material tree and `npm` scripts for **migration, update-compatibility tests, and historical rights records**. **The new app does not ship the old Electron runtime or the old VPN core.** Day-to-day builds and releases use `native/`.
+
+历史开发命令（仅旧树，非当前产品路径）· Historical commands (legacy tree only, not the supported product path):
 
 ```bash
 # Node.js 22（见 .nvmrc）· Node.js 22 (see .nvmrc)
 npm install
-npm start                # 界面开发服务器 · renderer dev server at http://localhost:4200
+npm start                # 界面开发服务器 · renderer dev server
 npm test                 # 单元测试 · unit tests (Angular + Electron main)
-npm run build:web        # 生产界面构建（打包前必需）· production renderer build (needed before packaging)
+npm run build:web        # 生产界面构建 · production renderer build
 npm run electron:dev     # 开发服务器 + Electron · dev server + Electron
-npm run electron:make    # macOS universal DMG / ZIP（需在 macOS 上）· build universal DMG / ZIP (on macOS)
+npm run electron:make    # 旧版 macOS universal DMG / ZIP · legacy universal DMG / ZIP
 ```
 
-- 可安装包在 `out/make`；`dist/` 只是界面（renderer）构建产物。· Installers land in `out/make`; `dist/` is only the renderer build.
-- 图标字体只保留源码使用的字形，普通构建会自动检查覆盖。新增图标后安装 `python3 -m pip install 'fonttools[woff]'`，运行 `npm run symbols:generate` 并提交 `build/fonts/`；普通构建无需 Python。
-  The icon font contains the source icons and is checked during builds. After adding icons, install `fonttools[woff]`, run `npm run symbols:generate`, and commit `build/fonts/`; normal builds do not need Python.
-- asar 只打包主进程代码与运行时依赖、生产界面及许可证；测试、构建工具和源码映射不随应用分发（见 `forge.config.cjs` 的运行文件白名单）。
-  The asar ships main-process code and runtime dependencies, the production UI and licenses; tests, build tools and source maps are excluded (see the runtime file allow-list in `forge.config.cjs`).
-- `package.json` 的 `overrides` 把 `@electron/node-gyp` 固定为 npm 上的 `10.2.0-electron.1`：否则 `@electron/rebuild` 会从 GitHub 拉取 node-gyp（国内常失败），请勿删除。
-  The `overrides` entry in `package.json` pins `@electron/node-gyp` to the npm-published `10.2.0-electron.1`, so `@electron/rebuild` does not fetch node-gyp from GitHub (often unreachable in China). Do not remove it.
-- 论坛配置集中在 `src/app/core/forum.config.ts`（与 `electron/forum-config.cjs` 同步，有测试校验）。
-  Forum settings live in `src/app/core/forum.config.ts`, mirrored in `electron/forum-config.cjs` (kept in sync by tests).
+旧版 VPN 内核曾使用随仓库分发的 **mihomo（Clash Meta）** universal 二进制（`electron/bin/mac-vpn.tar.gz`）。原生版已改为自研网络栈，构建与发布不再依赖该内核。  
+The legacy VPN core used a shipped **mihomo (Clash Meta)** universal binary (`electron/bin/mac-vpn.tar.gz`). The native edition uses its own network stack and no longer depends on that core for build or release.
 
-### CI
+## 开发 · Development
 
-- **Build macOS universal self-signed DMG**（手动触发）：构建并深度 ad-hoc 签名的 universal（Intel + Apple 芯片）DMG，产物在 Actions artifact。
-  *Build macOS universal self-signed DMG* (manual): builds a deep ad-hoc-signed universal (Intel + Apple silicon) DMG as an Actions artifact.
-- **Build and release**：推送 `v*` 标签或手动触发，构建并发布到 Release；可选签名/公证密钥：
-  *Build and release*: on `v*` tags or manually; optional signing / notarization secrets:
+| 路径 Path | 说明 Description |
+|---|---|
+| [`native/`](native/) | **当前支持的原生应用**（Swift / C、本地 WebKit UI）· **Supported native app** (Swift / C, local WebKit UI) |
+| 仓库根目录 Repo root (`src/`, `electron/`, …) | 历史 Electron 实现 · Legacy Electron implementation |
+
+CI：
+
+- **Native check**（`native-check.yml`）：原生相关检查。  
+  Native-related checks.
+- **Build and release native macOS app**（`release.yml`）：手动或标签触发，从 `native/` 构建并发布；稳定版可先出草稿，确认后再设为 Latest。  
+  Manual or tag-triggered build/publish from `native/`; stable releases may start as drafts, then be marked Latest after acceptance.
+
+可选签名 / 公证 Secrets（与正式发布相关）· Optional signing / notarization secrets:
 
 | 用途 Purpose | Secrets |
 |---|---|
 | 签名 Signing | `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_IDENTITY` |
 | 公证 Notarization | `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` |
+| 应用内更新签名 Update signing | `WLSAPLUS_UPDATE_ED25519_KEY`（及既有更新相关配置） |
 
 ### PowerSchool 网络录制（开发用）· PowerSchool capture (dev only)
 
@@ -137,19 +150,20 @@ npx playwright install chromium
 npm run record:powerschool -- --url "https://your-school-powerschool.example.com/" --duration 90
 ```
 
-会脱敏密码 / Cookie，但捕获仍可能含隐私，**禁止公开**；结果在 `captures/`（已 gitignore）。
+会脱敏密码 / Cookie，但捕获仍可能含隐私，**禁止公开**；结果在 `captures/`（已 gitignore）。  
 Passwords and cookies are redacted, but captures may still contain personal data — **never publish them** (`captures/` is gitignored).
 
 ## 隐私 · Privacy
 
-- 课表、成绩、待办保存在本机；PowerSchool 密码用系统加密存储。
-  Schedule, grades and to-dos stay on your Mac; the PowerSchool password is stored with OS encryption.
-- 论坛自动登录只把当前 PowerSchool 会话 Cookie（白名单）交给论坛服务器做一次性验证，不发送密码；论坛在独立的会话分区中运行。
-  Forum auto sign-in sends only whitelisted PowerSchool session cookies for a one-time check (never the password); the forum runs in its own isolated session partition.
+- 课表、成绩、待办保存在本机；PowerSchool 密码用系统 Keychain / 系统加密存储。  
+  Schedule, grades and to-dos stay on your Mac; the PowerSchool password is stored with Keychain / OS encryption.
+- 论坛自动登录只把当前 PowerSchool 会话 Cookie（白名单）交给论坛服务器做一次性验证，不发送密码；论坛在隔离的 WebKit 数据存储中运行。  
+  Forum auto sign-in sends only whitelisted PowerSchool session cookies for a one-time check (never the password); the forum runs in an isolated WebKit data store.
 
 ## 许可证 · License
 
-源代码以 **GNU GPL v3** 发布，见 [`LICENSE`](LICENSE)。第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 以及：
-Source code is released under **GNU GPL v3** ([`LICENSE`](LICENSE)). Third-party notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and
+源代码以 **GNU GPL v3** 发布，见 [`LICENSE`](LICENSE)。第三方许可证见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。  
+Source code is released under **GNU GPL v3** ([`LICENSE`](LICENSE)). Third-party notices: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-- [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)（`electron/bin/mac-vpn.tar.gz` 中的 mihomo / Clash Meta 核心，随应用分发 · mihomo / Clash Meta core, shipped in the app）
+原生工程的来源与权利边界说明见 [`native/PROVENANCE.md`](native/PROVENANCE.md)。历史 Electron 树中仍可能引用随旧版分发的组件许可证（例如 [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)）；**原生应用不再分发该内核**。  
+Provenance for the native tree: [`native/PROVENANCE.md`](native/PROVENANCE.md). The legacy Electron tree may still reference licenses for components that shipped with older builds (e.g. [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)); **the native app does not redistribute that core**.
