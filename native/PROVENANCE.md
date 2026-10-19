@@ -15,6 +15,7 @@
 - [VMess AEAD documentation](https://www.v2fly.org/developer/protocols/vmess.html#vmess-aead)
 - [RFC 6455 WebSocket](https://www.rfc-editor.org/rfc/rfc6455)
 - [RFC 9293 TCP](https://www.rfc-editor.org/rfc/rfc9293)
+- [PKWARE ZIP format specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
 - [Apple Network framework](https://developer.apple.com/documentation/network)
 - [Apple CryptoKit](https://developer.apple.com/documentation/cryptokit)
 - [LevelDB file-format descriptions](https://github.com/google/leveldb/blob/main/doc/table_format.md)

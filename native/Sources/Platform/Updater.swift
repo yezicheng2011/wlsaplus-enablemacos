@@ -306,7 +306,14 @@ enum UpdateInstaller {
                 for app in NSWorkspace.shared.runningApplications where app.bundleURL?.standardizedFileURL == target { app.forceTerminate() }
             }
             if FileManager.default.fileExists(atPath: backup.path) {
-                try? command("/bin/rm", ["-rf", target.path]); try command("/bin/mv", [backup.path, target.path])
+                do {
+                    try? command("/bin/rm", ["-rf", target.path])
+                    try command("/bin/mv", [backup.path, target.path])
+                } catch {
+                    let message = "The update failed and automatic restoration could not finish. The previous signed application is retained at " + backup.path
+                    try? privateWrite(jsonData(["message": message]), to: AppIdentity.support.appendingPathComponent("updates/install-result.json"))
+                    throw AppError(message)
+                }
             }
             if installed {
                 let file = AppIdentity.support.appendingPathComponent("updates/failed-versions.json")

@@ -116,7 +116,7 @@ static int parse_ip(const uint8_t *packet, size_t length, parsed *result) {
         if (header < 20 || header > length || get16(packet + 2) != length ||
             finish_sum(sum_bytes(0, packet, header)) != 0 ||
             (get16(packet + 6) & 0xbfffu) != 0 || packet[8] == 0) return -1;
-        /* Fragment reassembly and source-routing options are not implemented. */
+        /* Fragments are reassembled before this parser; source routing is rejected. */
         for (size_t i = 20; i < header;) {
             uint8_t option = packet[i];
             if (option == 0) break;

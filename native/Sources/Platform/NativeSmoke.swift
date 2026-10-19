@@ -8,6 +8,20 @@ private func smokeSystemCommand(_ executable: String, _ arguments: [String]) thr
     try run(executable, arguments)
 }
 
+private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) throws -> (status: Int32, output: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: executable)
+    process.arguments = arguments
+    let pipe = Pipe()
+    process.standardInput = FileHandle(forReadingAtPath: "/dev/null")
+    process.standardOutput = pipe; process.standardError = pipe
+    try process.run()
+    let bytes = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard bytes.count <= 65_536 else { throw AppError("Native smoke snapshot output exceeded its bound.") }
+    return (process.terminationStatus, String(decoding: bytes, as: UTF8.self))
+}
+
 /// Compiled only into the explicit native integration test executable.
 /// Logs contain stages and protocol/result classes, never subscription material.
 @MainActor enum NativeSmoke {
@@ -40,6 +54,7 @@ private func smokeSystemCommand(_ executable: String, _ arguments: [String]) thr
         stage("snapshot")
         let original: NetworkSnapshot
         do { original = try NetworkSnapshot.capture() }
+        catch let error as Failure { cleanupConfirmed = true; throw error }
         catch { cleanupConfirmed = true; throw Failure.blocked("route and DNS snapshot") }
         let service: VPNService
         do { service = VPNService(store: try LocalState(directory: directory)) }
@@ -124,7 +139,7 @@ private func smokeSystemCommand(_ executable: String, _ arguments: [String]) thr
             throw Failure.assertion("disconnected state")
         }
     }
-    private static func stage(_ value: String) {
+    private nonisolated static func stage(_ value: String) {
         print("native-smoke: \(value)")
         fflush(stdout)
     }
@@ -145,40 +160,65 @@ private func smokeSystemCommand(_ executable: String, _ arguments: [String]) thr
 
         static func capture() throws -> NetworkSnapshot {
             var routes = [String: [String: String]]()
-            for (family, target) in [("-inet", "default"), ("-inet6", "default"),
-                                     ("-inet", "0.0.0.0/1"), ("-inet", "128.0.0.0/1"),
-                                     ("-inet6", "::/1"), ("-inet6", "8000::/1")] {
+            for (family, target, label) in [("-inet", "default", "ipv4-default"), ("-inet6", "default", "ipv6-default"),
+                                           ("-inet", "0.0.0.0/1", "ipv4-low-split"), ("-inet", "128.0.0.0/1", "ipv4-high-split"),
+                                           ("-inet6", "::/1", "ipv6-low-split"), ("-inet6", "8000::/1", "ipv6-high-split")] {
                 let key = family + " " + target
-                if let output = try? smokeSystemCommand("/sbin/route", ["-n", "get", family, target]) {
+                let result: (status: Int32, output: String)
+                do { result = try smokeReadOnlyResult("/sbin/route", ["-n", "get", family, target]) }
+                catch { throw Failure.blocked("route snapshot command launch") }
+                if result.status == 0 {
                     var identity = [String: String]()
                     // Exclude mutable counters/timers; preserve the complete
                     // route identity and ownership flags rather than table text.
-                    for line in output.components(separatedBy: .newlines) {
+                    for line in result.output.components(separatedBy: .newlines) {
                         guard let colon = line.firstIndex(of: ":") else { continue }
                         let name = line[..<colon].trimmingCharacters(in: .whitespaces)
                         if ["destination", "mask", "netmask", "gateway", "interface", "flags"].contains(name) {
                             identity[name] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
                         }
                     }
-                    guard identity["interface"] != nil else { throw Failure.assertion("route snapshot shape") }
+                    stage("snapshot-route \(label) exit-0 fields-\(identity.keys.sorted().joined(separator: ","))")
+                    guard identity["interface"]?.isEmpty == false else { throw Failure.blocked("route snapshot interface field") }
                     routes[key] = identity
+                } else {
+                    let text = result.output.lowercased()
+                    let category = text.contains("usage:") ? "usage" :
+                        (["not in table", "not found", "unreachable", "no route"].contains(where: text.contains) ? "missing" : "failure")
+                    stage("snapshot-route \(label) exit-\(result.status) \(category)")
                 }
+            }
+            if let name = routes["-inet default"]?["interface"] {
+                stage("snapshot-default-interface \(name.hasPrefix("utun") ? "utun" : "physical")")
             }
             guard let original4 = routes["-inet default"],
                   let interface = original4["interface"], !interface.hasPrefix("utun") else {
                 throw Failure.blocked("physical IPv4 default route")
             }
-            let list = try smokeSystemCommand("/usr/sbin/networksetup", ["-listallnetworkservices"])
-            let services = list.components(separatedBy: .newlines).dropFirst().compactMap { line -> String? in
+            let list: (status: Int32, output: String)
+            do { list = try smokeReadOnlyResult("/usr/sbin/networksetup", ["-listallnetworkservices"]) }
+            catch { throw Failure.blocked("DNS service list launch") }
+            stage("snapshot-service-list exit-\(list.status)")
+            guard list.status == 0 else { throw Failure.blocked("DNS service list command") }
+            let lines = list.output.components(separatedBy: .newlines).dropFirst()
+            let disabled = lines.filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("*") }.count
+            let services = lines.compactMap { line -> String? in
                 let name = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 if name.isEmpty { return nil }
                 return name.hasPrefix("*") ? String(name.dropFirst()) : name
             }
+            stage("snapshot-services total-\(services.count) disabled-\(disabled)")
             guard !services.isEmpty else { throw Failure.blocked("network services") }
             var dns = [String: String]()
             for service in services {
-                dns[service] = try smokeSystemCommand("/usr/sbin/networksetup", ["-getdnsservers", service])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let result: (status: Int32, output: String)
+                do { result = try smokeReadOnlyResult("/usr/sbin/networksetup", ["-getdnsservers", service]) }
+                catch { throw Failure.blocked("DNS snapshot command launch") }
+                let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                let automatic = output.hasPrefix("There aren't any DNS Servers set on ")
+                stage("snapshot-dns exit-\(result.status) \(automatic ? "automatic" : "configured-or-error")")
+                guard result.status == 0 else { throw Failure.blocked("DNS snapshot command") }
+                dns[service] = output
             }
             return NetworkSnapshot(routes: routes, dns: dns)
         }
