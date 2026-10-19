@@ -105,8 +105,8 @@ jobs:
           import os,pathlib
           pathlib.Path('release-notes.txt').write_text('WLSAPlus '+os.environ['VERSION']+' for macOS 13+, Intel and Apple silicon.\n\nNative system-framework implementation. Includes per-architecture update packages, universal download and signed update-manifest.json.\n')
           PY
-          if [[ "$BETA" == true ]]; then mode=(--prerelease); else mode=(--draft); fi
-          gh release create "$TAG" artifacts/* --target "$GITHUB_SHA" --title "WLSAPlus $VERSION" --notes-file release-notes.txt --latest=false "${mode[@]}"
+          if [[ "$BETA" == true ]]; then mode=(--prerelease --latest=false); else mode=(--draft); fi
+          gh release create "$TAG" artifacts/* --target "$GITHUB_SHA" --title "WLSAPlus $VERSION" --notes-file release-notes.txt "${mode[@]}"
       - name: Advance the existing beta update channel
         if: needs.build.outputs.beta == 'true'
         shell: bash

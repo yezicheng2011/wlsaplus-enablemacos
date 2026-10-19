@@ -40,7 +40,7 @@ Linux 可以运行 C 数据包引擎、JavaScript 与 Swift Core 测试。Linux 
 WLSAPLUS_VERSION=2.0.0-beta.1 bash scripts/release.sh
 ```
 
-需要先导入原固定代码签名证书，并设置 `WLSAPLUS_UPDATE_ED25519_KEY`。输出文件名和清单格式保持旧版兼容。`release.sh` 只在本地准备产物，发布仍需通过仓库发布流程执行。必须在真实 Mac 上验证旧版 1.1.2 → 新版、下次原生版本升级、取消授权、非可写 Applications 目录、断点续传与强制回滚。
+需要先导入原固定代码签名证书，并设置 `WLSAPLUS_UPDATE_ED25519_KEY`。输出文件名和清单格式保持旧版兼容。`release.sh` 只在本地准备产物；仓库根目录的发布工作流取代原 Electron 产物流程，稳定版生成草稿，测试版更新现有 beta 通道。稳定草稿验收后发布时须选中「Set as the latest release」（CLI：`gh release edit v版本 --draft=false --latest`），旧版和新版的稳定更新按钮才能发现它。必须在真实 Mac 上验证旧版 1.1.2 → 新版、下次原生版本升级、取消授权、非可写 Applications 目录、断点续传与强制回滚。
 
 ## 功能与数据
 

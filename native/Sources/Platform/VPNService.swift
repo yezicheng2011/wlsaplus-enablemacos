@@ -12,6 +12,9 @@ import Darwin
     private var busy = false
     private var operation = ""
     private var disconnectRequested = false
+    #if NATIVE_INTEGRATION_TESTS
+    private(set) var smokeHelperStage: String?
+    #endif
     private let sessionURL: URL
     private(set) var status: [String: Any] = ["state": "disconnected", "connected": false]
     var onChange: (([String: Any]) -> Void)?
@@ -48,6 +51,9 @@ import Darwin
         guard !busy else { throw AppError("A VPN operation is already in progress.") }
         guard configuration == nil else { throw AppError("Disconnect the current VPN session before connecting again.") }
         busy = true; operation = "connect"; disconnectRequested = false
+        #if NATIVE_INTEGRATION_TESTS
+        smokeHelperStage = nil
+        #endif
         defer { busy = false; operation = "" }
         if catalog.isEmpty { _ = try await nodes() }
         if disconnectRequested { throw CancellationError() }
@@ -78,25 +84,39 @@ import Darwin
             var lastError: Error?
             while Date() < deadline {
                 if disconnectRequested { throw CancellationError() }
+                let value: [String: Any]
                 do {
-                    let value = try await control("GET", "/status", config: config)
-                    if let pid = value["pid"] as? NSNumber { helperPID = pid.int32Value }
-                    let state = value["state"] as? String ?? ""
-                    if state == "connected", value["connected"] as? Bool == true,
-                       value["probeAuthenticated"] as? Bool == true, value["networkActive"] as? Bool == true {
-                        if disconnectRequested { throw CancellationError() }
-                        try store.set("vpnNode", node.id)
-                        publish(publicStatus(value, node: node)); beginMonitoring()
-                        return status
-                    }
-                    if state == "error" || state == "stopped" {
-                        throw AppError(value["message"] as? String ?? "The native VPN helper failed to start.")
-                    }
-                    lastError = nil
+                    value = try await control("GET", "/status", config: config)
                 } catch {
                     lastError = error
-                    if helperPID != nil { throw error }
+                    if let pid = helperPID, !VPNProcessIdentity.exists(pid) { throw error }
+                    // Root route/DNS commands share the helper's serial queue.
+                    // A slow system utility can delay HTTP past its five-second
+                    // request timeout while setup is still progressing normally.
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                    continue
                 }
+                if let pid = value["pid"] as? NSNumber { helperPID = pid.int32Value }
+                #if NATIVE_INTEGRATION_TESTS
+                let progress = value["failureStage"] as? String ?? value["stage"] as? String
+                if let progress, ["listener", "resolve", "proxy-probe", "utun", "network-plan", "routed-https", "connected", "cleanup", "recovery"].contains(progress) {
+                    smokeHelperStage = progress
+                }
+                #endif
+                let state = value["state"] as? String ?? ""
+                if state == "connected", value["connected"] as? Bool == true,
+                   value["probeAuthenticated"] as? Bool == true, value["networkActive"] as? Bool == true {
+                    if disconnectRequested { throw CancellationError() }
+                    try store.set("vpnNode", node.id)
+                    publish(publicStatus(value, node: node)); beginMonitoring()
+                    return status
+                }
+                // A completed control response explicitly reporting failure is
+                // fatal; only transport/control polling errors above are retried.
+                if state == "error" || state == "stopped" {
+                    throw AppError(value["message"] as? String ?? "The native VPN helper failed to start.")
+                }
+                lastError = nil
                 try await Task.sleep(nanoseconds: 300_000_000)
             }
             throw lastError ?? AppError("The native VPN helper did not become ready before the deadline.")

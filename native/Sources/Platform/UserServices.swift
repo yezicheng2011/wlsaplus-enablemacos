@@ -340,6 +340,9 @@ private enum ForumPolicy {
         emit("settings", result)
         return result
     }
+    func restoreAppearance() {
+        applyWindowAppearance()
+    }
     private func applyWindowAppearance() {
         let value = store.value["appearance"] as? String ?? "system"
         let appearance: NSAppearance? = value == "dark" ? NSAppearance(named: .darkAqua) : value == "light" ? NSAppearance(named: .aqua) : nil

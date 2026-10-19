@@ -62,7 +62,15 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
     private var manifest: UpdateManifest?
     private var timer: Timer?
     private var channelGeneration = 0
-    init(store: LocalState) { self.store = store }
+    init(store: LocalState) {
+        self.store = store
+        let outcome = directory.appendingPathComponent("install-result.json")
+        if let data = try? Data(contentsOf: outcome), let value = try? jsonObject(data, maximum: 16384),
+           let message = value["message"] as? String {
+            status = ["state": "error", "message": message, "percent": NSNull()]
+            try? FileManager.default.removeItem(at: outcome)
+        }
+    }
     var beta: Bool { store.value["channel"] as? String == "beta" }
     var architecture: String {
         #if arch(arm64)
@@ -252,13 +260,13 @@ enum UpdateInstaller {
         let target = URL(fileURLWithPath: arguments[2]).standardizedFileURL, staged = URL(fileURLWithPath: arguments[3]).standardizedFileURL,
             marker = URL(fileURLWithPath: arguments[4]).standardizedFileURL, version = arguments[5], restart = arguments[6] == "restart"
         let root = AppIdentity.support.appendingPathComponent("updates/staging", isDirectory: true).standardizedFileURL
-        guard target.lastPathComponent == "WLSAPlus.app", staged.path.hasPrefix(root.path + "/"), marker.path.hasPrefix(root.path + "/"), marker.lastPathComponent == "launched.marker" else { throw AppError("Installer path validation failed.") }
+        guard target.pathExtension == "app", !target.path.hasPrefix("/Volumes/"), !target.path.contains("/AppTranslocation/"),
+              staged.path.hasPrefix(root.path + "/"), marker.path.hasPrefix(root.path + "/"), marker.lastPathComponent == "launched.marker" else { throw AppError("Installer path validation failed.") }
         #if arch(arm64)
         let arch = "arm64"
         #else
         let arch = "x64"
         #endif
-        try NativeUpdater.verifyApp(staged, version: version, architecture: arch)
         for _ in 0..<120 { if kill(parent, 0) != 0 && errno == ESRCH { break }; usleep(500_000) }
         guard kill(parent, 0) != 0 else { throw AppError("The application did not exit; update cancelled.") }
         let backup = target.deletingLastPathComponent().appendingPathComponent(".WLSAPlus-backup-\(UUID().uuidString).app")
@@ -267,12 +275,21 @@ enum UpdateInstaller {
             if FileManager.default.isWritableFile(atPath: target.deletingLastPathComponent().path) { try run(tool, args) }
             else { try elevatedCommand(tool, args) }
         }
-        try command("/usr/bin/ditto", [staged.path, prepared.path])
+        var installed = false
         do {
+            try? FileManager.default.removeItem(at: AppIdentity.support.appendingPathComponent("updates/install-result.json"))
+            try NativeUpdater.verifyApp(staged, version: version, architecture: arch)
+            let currentPlist = try Data(contentsOf: target.appendingPathComponent("Contents/Info.plist"))
+            guard let currentInfo = try PropertyListSerialization.propertyList(from: currentPlist, format: nil) as? [String: Any],
+                  let currentVersion = currentInfo["CFBundleShortVersionString"] as? String else { throw AppError("The installed application identity is missing.") }
+            // A renamed .app is supported, but it must still be the trusted app.
+            try NativeUpdater.verifyApp(target, version: currentVersion, architecture: arch)
+            try command("/usr/bin/ditto", [staged.path, prepared.path])
             try NativeUpdater.verifyApp(prepared, version: version, architecture: arch)
             try command("/bin/mv", [target.path, backup.path])
             do { try command("/bin/mv", [prepared.path, target.path]) }
             catch { try? command("/bin/mv", [backup.path, target.path]); throw error }
+            installed = true
             var args = [target.path, "--args", "--wlsaplus-update-marker=" + marker.path]
             if !restart { args.insert(contentsOf: ["-g", "-j"], at: 0); args.append("--wlsaplus-update-verify-only") }
             try run("/usr/bin/open", args)
@@ -281,17 +298,26 @@ enum UpdateInstaller {
             guard started else { throw AppError("The new application did not confirm startup.") }
             try? command("/bin/rm", ["-rf", backup.path])
         } catch {
+            let original = error
+            try? privateWrite(jsonData(["message": "The update could not be installed: " + original.localizedDescription]),
+                              to: AppIdentity.support.appendingPathComponent("updates/install-result.json"))
             // Running applications are identified by their exact bundle path.
-            for app in NSWorkspace.shared.runningApplications where app.bundleURL?.standardizedFileURL == target { app.forceTerminate() }
+            if installed {
+                for app in NSWorkspace.shared.runningApplications where app.bundleURL?.standardizedFileURL == target { app.forceTerminate() }
+            }
             if FileManager.default.fileExists(atPath: backup.path) {
                 try? command("/bin/rm", ["-rf", target.path]); try command("/bin/mv", [backup.path, target.path])
             }
-            let file = AppIdentity.support.appendingPathComponent("updates/failed-versions.json")
-            var failures = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String]) ?? []
-            if !failures.contains(version) { failures.append(version) }
-            try? privateWrite(JSONSerialization.data(withJSONObject: failures), to: file)
+            if installed {
+                let file = AppIdentity.support.appendingPathComponent("updates/failed-versions.json")
+                var failures = (try? JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String]) ?? []
+                if !failures.contains(version) { failures.append(version) }
+                try? privateWrite(JSONSerialization.data(withJSONObject: failures), to: file)
+            }
+            // Failure before replacement (including cancelled authorization)
+            // reopens the old app without treating the candidate as defective.
             try? run("/usr/bin/open", [target.path])
-            throw error
+            throw original
         }
     }
 }

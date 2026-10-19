@@ -39,7 +39,12 @@ enum ArchivePolicy {
             var p = 0
             while p < data.count {
                 let type = try word(data, p, 2), count = Int(try word(data, p+2, 2))
-                guard [UInt64(0x5455), 0x000a, 0x7855, 0x7875].contains(type), p+4+count <= data.count else { throw AppError("Unsupported ZIP extra field.") }
+                // ditto emits original UNIX timestamps (8 bytes in the central
+                // directory, plus UID/GID in the 12-byte local form). Neither
+                // form changes the entry path or file type.
+                guard [UInt64(0x5455), 0x000a, 0x5855, 0x7855, 0x7875].contains(type),
+                      p+4+count <= data.count,
+                      type != 0x5855 || count == 8 || count == 12 else { throw AppError("Unsupported ZIP extra field.") }
                 p += 4 + count
             }
         }

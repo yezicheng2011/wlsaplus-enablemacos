@@ -197,6 +197,8 @@ private final class VPNRuntime {
     private var packets = [Data]()
     private var packetBytes = 0
     private var state = "starting"
+    private var stage = "listener"
+    private var failureStage: String?
     private var message = "Checking the VPN server."
     private var networkActive = false
     private var probeAuthenticated = false
@@ -232,19 +234,28 @@ private final class VPNRuntime {
             switch value {
             case .ready:
                 guard !self.startedSetup else { return }; self.startedSetup = true
-                self.startWatchers(); self.setup()
-            case .failed(let error): self.failAndRecover(error)
+                self.setup()
+            case .failed:
+                // A terminal listener has no usable control endpoint. Recover
+                // before exiting instead of retaining an unreachable root worker.
+                self.stopForExit(1)
             default: break
             }
         }
-        listener.start(queue: queue)
+        queue.async {
+            // The parent/signal watchdog also covers bind/startup failures.
+            self.startWatchers()
+            self.listener.start(queue: self.queue)
+        }
     }
 
     private func setup() {
         state = "connecting"
+        stage = "resolve"
         Task {
             do {
                 let addresses = try Self.resolve(configuration.node.server, port: configuration.node.port)
+                queue.async { if !self.stopping, !self.stopped { self.stage = "proxy-probe" } }
                 var successful: (ProxyNode, Double)?
                 for address in addresses.prefix(4) {
                     var attempt = configuration.node
@@ -272,6 +283,7 @@ private final class VPNRuntime {
     }
 
     private func configureTunnel(addresses: [String]) throws {
+        stage = "utun"
         var name = [CChar](repeating: 0, count: 64)
         descriptor = wl_tun_open(&name, name.count)
         guard descriptor >= 0 else { throw AppError("macOS could not create a native utun interface.") }
@@ -309,11 +321,13 @@ private final class VPNRuntime {
         source.setEventHandler { [weak self] in self?.readPackets() }
         readSource = source; source.resume()
         let transaction = NetworkPlan(interface: interface, nodeAddresses: addresses, journal: VPNHelper.journal)
+        stage = "network-plan"
         plan = transaction
         // Conservatively report an active transaction from its first possible
         // mutation until a successful restore, including partial-setup failures.
         networkActive = true
         try transaction.apply()
+        stage = "routed-https"
         message = "Verifying traffic through the configured tunnel."
     }
 
@@ -328,6 +342,7 @@ private final class VPNRuntime {
                         guard let plan = self.plan else { throw AppError("The tunnel network transaction is missing.") }
                         try plan.verifyActive()
                         self.state = "connected"; self.message = "Native VPN is active."
+                        self.stage = "connected"
                         self.connectedAt = ISO8601DateFormatter().string(from: Date())
                     } catch { self.failAndRecover(error) }
                 }
@@ -497,6 +512,7 @@ private final class VPNRuntime {
                 complete(200, snapshot(), { self.queue.asyncAfter(deadline: .now() + 0.05) { self.exitHelper(0) } })
             } catch {
                 state = "error"; message = error.localizedDescription
+                failureStage = "recovery"
                 complete(500, snapshot(), nil)
             }
             return
@@ -505,13 +521,16 @@ private final class VPNRuntime {
     }
     private func snapshot() -> [String: Any] {
         var value: [String: Any] = ["pid": Int(getpid()), "state": state,
+            "stage": stage,
             "connected": state == "connected" && networkActive && probeAuthenticated,
             "networkActive": networkActive, "probeAuthenticated": probeAuthenticated,
             "message": message, "interface": interface, "connectedAt": connectedAt]
         if let latency { value["latency"] = latency }
+        if let failureStage { value["failureStage"] = failureStage }
         return value
     }
     private func cleanup() throws {
+        stage = "cleanup"
         stopping = true
         readSource?.cancel(); readSource = nil
         writeSource?.cancel(); writeSource = nil
@@ -522,6 +541,7 @@ private final class VPNRuntime {
         do { try plan?.restore() }
         catch {
             stopping = false
+            stage = "recovery"
             throw AppError("VPN route/DNS recovery is incomplete; the root-owned recovery journal was retained.")
         }
         networkActive = false; plan = nil
@@ -530,14 +550,15 @@ private final class VPNRuntime {
     }
     private func failAndRecover(_ error: Error) {
         guard !stopped, !stopping else { return }
+        failureStage = stage
         state = "error"; message = error.localizedDescription
         do { try cleanup() }
         catch { message += " \(error.localizedDescription)" }
         // Keep the authenticated control endpoint available so the UI can inspect
         // the failure and explicitly confirm recovery/process exit via /stop.
     }
-    private func stopForExit() {
-        do { try cleanup(); exitHelper(0) }
+    private func stopForExit(_ successCode: Int32 = 0) {
+        do { try cleanup(); exitHelper(successCode) }
         catch {
             fputs("WLSAPlus: network recovery failed; retain /var/db/wlsaplus-native/.root-network/journal.json.\n", stderr)
             exitHelper(1)

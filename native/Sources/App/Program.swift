@@ -74,6 +74,7 @@ import WebKit
                             self.browser.event("notification", ["message": message])
                         }
                         if CommandLine.arguments.contains("--wlsaplus-update-verify-only") { self.quitApproved = true; NSApp.terminate(nil) }
+                        else { self.school.startAutomaticSync() }
                     } catch {
                         if CommandLine.arguments.contains("--wlsaplus-update-verify-only") {
                             FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1)
@@ -85,6 +86,11 @@ import WebKit
             vpn.onChange = { [weak self] value in self?.browser.event("vpn", value) }
             updater.onChange = { [weak self] value in self?.browser.event("update", value) }
             updater.disconnect = { [weak self] in _ = try await self?.vpn.disconnect() }
+            school.onAutomaticSync = { [weak self] _ in
+                guard let self else { return }
+                self.browser.event("state", self.state())
+                Task { @MainActor [weak self] in try? await self?.services.scheduleReminders() }
+            }
             services.onChange = { [weak self] value in
                 if let name = value["name"] as? String, let data = value["value"] { self?.browser.event(name, data) }
             }
@@ -92,6 +98,7 @@ import WebKit
             window.isReleasedWhenClosed = false
             window.title = "WLSAPlus"; window.minSize = NSSize(width: 520, height: 580); window.center()
             window.contentView = browser.webView; window.setFrameAutosaveName("WLSAPlus.main")
+            services.restoreAppearance()
             createMenu()
             if !CommandLine.arguments.contains("--autostart") && !CommandLine.arguments.contains("--wlsaplus-update-verify-only") {
                 window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
@@ -129,9 +136,9 @@ import WebKit
             if previousChannel != updater.beta { updater.channelChanged() }
             browser.event("state", state()); return settings
         case "school.login", "school.sync":
-            let previous = school.account["username"] as? String
+            let previous = school.account["username"] as? String, previousURL = school.account["baseURL"] as? String
             let snapshot = method == "school.login" ? try await school.login(args) : try await school.sync()
-            if previous != school.account["username"] as? String { await services.clearForum() }
+            if previous != school.account["username"] as? String || previousURL != school.account["baseURL"] as? String { await services.clearForum() }
             do { try await services.scheduleReminders() }
             catch { browser.event("notification", ["message": error.localizedDescription]) }
             browser.event("state", state()); return snapshot
@@ -179,6 +186,7 @@ import WebKit
         }
         return .terminateLater
     }
+    func applicationWillTerminate(_ notification: Notification) { school.stopAutomaticSync() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window?.makeKeyAndOrderFront(nil); return true }
     private func present(_ error: Error) {
         let alert = NSAlert(); alert.messageText = "WLSAPlus"; alert.informativeText = error.localizedDescription; alert.runModal()

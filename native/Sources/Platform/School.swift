@@ -5,8 +5,9 @@ enum PasswordVault {
     private static var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: AppIdentity.bundle + ".native.account", kSecAttrAccount as String: "powerschool"]
     }
-    static func read() throws -> String? {
+    static func read(allowInteraction: Bool = true) throws -> String? {
         var q = query
+        if !allowInteraction { q[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail }
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var object: CFTypeRef?
@@ -46,11 +47,25 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
     private(set) var session: URLSession?
     private(set) var cookies: HTTPCookieStorage?
     private var generation = 0
-    private var busy = false
+    private struct ConnectionAttempt {
+        let generation: Int
+        let automatic: Bool
+        let connection: URLSession
+    }
+    private var active: ConnectionAttempt?
+    private var courseLoads = 0
+    private var automaticTask: Task<Void, Never>?
+    private var automaticTaskGeneration = 0
+    private var automaticTimer: Timer?
+    var onAutomaticSync: (([String: Any]) -> Void)?
     init(store: LocalState) { self.store = store }
     var account: [String: Any] { store.value["school"] as? [String: Any] ?? [:] }
     func login(_ input: [String: Any]) async throws -> [String: Any] {
-        guard !busy else { throw AppError("A school connection is already in progress.") }
+        cancelAutomaticAttempt()
+        return try await connect(input, automatic: false)
+    }
+    private func connect(_ input: [String: Any], automatic: Bool) async throws -> [String: Any] {
+        guard active == nil else { throw AppError("A school connection is already in progress.") }
         guard let base = input["baseURL"] as? String, let user = input["username"] as? String,
               let password = input["password"] as? String, !user.trimmingCharacters(in: .whitespaces).isEmpty, !password.isEmpty,
               let candidate = URLComponents(string: base.contains("://") ? base : "https://" + base), candidate.scheme == "https", candidate.host != nil,
@@ -58,18 +73,24 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
         var components = candidate
         components.path = ""; components.query = nil; components.fragment = nil
         guard let origin = components.url else { throw AppError("Invalid school address.") }
-        busy = true; generation += 1; let epoch = generation
-        defer { busy = false }
+        generation += 1; let epoch = generation
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 25
         configuration.timeoutIntervalForResource = 60
         configuration.httpCookieAcceptPolicy = .always
         let connection = URLSession(configuration: configuration, delegate: SchoolRedirects(origin), delegateQueue: nil)
-        func current() throws { if generation != epoch { throw CancellationError() } }
+        active = ConnectionAttempt(generation: epoch, automatic: automatic, connection: connection)
+        // A cancelled background request must not clear a newer foreground request's lock.
+        defer { if active?.generation == epoch { active = nil } }
+        func current() throws {
+            try Task.checkCancellation()
+            if generation != epoch || active?.generation != epoch { throw CancellationError() }
+        }
         do {
             let loginHTML = try await request(connection, origin: origin, path: "/public/")
             try current()
             let parsed = try await parser("fields", ["html": loginHTML])
+            try current()
             var fields = parsed["fields"] as? [String: String] ?? [:]
             // Form field names are the server's public sign-in contract.
             fields["account"] = user.trimmingCharacters(in: .whitespaces)
@@ -83,6 +104,7 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
             let home = try await request(connection, origin: origin, path: "/guardian/home.html", method: "POST", body: Data(body.utf8), contentType: "application/x-www-form-urlencoded")
             try current()
             let status = try await parser("fields", ["html": home])
+            try current()
             guard status["signIn"] as? Bool != true else { throw AppError("Sign in failed. Check your school address and credentials.") }
             async let week = request(connection, origin: origin, path: "/guardian/myschedule.html")
             async let matrix = request(connection, origin: origin, path: "/guardian/myschedulematrix.html")
@@ -90,10 +112,16 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
             let (w, m) = try await (week, matrix)
             let a = (try? await attendance) ?? ""
             try current()
-            let snapshot = try await parser("snapshot", ["week": w, "matrix": m, "home": home, "attendance": a])
+            var snapshot = try await parser("snapshot", ["week": w, "matrix": m, "home": home, "attendance": a])
             try current()
-            let previousPassword = try PasswordVault.read()
-            try PasswordVault.write(password)
+            let sameAccount = account["baseURL"] as? String == origin.absoluteString && account["username"] as? String == fields["account"]
+            if sameAccount, snapshot["assignments"] == nil {
+                // Weekly pages do not include assignment detail. Retain the last real detail sync.
+                snapshot["assignments"] = (store.value["snapshot"] as? [String: Any])?["assignments"] ?? [[String: Any]]()
+            }
+            // Automatic refresh never changes the saved credential or invokes Keychain UI.
+            let previousPassword = automatic ? nil : try PasswordVault.read()
+            if !automatic { try PasswordVault.write(password) }
             do {
                 var next = store.value
                 next["school"] = ["baseURL": origin.absoluteString, "username": fields["account"]!]
@@ -101,7 +129,9 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
                 // One atomic account/snapshot commit; old-account records never mix with new cookies.
                 try store.replace(next)
             } catch {
-                if let previousPassword { try? PasswordVault.write(previousPassword) } else { try? PasswordVault.remove() }
+                if !automatic {
+                    if let previousPassword { try? PasswordVault.write(previousPassword) } else { try? PasswordVault.remove() }
+                }
                 throw error
             }
             session?.invalidateAndCancel()
@@ -110,18 +140,26 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
         } catch { connection.invalidateAndCancel(); throw error }
     }
     func sync() async throws -> [String: Any] {
+        cancelAutomaticAttempt()
         guard let password = try PasswordVault.read(), let base = account["baseURL"], let user = account["username"] else { throw AppError("Connect to PowerSchool first.") }
         return try await login(["baseURL": base, "username": user, "password": password])
     }
     func logout() throws {
+        cancelAutomaticAttempt()
         generation += 1
+        active?.connection.invalidateAndCancel(); active = nil
         session?.invalidateAndCancel(); session = nil; cookies = nil
         try PasswordVault.remove()
-        try store.set("school", nil)
-        try store.set("snapshot", ["courses": [], "schedule": [], "assignments": [], "attendance": []])
+        var next = store.value
+        next["school"] = nil
+        next["snapshot"] = ["courses": [], "schedule": [], "assignments": [], "attendance": []]
+        try store.replace(next)
     }
     func course(_ id: String) async throws -> [String: Any] {
-        guard !busy else { throw AppError("Wait for the school synchronization to finish before loading course details.") }
+        cancelAutomaticAttempt()
+        guard active == nil else { throw AppError("Wait for the school synchronization to finish before loading course details.") }
+        courseLoads += 1
+        defer { courseLoads -= 1 }
         let epoch = generation
         guard let session, let base = account["baseURL"] as? String, let origin = URL(string: base),
               var snapshot = store.value["snapshot"] as? [String: Any],
@@ -145,6 +183,48 @@ private final class SchoolRedirects: NSObject, URLSessionTaskDelegate {
         }
         details["lookup"] = nil
         return details
+    }
+    func startAutomaticSync() {
+        guard automaticTimer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 15 * 60, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.enqueueAutomaticSync() }
+        }
+        timer.tolerance = 15
+        automaticTimer = timer
+        enqueueAutomaticSync()
+    }
+    func stopAutomaticSync() {
+        automaticTimer?.invalidate(); automaticTimer = nil
+        cancelAutomaticAttempt()
+    }
+    private func enqueueAutomaticSync() {
+        guard automaticTask == nil, active == nil, courseLoads == 0, parser != nil,
+              let base = account["baseURL"] as? String, !base.isEmpty,
+              let user = account["username"] as? String, !user.isEmpty else { return }
+        automaticTaskGeneration += 1
+        let ticket = automaticTaskGeneration
+        automaticTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.automaticTaskGeneration == ticket { self.automaticTask = nil } }
+            do {
+                guard let password = try PasswordVault.read(allowInteraction: false), !password.isEmpty else { return }
+                try Task.checkCancellation()
+                let snapshot = try await self.connect(["baseURL": base, "username": user, "password": password], automatic: true)
+                // This callback runs without an await, while this account/session is still current.
+                self.onAutomaticSync?(snapshot)
+            } catch {
+                // Network, parser and locked/absent-Keychain failures leave the real cached state intact.
+            }
+        }
+    }
+    private func cancelAutomaticAttempt() {
+        automaticTaskGeneration += 1
+        automaticTask?.cancel(); automaticTask = nil
+        if let attempt = active, attempt.automatic {
+            generation += 1
+            active = nil
+            attempt.connection.invalidateAndCancel()
+        }
     }
     private func request(_ session: URLSession, origin: URL, path: String, method: String = "GET", body: Data? = nil, contentType: String? = nil, referrer: URL? = nil) async throws -> String {
         guard let url = URL(string: path, relativeTo: origin)?.absoluteURL, url.scheme == origin.scheme, url.host == origin.host, url.port == origin.port else { throw AppError("Refusing a request outside the school server.") }

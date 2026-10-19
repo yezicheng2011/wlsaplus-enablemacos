@@ -79,6 +79,7 @@ private func smokeSystemCommand(_ executable: String, _ arguments: [String]) thr
                     // Foreign errors may contain endpoints or private runtime
                     // paths. Only this fixed stage class reaches CI logs.
                     stage("\(failureStage) failed")
+                    if let helperStage = service.smokeHelperStage { stage("helper-stage \(helperStage)") }
                 }
 
                 stage("restore")
