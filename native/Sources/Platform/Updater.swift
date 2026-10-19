@@ -72,7 +72,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
         #endif
     }
     func begin() {
-        timer = Timer.scheduledTimer(withTimeInterval: 21600, repeats: true) { [weak self] _ in Task { @MainActor in self?.check() } }
+        timer = Timer.scheduledTimer(withTimeInterval: 21600, repeats: true) { [weak self] _ in Task { @MainActor [weak self] in self?.check() } }
         Task { try? await Task.sleep(nanoseconds: 8_000_000_000); check() }
     }
     func set(_ state: String, _ message: String, percent: Double? = nil) {
