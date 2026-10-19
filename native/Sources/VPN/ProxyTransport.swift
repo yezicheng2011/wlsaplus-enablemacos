@@ -138,7 +138,9 @@ final class ProxyConnection {
                 vmess = try VMessSession(uuid: node.uuid!, alterId: node.alterId ?? 0,
                                          destinationHost: host, destinationPort: port, udp: datagram)
             }
-            let network = try NetworkByteTransport(node: node, datagram: ss && datagram, queue: queue)
+            // 6s per resolved address, up to 4 addresses, fits inside the outer deadline.
+            let network = try NetworkByteTransport(node: node, datagram: ss && datagram, queue: queue,
+                                                   perAttemptSeconds: 6)
             let channel: ByteTransport
             if !ss && (node.network ?? "tcp").lowercased() == "ws" {
                 channel = try WebSocketByteTransport(base: network, node: node)
@@ -150,7 +152,8 @@ final class ProxyConnection {
             channel.onClose = { [weak self] in self?.transportClosed() }
             let deadline = DispatchWorkItem { [weak self] in self?.fail(ProxyError.timeout) }
             timeout = deadline
-            queue.asyncAfter(deadline: .now() + 20, execute: deadline)
+            // Outer budget covers IPv4-then-IPv6 failover for SS/WS endpoints.
+            queue.asyncAfter(deadline: .now() + 28, execute: deadline)
             channel.start()
         } catch { fail(error) }
     }

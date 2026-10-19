@@ -1,8 +1,12 @@
 # Third-party notices
 
-WLSAPlus (this repository) is licensed under the **GNU General Public License v3.0**. See [`LICENSE`](LICENSE).
+WLSAPlus (this repository) is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The native Swift/C VPN and packet stack is original and is also Apache-2.0; it does not vendor mihomo, clash, sing-box, or gVisor source or binaries.
 
 The distributed macOS app may also include the following components. Their licenses apply to those components; keep the corresponding license files when you redistribute binaries.
+
+## Legacy Electron VPN core (1.x packages only)
+
+Native 2.x builds do **not** ship these binaries. They remain listed because historical `electron/bin` artifacts and 1.1.2 updaters may still reference them.
 
 ## Bundled VPN / network cores
 
@@ -27,7 +31,7 @@ For a machine-readable inventory after `npm install`, you can run a license chec
 
 ## vpn-subscription-worker (optional deploy)
 
-`vpn-subscription-worker/` is a separately deployable worker. Treat it as part of this repository under the same GPL-3.0 terms unless a file in that directory says otherwise. Do not commit upstream VPN subscription secrets into the client; keep them in Worker secrets.
+`vpn-subscription-worker/` is a separately deployable worker. Treat it as part of this repository under the same Apache-2.0 terms unless a file in that directory says otherwise. Do not commit upstream VPN subscription secrets into the client; keep them in Worker secrets.
 
 ## Attribution note
 

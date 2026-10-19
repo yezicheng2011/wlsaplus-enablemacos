@@ -3,6 +3,7 @@ import Network
 import Security
 import CryptoKit
 import Dispatch
+import Darwin
 
 protocol ByteTransport: AnyObject {
     var onReady: (() -> Void)? { get set }
@@ -16,15 +17,69 @@ protocol ByteTransport: AnyObject {
     func close()
 }
 
+/// Ordered A/AAAA lookup used by every outbound proxy dial. IPv4 is tried before
+/// IPv6 so a firewalled AAAA record cannot burn the whole probe budget.
+enum ProxyEndpointResolver {
+    static func addresses(host: String, port: UInt16) throws -> [String] {
+        if let literal = literalAddress(host) { return [literal] }
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = Int32(SOCK_STREAM)
+        hints.ai_protocol = Int32(IPPROTO_TCP)
+        var answer: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, String(port), &hints, &answer) == 0, let first = answer else {
+            throw ProxyError.configuration("The proxy server name could not be resolved")
+        }
+        defer { freeaddrinfo(first) }
+        var result = [String]()
+        var cursor: UnsafeMutablePointer<addrinfo>? = first
+        while let current = cursor {
+            var text = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let entry = current.pointee
+            if (entry.ai_family == AF_INET || entry.ai_family == AF_INET6),
+               getnameinfo(entry.ai_addr, entry.ai_addrlen, &text, socklen_t(text.count), nil, 0, NI_NUMERICHOST) == 0 {
+                let address = String(cString: text)
+                if !address.contains("%"), !result.contains(address) { result.append(address) }
+            }
+            cursor = entry.ai_next
+        }
+        result.sort { left, right in
+            let leftV6 = left.contains(":")
+            let rightV6 = right.contains(":")
+            if leftV6 != rightV6 { return !leftV6 && rightV6 }
+            return left < right
+        }
+        guard !result.isEmpty, result.count <= 64 else {
+            throw ProxyError.configuration("The proxy server has no usable IP endpoint")
+        }
+        return result
+    }
+
+    static func literalAddress(_ host: String) -> String? {
+        var v4 = in_addr(); var v6 = in6_addr()
+        if inet_pton(AF_INET, host, &v4) == 1 { return host }
+        if inet_pton(AF_INET6, host, &v6) == 1 { return host }
+        return nil
+    }
+}
+
 /// Network.framework owns sockets and TLS. Every method/callback runs on one serial queue.
+/// TCP dials resolve first and walk IPv4 then IPv6 with a short per-address timeout so
+/// Shadowsocks / WebSocket endpoints that only answer on one family still become ready
+/// before the outer authenticated probe deadline.
 final class NetworkByteTransport: ByteTransport {
     var onReady: (() -> Void)?
     var onData: ((Data) -> Void)?
     var onError: ((Error) -> Void)?
     var onClose: (() -> Void)?
-    private let connection: NWConnection
+
     private let queue: DispatchQueue
     private let datagram: Bool
+    private let port: NWEndpoint.Port
+    private let candidates: [String]
+    private let parameters: NWParameters
+    private var connection: NWConnection?
+    private var candidateIndex = 0
     private var started = false
     private var ready = false
     private var closed = false
@@ -32,20 +87,29 @@ final class NetworkByteTransport: ByteTransport {
     private var pendingPackets = 0
     private var readEnabled = true
     private var receiving = false
+    private var attemptTimeout: DispatchWorkItem?
+    private let perAttemptSeconds: TimeInterval
 
-    init(node: ProxyNode, datagram: Bool, queue: DispatchQueue) throws {
-        self.queue = queue; self.datagram = datagram
+    init(node: ProxyNode, datagram: Bool, queue: DispatchQueue,
+         perAttemptSeconds: TimeInterval = 6) throws {
+        self.queue = queue
+        self.datagram = datagram
+        self.perAttemptSeconds = max(2, min(perAttemptSeconds, 20))
         guard let port = NWEndpoint.Port(rawValue: node.port), node.port != 0 else {
             throw ProxyError.configuration("Invalid proxy port")
         }
+        self.port = port
         guard node.skipCertVerify != true else { throw ProxyError.unsupported("Insecure TLS is disabled") }
-        let parameters: NWParameters
-        if datagram { parameters = NWParameters.udp }
-        else {
+        candidates = try ProxyEndpointResolver.addresses(host: node.server, port: node.port)
+        if datagram {
+            parameters = NWParameters.udp
+            parameters.preferNoProxies = true
+        } else {
             let tcp = NWProtocolTCP.Options()
             tcp.enableKeepalive = true
             tcp.keepaliveIdle = 60
-            tcp.connectionTimeout = 20
+            // Keep each SYN attempt shorter than the outer probe so failover can run.
+            tcp.connectionTimeout = Int(self.perAttemptSeconds)
             if node.tls == true {
                 let tls = NWProtocolTLS.Options()
                 let name = node.serverName?.isEmpty == false ? node.serverName! : node.server
@@ -62,30 +126,22 @@ final class NetworkByteTransport: ByteTransport {
                     complete(SecTrustEvaluateWithError(secTrust, nil))
                 }, queue)
                 parameters = NWParameters(tls: tls, tcp: tcp)
-            } else { parameters = NWParameters(tls: nil, tcp: tcp) }
+            } else {
+                parameters = NWParameters(tls: nil, tcp: tcp)
+            }
+            parameters.preferNoProxies = true
         }
-        connection = NWConnection(host: NWEndpoint.Host(node.server), port: port, using: parameters)
     }
 
     func start() {
-        guard !started, !closed else { return }; started = true
-        connection.stateUpdateHandler = { [weak self] state in
-            guard let self, !self.closed else { return }
-            switch state {
-            case .ready:
-                guard !self.ready else { return }; self.ready = true
-                self.onReady?(); self.receive()
-            case .failed(let error): self.fail(error)
-            case .cancelled: self.finish()
-            default: break
-            }
-        }
-        connection.start(queue: queue)
+        guard !started, !closed else { return }
+        started = true
+        dialNext(reason: nil)
     }
 
     func send(_ data: Data) {
         guard !closed else { return }
-        guard ready else { fail(ProxyError.closed); return }
+        guard ready, let connection else { fail(ProxyError.closed); return }
         guard pendingBytes + data.count <= 4 * 1024 * 1024, pendingPackets < 4096 else {
             fail(ProxyError.bufferLimit); return
         }
@@ -98,7 +154,7 @@ final class NetworkByteTransport: ByteTransport {
     }
 
     func finishWriting() {
-        guard !closed, ready else { return }
+        guard !closed, ready, let connection else { return }
         connection.send(content: nil, contentContext: .finalMessage, isComplete: true,
                         completion: .contentProcessed { [weak self] error in
             if let error { self?.fail(error) }
@@ -111,12 +167,64 @@ final class NetworkByteTransport: ByteTransport {
     }
 
     func close() {
-        guard !closed else { return }; closed = true; ready = false
-        connection.stateUpdateHandler = nil; connection.cancel()
+        guard !closed else { return }
+        closed = true; ready = false
+        cancelAttemptTimeout()
+        connection?.stateUpdateHandler = nil
+        connection?.cancel()
+        connection = nil
+    }
+
+    private func dialNext(reason: Error?) {
+        guard !closed, !ready else { return }
+        cancelAttemptTimeout()
+        if let previous = connection {
+            previous.stateUpdateHandler = nil
+            previous.cancel()
+            connection = nil
+        }
+        guard candidateIndex < candidates.count else {
+            fail(reason ?? ProxyError.timeout)
+            return
+        }
+        let host = candidates[candidateIndex]
+        candidateIndex += 1
+        let next = NWConnection(host: NWEndpoint.Host(host), port: port, using: parameters)
+        connection = next
+        next.stateUpdateHandler = { [weak self] state in
+            guard let self, !self.closed else { return }
+            switch state {
+            case .ready:
+                self.cancelAttemptTimeout()
+                guard !self.ready else { return }
+                self.ready = true
+                self.onReady?(); self.receive()
+            case .failed(let error):
+                if self.ready { self.fail(error); return }
+                self.dialNext(reason: error)
+            case .cancelled:
+                if self.ready { self.finish() }
+            default: break
+            }
+        }
+        next.start(queue: queue)
+        if !datagram {
+            let timeout = DispatchWorkItem { [weak self] in
+                guard let self, !self.closed, !self.ready else { return }
+                self.dialNext(reason: ProxyError.timeout)
+            }
+            attemptTimeout = timeout
+            queue.asyncAfter(deadline: .now() + perAttemptSeconds, execute: timeout)
+        }
+    }
+
+    private func cancelAttemptTimeout() {
+        attemptTimeout?.cancel()
+        attemptTimeout = nil
     }
 
     private func receive() {
-        guard !closed, readEnabled, !receiving else { return }
+        guard !closed, readEnabled, !receiving, let connection else { return }
         receiving = true
         if datagram {
             connection.receiveMessage { [weak self] data, _, _, error in
@@ -137,10 +245,12 @@ final class NetworkByteTransport: ByteTransport {
             }
         }
     }
+
     private func fail(_ error: Error) {
         guard !closed else { return }
         onError?(error); close()
     }
+
     private func finish() {
         guard !closed else { return }
         close(); onClose?()
@@ -288,7 +398,14 @@ final class WebSocketByteTransport: ByteTransport {
         self.base = base
         let path = node.wsPath?.isEmpty == false ? node.wsPath! : "/"
         let literal = node.server.contains(":") ? "[\(node.server)]" : node.server
-        let host = node.wsHost?.isEmpty == false ? node.wsHost! : "\(literal):\(node.port)"
+        // Prefer an explicit Host header from the subscription. When absent, include
+        // the port so non-443 WebSocket backends still see a canonical authority.
+        let host: String
+        if let configured = node.wsHost, !configured.isEmpty {
+            host = configured
+        } else {
+            host = "\(literal):\(node.port)"
+        }
         guard path.hasPrefix("/"), path.utf8.allSatisfy({ $0 > 32 && $0 < 127 }),
               !host.isEmpty, host.utf8.allSatisfy({ $0 > 32 && $0 < 127 }) else {
             throw ProxyError.configuration("Invalid WebSocket Host or path")
