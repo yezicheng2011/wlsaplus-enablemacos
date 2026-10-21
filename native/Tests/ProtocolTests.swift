@@ -13,6 +13,7 @@ enum ProtocolTests {
     static func run() throws {
         try primitiveVectors()
         try shadowsocksFrames()
+        try shadowsocksCipherFrames()
         try vmessFrames()
         try websocketFrames()
         try configurationValidation()
@@ -92,6 +93,58 @@ enum ProtocolTests {
         try fails("SS oversized UDP packet") { _ = try datagrams.encodeDatagram(Data(repeating: 0, count: 65_507)) }
         try fails("SS invalid UDP address") { _ = try ProxyAddress.stripSOCKS(hex("0300")) }
         try check(try ProxyAddress.socks("2001:db8::1", 443).count == 19, "IPv6 address encoding")
+    }
+
+    // aes-128-gcm and chacha20-ietf-poly1305 fixtures: Python cryptography 43 (OpenSSL),
+    // generator verified against the aes-256-gcm fixtures above. Distinct passwords keep the
+    // process-wide salt replay cache from colliding with other fixtures.
+    private static func shadowsocksCipherFrames() throws {
+        let cases: [(ShadowsocksCipher, String, String, String)] = [
+            (.aes128gcm, "mockmini-aes128",
+             "101112131415161718191a1b1c1d1e1fea725cfab8ac4bb49d780d4f3b184f2f02228bc49a361d48e7e600e83e5f450ddb3c1ce9ba5f430e148ebef328801ad2c97ec805e8fa827050d4cb408a963cc242ff9842dad58b463c4ac630",
+             "202122232425262728292a2b2c2d2e2ffad7c10a16b0ade7ee35265f27863f467a27c5602edce1ba1131"),
+            (.chacha20poly1305, "mockmini-chacha",
+             "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f41c9f5d76cbe27348e4edafa9fb2bcccdf5864973341633a3ce29005d1198176a0b1b30bc46040765db84f52eb0504c3c75a39842b8e528c95d37e91b3a33127a8f616a46f3d584596c8026a",
+             "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fc018e2f48dd5674861fe247e9974e7279eadbcfc5602db9b26b2"),
+        ]
+        try check(ShadowsocksKeys.master(password: "mockmini-aes128", count: 16) == hex("88ff720dcec21d15a48a267f945a2cb9"), "SS 16-byte EVP_BytesToKey")
+        try check(ShadowsocksKeys.subkey(master: hex("88ff720dcec21d15a48a267f945a2cb9"), salt: Data((0..<16).map(UInt8.init))) == hex("7705848c18c6b4977467cf850f9bcfc2"), "SS 16-byte HKDF-SHA1 subkey")
+        for (cipher, password, tcp, udp) in cases {
+            let name = cipher.rawValue
+            let vector = hex(tcp)
+            try fails("SS \(name) tampered payload tag") {
+                let fresh = try ShadowsocksSession(password: password, destinationHost: "example.com", destinationPort: 443, udp: false, cipher: cipher)
+                var bad = vector; bad[cipher.saltSize + 2] ^= 1
+                _ = try fresh.decodeStream(bad)
+            }
+            let session = try ShadowsocksSession(password: password, destinationHost: "example.com", destinationPort: 443, udp: false, cipher: cipher)
+            let header = try session.requestHeader()
+            try check(header.count == cipher.saltSize + 18 + 15 + 16, "SS \(name) outbound salt size")
+            var decoded = [Data]()
+            for byte in vector { decoded += try session.decodeStream(Data([byte])) }
+            try check(decoded == [Data("hello".utf8), Data("bye".utf8)], "SS \(name) stream split at every byte")
+            try session.finishReceiving()
+            let large = try session.encodeStream(Data(repeating: 9, count: 40_000))
+            try check(large.count == 3 && large[0].count == 18 + 0x3fff + 16, "SS \(name) bounded chunking")
+            let datagrams = try ShadowsocksSession(password: password, destinationHost: "192.0.2.1", destinationPort: 53, udp: true, cipher: cipher)
+            try check(try datagrams.decodeDatagram(hex(udp)) == Data("dns".utf8), "SS \(name) UDP fixture")
+            try fails("SS \(name) replayed UDP salt") { _ = try datagrams.decodeDatagram(hex(udp)) }
+            let outgoing = try datagrams.encodeDatagram(Data("q".utf8))
+            try check(outgoing.count == cipher.saltSize + 7 + 1 + 16, "SS \(name) UDP packet layout")
+            let wrong = try ShadowsocksSession(password: password, destinationHost: "192.0.2.1", destinationPort: 53, udp: true,
+                                               cipher: cipher == .aes128gcm ? .aes256gcm : .aes128gcm)
+            try fails("SS \(name) packet rejected under another cipher") { _ = try wrong.decodeDatagram(outgoing) }
+        }
+        for spelling in ["aes-128-gcm", "AES-256-GCM", "chacha20-ietf-poly1305", "chacha20-poly1305"] {
+            let node = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
+                                 cipher: spelling, password: "secret")
+            try node.validate()
+        }
+        for spelling in ["rc4-md5", "aes-256-cfb", "2022-blake3-aes-128-gcm", "none", ""] {
+            let node = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
+                                 cipher: spelling, password: "secret")
+            try fails("Unsupported Shadowsocks cipher \(spelling)") { try node.validate() }
+        }
     }
 
     private static func vmessSession(_ alter: Int, udp: Bool = false) throws -> VMessSession {

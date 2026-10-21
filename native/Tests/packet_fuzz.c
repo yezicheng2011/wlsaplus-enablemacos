@@ -86,7 +86,7 @@ typedef struct {
     int have_server;
     uint32_t last_ack;      /* previous ACK value we sent (dup-ACK generation) */
 } tuple;
-typedef struct { int live, closed, eof; uint64_t delivered; int udp; unsigned t; } shadow;
+typedef struct { int live, closed, eof; uint64_t delivered; int udp; unsigned t; uint32_t isn; } shadow;
 
 typedef struct {
     tuple tuples[TUPLES];
@@ -128,6 +128,7 @@ static void on_connect(void *ctx, uint64_t id, const char *host, uint16_t port, 
     w->max_id = id;
     shadow *s = &w->ids[id];
     memset(s, 0, sizeof(*s)); s->live = 1; s->udp = udp; s->t = (unsigned)w->in_input;
+    s->isn = t->client_isn;  /* a later SYN with a new ISN on this tuple must not move the stream origin */
     t->id = id; t->have_server = 0;
     REQUIRE(++w->live <= 128);
 }
@@ -139,7 +140,7 @@ static void on_data(void *ctx, uint64_t id, const uint8_t *bytes, size_t n) {
     REQUIRE(!s->eof && n <= RX_CAP);
     tuple *t = &w->tuples[s->t];
     for (size_t i = 0; i < n; ++i)
-        REQUIRE(bytes[i] == stream_byte(t, t->client_isn + 1 + (uint32_t)(s->delivered + i)));
+        REQUIRE(bytes[i] == stream_byte(t, s->isn + 1 + (uint32_t)(s->delivered + i)));
     s->delivered += n;
 }
 static void on_eof(void *ctx, uint64_t id) {

@@ -42,8 +42,8 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
         }
         switch type.lowercased() {
         case "ss", "shadowsocks":
-            guard cipher?.lowercased() == "aes-256-gcm", password != nil else {
-                throw ProxyError.unsupported("Shadowsocks requires aes-256-gcm and a password")
+            guard ShadowsocksCipher(name: cipher) != nil, password != nil else {
+                throw ProxyError.unsupported("Shadowsocks requires a password and one of aes-128-gcm, aes-256-gcm, chacha20-ietf-poly1305")
             }
             guard tls != true, network == nil || network == "tcp" else {
                 throw ProxyError.unsupported("Shadowsocks transport plugins are not supported")
@@ -136,8 +136,11 @@ final class ProxyConnection {
                 guard let password = node.password, !password.isEmpty else {
                     throw ProxyError.configuration("Shadowsocks requires a non-empty password")
                 }
+                guard let method = ShadowsocksCipher(name: node.cipher) else {
+                    throw ProxyError.unsupported("Unsupported Shadowsocks cipher")
+                }
                 shadowsocks = try ShadowsocksSession(password: password, destinationHost: host,
-                                                      destinationPort: port, udp: datagram)
+                                                      destinationPort: port, udp: datagram, cipher: method)
             } else {
                 vmess = try VMessSession(uuid: node.uuid!, alterId: node.alterId ?? 0,
                                          destinationHost: host, destinationPort: port, udp: datagram)
