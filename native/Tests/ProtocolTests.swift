@@ -15,6 +15,7 @@ enum ProtocolTests {
         try shadowsocksFrames()
         try shadowsocksCipherFrames()
         try vmessFrames()
+        try vmessChaChaFrames()
         try websocketFrames()
         try configurationValidation()
         try endpointResolver()
@@ -190,6 +191,41 @@ enum ProtocolTests {
         try check(chunks.count == 4 && chunks.allSatisfy { $0.count <= 0x4002 }, "VMess bounded large-stream chunks")
     }
 
+    // Same public example identity, security=4. Fixtures from an independent Python
+    // implementation that first reproduces every AES-128-GCM fixture above.
+    private static let chachaAeadRequest = "0fadc0039741be1da55e11960db326ed2dbba3205532edc48d4f97eb951073d8443a05060708090a0b0caff7359c252a748a975d305d497b1f5bb39dbaa569c658420d48a48ddf8a0313f772298eaab385c46df3aa7c114a574fd8cac35b37f8b062af33eeb5827a2813194f4419d90dc30389"
+    private static let chachaLegacyRequest = "5e47a5ab744b87b3cbeffd8e6cbc906b153bb895fd69fdf57afdb47022206f14997fd7ddb340ceb3ed9aebc6aa44c71725ec1ef88a49d2b0c432ae0f9d78689d896268ccfc3af53a3f"
+    private static let chachaAeadResponse = "9bdfb1639712b6a6348d0087b8d1af379ecf70afb5ebb377066e79586918c758b5afc6888061001be647892a54ecd8b0a3650771b7701b3a4437942b2cc38a85f85e65"
+    private static let chachaLegacyResponse = "372343ca001b22e73b78a96970a566911b3916ef87b83eb868cff35adf5ec67244"
+    private static func vmessChaChaFrames() throws {
+        try check(VMessSecurity.chacha20poly1305.bodyKey(key) == hex("1bf42e241816ba29ff5f307bb1bc1d168b39e04ece3e33ab822442d7e6cefd5f"), "VMess ChaCha body key expansion")
+        try check(VMessSecurity(name: nil) == .aes128gcm && VMessSecurity(name: "AUTO") == .aes128gcm, "VMess auto keeps AES-128-GCM")
+        try check(VMessSecurity(name: "chacha20-ietf-poly1305") == .chacha20poly1305, "VMess ChaCha spelling alias")
+        try check(VMessSecurity(name: "none") == nil && VMessSecurity(name: "zero") == nil, "VMess unauthenticated security rejected")
+        for alter in [1, 0] {
+            func make() throws -> VMessSession {
+                try VMessSession(uuid: user, alterId: alter, destinationHost: "example.com", destinationPort: 443,
+                                 udp: false, requestIV: iv, requestKey: key, responseAuth: 0x42, security: .chacha20poly1305)
+            }
+            let session = try make()
+            let request = try session.requestHeader(timestamp: 1_700_000_000,
+                                                    authRandom: hex("01020304"), nonce: hex("05060708090a0b0c"))
+            try check(request == hex(alter == 0 ? chachaAeadRequest : chachaLegacyRequest), "VMess ChaCha request wire fixture alterId=\(alter)")
+            try check(try session.encodeBody(Data("hello VMess".utf8)) == [hex("001b8aa8b3dd91970d0f2138e4a5f05e5b37344a99aac4a060c5f05422")], "VMess ChaCha request body wire fixture")
+            let vector = hex(alter == 0 ? chachaAeadResponse : chachaLegacyResponse)
+            var decoded = [Data]()
+            for byte in vector { decoded += try session.decodeResponse(Data([byte])) }
+            try check(decoded == [Data("hello VMess".utf8)], "VMess ChaCha response split at every byte alterId=\(alter)")
+            try session.finishReceiving()
+            try check(try session.finishWriting() == hex("0010b43dee00b470c0dae2f5a20fb3d27125"), "VMess ChaCha authenticated termination fixture")
+            let altered = try make()
+            var bad = vector; bad[bad.count - 1] ^= 1
+            try fails("VMess ChaCha tampered body tag") { _ = try altered.decodeResponse(bad) }
+            let aesReader = try vmessSession(alter)
+            try fails("VMess AES session rejects ChaCha body") { _ = try aesReader.decodeResponse(vector) }
+        }
+    }
+
     private static func websocketFrames() throws {
         try check(WebSocketWire.accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", "RFC6455 handshake accept")
         let masked = try WebSocketWire.clientFrame(Data("Hello".utf8), opcode: 1, mask: hex("37fa213d"))
@@ -252,7 +288,9 @@ enum ProtocolTests {
         try fails("Negative alterId") { try node.validate() }
         node.alterId = 65_536
         try fails("Too large alterId") { try node.validate() }
-        node.alterId = 0; node.cipher = "unknown"
+        node.alterId = 0; node.cipher = "chacha20-poly1305"
+        try node.validate()
+        node.cipher = "unknown"
         try fails("Unsupported VMess cipher") { try node.validate() }
         var ss = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
                            cipher: "aes-256-gcm", password: "secret")

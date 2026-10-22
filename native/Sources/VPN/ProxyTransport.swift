@@ -55,8 +55,8 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
             guard (0...65535).contains(alterId ?? 0) else {
                 throw ProxyError.configuration("VMess alterId must be in 0...65535")
             }
-            guard ["auto", "aes-128-gcm"].contains((cipher ?? "auto").lowercased()) else {
-                throw ProxyError.unsupported("This VMess implementation supports auto and aes-128-gcm")
+            guard VMessSecurity(name: cipher) != nil else {
+                throw ProxyError.unsupported("This VMess implementation supports auto, aes-128-gcm and chacha20-poly1305")
             }
             guard ["tcp", "ws"].contains((network ?? "tcp").lowercased()) else {
                 throw ProxyError.unsupported("VMess requires TCP or WebSocket transport")
@@ -143,7 +143,8 @@ final class ProxyConnection {
                                                       destinationPort: port, udp: datagram, cipher: method)
             } else {
                 vmess = try VMessSession(uuid: node.uuid!, alterId: node.alterId ?? 0,
-                                         destinationHost: host, destinationPort: port, udp: datagram)
+                                         destinationHost: host, destinationPort: port, udp: datagram,
+                                         security: VMessSecurity(name: node.cipher) ?? .aes128gcm)
             }
             // 6s per resolved address, up to 4 addresses, fits inside the outer deadline.
             let network = try NetworkByteTransport(node: node, datagram: ss && datagram, queue: queue,
