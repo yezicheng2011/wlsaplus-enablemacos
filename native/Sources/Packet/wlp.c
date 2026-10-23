@@ -13,6 +13,7 @@
 #define TX_LIMIT 262144u
 #define UDP_PENDING 65536u
 #define MSS_LIMIT 1200u
+#define WSCALE_MAX 14u
 #define MAX_PACKET 65575u
 #define FRAGMENT_LIMIT 16u
 #define FRAGMENT_HEADER 2048u
@@ -38,7 +39,10 @@ typedef struct flow {
     struct flow *next;
     uint64_t id, created, active, sent_at, probe_at, wait_at;
     uint8_t version, protocol, source[16], destination[16];
-    uint16_t source_port, destination_port, mss, peer_window;
+    uint16_t source_port, destination_port, mss;
+    uint32_t peer_window;      /* already scaled by peer_shift */
+    uint8_t peer_shift;        /* RFC 7323 shift the client announced (0..14) */
+    int window_scaling;        /* client offered WS on SYN; we echo shift 0 */
     uint32_t iss, receive_next, send_una, send_next, tx_sequence;
     uint32_t window_sequence, window_ack, congestion, threshold;
     uint32_t receive_fin_sequence;
@@ -402,8 +406,8 @@ static size_t write_ip(wlp_engine *engine, const flow *f, uint8_t *packet, size_
 }
 static void emit_tcp(wlp_engine *engine, flow *f, uint32_t sequence, uint32_t ack,
                      uint8_t flags, const uint8_t *bytes, size_t length) {
-    uint8_t packet[40 + 24 + MSS_LIMIT];
-    size_t header = flags & FLAG_SYN ? 24 : 20;
+    uint8_t packet[40 + 28 + MSS_LIMIT];
+    size_t header = flags & FLAG_SYN ? (f->window_scaling ? 28 : 24) : 20;
     size_t ip = write_ip(engine, f, packet, header + length);
     uint8_t *tcp = packet + ip;
     memset(tcp, 0, header);
@@ -414,7 +418,10 @@ static void emit_tcp(wlp_engine *engine, flow *f, uint32_t sequence, uint32_t ac
     tcp[12] = (uint8_t)(header / 4 << 4);
     tcp[13] = flags;
     put16(tcp + 14, (uint16_t)(RX_LIMIT - f->receive_buffered));
-    if (header == 24) { tcp[20] = 2; tcp[21] = 4; put16(tcp + 22, MSS_LIMIT); }
+    if (header >= 24) { tcp[20] = 2; tcp[21] = 4; put16(tcp + 22, MSS_LIMIT); }
+    /* Our receive buffer fits in 16 bits, so we announce shift 0: the client may
+     * scale its own window while ours stays unscaled. */
+    if (header == 28) { tcp[24] = 1; tcp[25] = 3; tcp[26] = 3; tcp[27] = 0; }
     if (length) memcpy(tcp + header, bytes, length);
     put16(tcp + 16, transport_sum(f->version, 6, f->destination, f->source, tcp, header + length));
     engine->callbacks.packet(engine->context, packet, ip + header + length);
@@ -509,7 +516,7 @@ static int input_udp(wlp_engine *engine, const parsed *p) {
     f->active = engine->now;
     return 0;
 }
-static int tcp_options(const uint8_t *tcp, size_t header, uint16_t *mss) {
+static int tcp_options(const uint8_t *tcp, size_t header, uint16_t *mss, int *wscale) {
     for (size_t i = 20; i < header;) {
         uint8_t option = tcp[i];
         if (option == 0) break;
@@ -518,6 +525,10 @@ static int tcp_options(const uint8_t *tcp, size_t header, uint16_t *mss) {
         if (option == 2) {
             if (tcp[i + 1] != 4 || !(tcp[13] & FLAG_SYN) || get16(tcp + i + 2) < 64) return -1;
             *mss = (uint16_t)minimum(*mss, get16(tcp + i + 2));
+        } else if (option == 3) {
+            /* Window scale: only meaningful on SYN, ignored elsewhere (RFC 7323 2.2). */
+            if (tcp[i + 1] != 3) return -1;
+            if (tcp[13] & FLAG_SYN) *wscale = (int)minimum(tcp[i + 2], WSCALE_MAX);
         }
         i += tcp[i + 1];
     }
@@ -583,7 +594,8 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
         ((flags & FLAG_SYN) && (flags & (FLAG_FIN | FLAG_RST))) || get16(tcp + 2) == 0 ||
         transport_sum(p->version, 6, p->source, p->destination, tcp, length) != 0) return -1;
     uint16_t mss = MSS_LIMIT;
-    if (tcp_options(tcp, header, &mss) < 0) return -1;
+    int wscale = -1;
+    if (tcp_options(tcp, header, &mss, &wscale) < 0) return -1;
     uint32_t sequence = get32(tcp + 4), ack = get32(tcp + 8);
     size_t payload_length = length - header;
     flow *f = find_tuple(engine, p);
@@ -602,7 +614,8 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
         if (!f) return -1;
         f->receive_next = sequence + 1;
         f->mss = mss;
-        f->peer_window = get16(tcp + 14);
+        f->peer_window = get16(tcp + 14);   /* the SYN's own window is never scaled */
+        if (wscale >= 0) { f->window_scaling = 1; f->peer_shift = (uint8_t)wscale; f->threshold = TX_LIMIT; }
         f->window_sequence = sequence;
         f->window_ack = 0;
         connect_callback(engine, f);
@@ -638,7 +651,7 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
     if (!before(ack, f->send_una)) {
         if (before(f->window_sequence, sequence) ||
             (sequence == f->window_sequence && !before(ack, f->window_ack))) {
-            f->peer_window = get16(tcp + 14);
+            f->peer_window = (uint32_t)get16(tcp + 14) << f->peer_shift;
             f->window_sequence = sequence;
             f->window_ack = ack;
         }
@@ -656,7 +669,7 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
             }
             if (f->sent_fin && before(f->fin_sequence, ack)) f->acked_fin = 1;
             uint32_t growth = f->congestion < f->threshold ? minimum(advanced, f->mss) : minimum(f->mss, (uint32_t)((uint64_t)f->mss * advanced / f->congestion) + 1);
-            f->congestion = minimum(65535, f->congestion + growth);
+            f->congestion = minimum(f->window_scaling ? TX_LIMIT : 65535u, f->congestion + growth);
         } else if (!payload_length && !(flags & FLAG_FIN) && f->send_una != f->send_next) {
             if (++f->duplicate_acks == 3) {
                 f->threshold = minimum(f->congestion, f->send_next - f->send_una) / 2;
