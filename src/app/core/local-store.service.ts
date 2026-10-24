@@ -1,6 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { normalizeTodoColor, normalizeTodoEndAt, normalizeTodoIcon, normalizeTodoTimeType } from './models';
-import type { AppColor, AppSettings, ProgressCourse, ProgressSnapshot, ScheduleSnapshot, ThemeMode, TodoColor, TodoIcon, TodoItem, TodoTimeType } from './models';
+import type { AppColor, AppSettings, ProgressCourse, ProgressSnapshot, ScheduleSnapshot, ThemeMode, TodoColor, TodoIcon, TodoItem, TodoTimeType, UiLang } from './models';
 
 const EMPTY_SCHEDULE: ScheduleSnapshot = {
   syncedAt: '',
@@ -13,6 +13,7 @@ const EMPTY_SCHEDULE: ScheduleSnapshot = {
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'system',
   color: 'default',
+  uiLang: 'system',
   tuningEnabled: false,
   tunedTime: null,
   classRemindersEnabled: true,
@@ -30,6 +31,7 @@ const EMPTY_PROGRESS: ProgressSnapshot = {
 };
 
 const THEME_MODES = new Set<ThemeMode>(['system', 'light', 'dark']);
+const UI_LANGS = new Set<UiLang>(['zh', 'en', 'system']);
 const APP_COLORS = new Set<AppColor>(['default', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'rose']);
 
 @Injectable({ providedIn: 'root' })
@@ -214,6 +216,7 @@ export class LocalStore {
     return {
       theme: THEME_MODES.has(value['theme'] as ThemeMode) ? value['theme'] as ThemeMode : DEFAULT_SETTINGS.theme,
       color: APP_COLORS.has(value['color'] as AppColor) ? value['color'] as AppColor : DEFAULT_SETTINGS.color,
+      uiLang: UI_LANGS.has(value['uiLang'] as UiLang) ? value['uiLang'] as UiLang : DEFAULT_SETTINGS.uiLang,
       tuningEnabled: typeof value['tuningEnabled'] === 'boolean' ? value['tuningEnabled'] : DEFAULT_SETTINGS.tuningEnabled,
       tunedTime: typeof value['tunedTime'] === 'string' ? value['tunedTime'] : null,
       classRemindersEnabled: typeof value['classRemindersEnabled'] === 'boolean' ? value['classRemindersEnabled'] : DEFAULT_SETTINGS.classRemindersEnabled,

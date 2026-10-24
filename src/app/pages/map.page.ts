@@ -1,4 +1,5 @@
-import { Component, signal } from '@angular/core';
+import { I18nService } from '../core/i18n.service';
+import { Component, signal , inject} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CampusMapPanelComponent } from '../shared/campus-map-panel.component';
 
@@ -7,7 +8,7 @@ import { CampusMapPanelComponent } from '../shared/campus-map-panel.component';
   imports: [RouterLink, CampusMapPanelComponent],
   template: `
     <div class="page map-page">
-      <header class="page-header"><a class="back icon-button" routerLink="/tools" aria-label="Back to tools"><span class="material-symbols-rounded">arrow_back</span></a><h1 class="page-title">Map</h1><span class="spacer"></span><span class="campus-name">WLSA Shanghai</span></header>
+      <header class="page-header"><a class="back icon-button" routerLink="/tools" [attr.aria-label]="i18n.t('map.back')"><span class="material-symbols-rounded">arrow_back</span></a><h1 class="page-title">{{ i18n.t('map.title') }}</h1><span class="spacer"></span><span class="campus-name">WLSA Shanghai</span></header>
       <section class="surface map-card"><app-campus-map-panel [selectedBuilding]="selectedBuilding()" (buildingSelected)="selectedBuilding.set($event)" /></section>
     </div>
   `,
@@ -17,5 +18,7 @@ import { CampusMapPanelComponent } from '../shared/campus-map-panel.component';
   `,
 })
 export class MapPage {
+  readonly i18n = inject(I18nService);
+
   readonly selectedBuilding = signal<number | null>(null);
 }

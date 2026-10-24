@@ -19,6 +19,7 @@ import {
 import { LocalStore } from '../core/local-store.service';
 import { todoDeadlineProgress } from '../core/models';
 import type { ClassSession, TodoItem } from '../core/models';
+import { I18nService } from '../core/i18n.service';
 import { ConfirmDialogComponent, TextDialogComponent } from '../shared/text-dialog.component';
 import type { TaskDialogResult } from '../shared/text-dialog.component';
 import { RoomMapDirective } from '../shared/room-map.directive';
@@ -28,7 +29,7 @@ import { RoomMapDirective } from '../shared/room-map.directive';
   imports: [DatePipe, CdkDrag, CdkDragHandle, CdkDropList, RouterLink, MatButtonModule, MatDialogModule, MatProgressBarModule, MatSnackBarModule, MatTooltipModule, RoomMapDirective],
   template: `
     <div class="page">
-      <header class="page-header"><div><div class="eyebrow">{{ clock.now() | date:'EEEE, MMMM d' }}</div><h1 class="page-title">Overview</h1></div><a mat-icon-button class="header-icon-button" routerLink="/settings" aria-label="Open settings"><span class="material-symbols-rounded">settings</span></a></header>
+      <header class="page-header"><div><div class="eyebrow">{{ clock.now() | date:'EEEE, MMMM d' }}</div><h1 class="page-title">{{ i18n.t('home.overview') }}</h1></div><a mat-icon-button class="header-icon-button" routerLink="/settings" [attr.aria-label]="i18n.t('home.settings_aria')"><span class="material-symbols-rounded">settings</span></a></header>
 
       <section class="class-card">
         <a class="class-card-link" routerLink="/schedule" aria-label="Open full schedule"></a>
@@ -38,16 +39,16 @@ import { RoomMapDirective } from '../shared/room-map.directive';
           <div class="time-range">{{ session.startsAt | date:'HH:mm' }} - {{ session.endsAt | date:'HH:mm' }}</div>
           <div class="facts"><span><span class="material-symbols-rounded">person</span>{{ session.teacher || 'Teacher unavailable' }}</span><button [appRoomMap]="session.room"><span class="material-symbols-rounded">location_on</span>{{ session.room || 'Room unavailable' }}</button></div>
           <mat-progress-bar mode="determinate" [value]="progress()" />
-          <div class="card-bottom"><strong>{{ countdown() }}</strong><span>{{ duration(session) }} min class</span></div>
-          @if (nextAfterFeatured(); as next) { <div class="next-line"><span>Next</span><strong>{{ next.courseName }}</strong><span>{{ next.startsAt | date:'HH:mm' }}</span></div> }
+          <div class="card-bottom"><strong>{{ countdown() }}</strong><span>{{ i18n.t('home.min_class', { n: duration(session) }) }}</span></div>
+          @if (nextAfterFeatured(); as next) { <div class="next-line"><span>{{ i18n.t('home.next') }}</span><strong>{{ next.courseName }}</strong><span>{{ next.startsAt | date:'HH:mm' }}</span></div> }
         } @else {
-          <div class="clear-state"><span class="material-symbols-rounded">event_available</span><h2>No more classes</h2><p>Your schedule is clear for now.</p></div>
+          <div class="clear-state"><span class="material-symbols-rounded">event_available</span><h2>{{ i18n.t('home.no_more') }}</h2><p>{{ i18n.t('home.clear') }}</p></div>
         }
       </section>
 
       <section class="timeline-section">
         <div class="section-heading timeline-heading">
-          <div><h2>Timeline</h2><span>{{ clock.now() | date:'MMM d, HH:mm' }} to {{ timeline().endsAt | date:'MMM d, HH:mm' }}</span></div>
+          <div><h2>{{ i18n.t('home.timeline') }}</h2><span>{{ clock.now() | date:'MMM d, HH:mm' }} to {{ timeline().endsAt | date:'MMM d, HH:mm' }}</span></div>
           <div class="timeline-zoom" aria-label="Timeline zoom controls">
             <button mat-icon-button type="button" (click)="changeTimelineZoom(-25, timelineScroll)" [disabled]="timelineZoom() === minTimelineZoom" aria-label="Zoom timeline out" matTooltip="Show more time"><span class="material-symbols-rounded">zoom_out</span></button>
             <output aria-live="polite" [attr.aria-label]="'Timeline zoom ' + timelineZoom() + ' percent'">{{ timelineZoom() }}%</output>
@@ -95,7 +96,7 @@ import { RoomMapDirective } from '../shared/room-map.directive';
       </section>
 
       <section class="todo-section">
-        <div class="section-heading"><div><h2>Tasks</h2><span>{{ store.todos().length }} open</span></div><button mat-mini-fab (click)="addTodo()" aria-label="Add a task"><span class="material-symbols-rounded">add</span></button></div>
+        <div class="section-heading"><div><h2>{{ i18n.t('home.tasks') }}</h2><span>{{ i18n.t('home.open_n', { n: store.todos().length }) }}</span></div><button mat-mini-fab (click)="addTodo()" [attr.aria-label]="i18n.t('home.add_task')"><span class="material-symbols-rounded">add</span></button></div>
         <div class="todo-list surface" cdkDropList cdkDropListLockAxis="y" [cdkDropListData]="store.todos()" [cdkDropListDisabled]="store.todos().length < 2" (cdkDropListDropped)="reorderTodos($event)">
           @for (todo of store.todos(); track todo.id) {
             <div class="todo-row" cdkDrag cdkDragLockAxis="y" [cdkDragData]="todo" [class.expanded]="expandedTodoId() === todo.id" [attr.data-task-color]="todo.color">
@@ -163,6 +164,8 @@ import { RoomMapDirective } from '../shared/room-map.directive';
   `,
 })
 export class HomePage {
+  readonly i18n = inject(I18nService);
+
   readonly store = inject(LocalStore);
   readonly clock = inject(ClockService);
   private readonly dialog = inject(MatDialog);

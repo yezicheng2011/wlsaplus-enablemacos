@@ -7,6 +7,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { CredentialVault } from '../core/credential-vault.service';
 import { PowerSchoolService } from '../core/powerschool.service';
+import { I18nService } from '../core/i18n.service';
 
 @Component({
   selector: 'app-connect-page',
@@ -15,12 +16,12 @@ import { PowerSchoolService } from '../core/powerschool.service';
     <main class="connect-page">
       <section class="connect-panel">
         <div class="logo"><img src="icons/app-icon.svg" alt="WLSAPlus"></div>
-        <h1>Connect PowerSchool</h1>
+        <h1>{{ i18n.t('connect.title') }}</h1>
         <p class="muted">Your account and schedule stay on this device.</p>
         <form [formGroup]="form" (ngSubmit)="submit()">
-          <mat-form-field appearance="outline"><mat-label>PowerSchool address</mat-label><input matInput formControlName="schoolUrl" autocomplete="url"><span class="material-symbols-rounded field-icon" matSuffix>language</span></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Username</mat-label><input matInput formControlName="username" autocomplete="username"><span class="material-symbols-rounded field-icon" matSuffix>person</span></mat-form-field>
-          <mat-form-field appearance="outline"><mat-label>Password</mat-label><input matInput formControlName="password" [type]="showPassword() ? 'text' : 'password'" autocomplete="current-password"><button mat-icon-button matSuffix type="button" (click)="showPassword.set(!showPassword())" aria-label="Toggle password visibility"><span class="material-symbols-rounded field-icon">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span></button></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>{{ i18n.t('connect.url') }}</mat-label><input matInput formControlName="schoolUrl" autocomplete="url"><span class="material-symbols-rounded field-icon" matSuffix>language</span></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>{{ i18n.t('connect.user') }}</mat-label><input matInput formControlName="username" autocomplete="username"><span class="material-symbols-rounded field-icon" matSuffix>person</span></mat-form-field>
+          <mat-form-field appearance="outline"><mat-label>{{ i18n.t('connect.pass') }}</mat-label><input matInput formControlName="password" [type]="showPassword() ? 'text' : 'password'" autocomplete="current-password"><button mat-icon-button matSuffix type="button" (click)="showPassword.set(!showPassword())" aria-label="Toggle password visibility"><span class="material-symbols-rounded field-icon">{{ showPassword() ? 'visibility_off' : 'visibility' }}</span></button></mat-form-field>
           @if (error()) { <div class="error" role="alert">{{ error() }}</div> }
           <button mat-flat-button class="connect-button" type="submit" [disabled]="form.invalid || loading()">
             @if (loading()) { <mat-spinner diameter="22" /> } @else { <span>Connect</span><span class="material-symbols-rounded button-icon">arrow_forward</span> }
@@ -42,6 +43,8 @@ import { PowerSchoolService } from '../core/powerschool.service';
   `,
 })
 export class ConnectPage implements OnInit {
+  readonly i18n = inject(I18nService);
+
   private readonly fb = inject(FormBuilder);
   private readonly service = inject(PowerSchoolService);
   private readonly vault = inject(CredentialVault);

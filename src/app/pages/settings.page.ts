@@ -8,7 +8,8 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { ClockService } from '../core/clock.service';
 import { LocalStore } from '../core/local-store.service';
-import type { AppColor, ThemeMode } from '../core/models';
+import type { AppColor, ThemeMode, UiLang } from '../core/models';
+import { I18nService } from '../core/i18n.service';
 import { PowerSchoolService } from '../core/powerschool.service';
 import { UpdateService } from '../core/update.service';
 import { CLASS_REMINDER_LEAD_MINUTES } from '../core/class-reminder.service';
@@ -20,46 +21,47 @@ import { BUILD_VERSION } from '../build-info';
   imports: [DatePipe, MatButtonModule, MatButtonToggleModule, MatSlideToggleModule],
   template: `
     <div class="page">
-      <header class="page-header"><h1 class="page-title">Settings</h1></header>
-      <section><h2 class="section-title">Appearance</h2><div class="settings-list surface">
-        <div class="setting"><div><strong>Theme</strong><span>Choose how WLSAPlus looks.</span></div><mat-button-toggle-group [value]="store.settings().theme" (change)="setTheme($event.value)"><mat-button-toggle value="system">System</mat-button-toggle><mat-button-toggle value="light">Light</mat-button-toggle><mat-button-toggle value="dark">Dark</mat-button-toggle></mat-button-toggle-group></div>
-        <div class="setting color-setting"><div><strong>App color</strong><span>Choose your accent color.</span></div><div class="color-options" role="radiogroup" aria-label="App color">
-          @for (option of colors; track option.value) {
+      <header class="page-header"><h1 class="page-title">{{ i18n.t('settings.title') }}</h1></header>
+      <section><h2 class="section-title">{{ i18n.t('settings.appearance') }}</h2><div class="settings-list surface">
+        <div class="setting"><div><strong>{{ i18n.t('settings.theme') }}</strong><span>{{ i18n.t('settings.theme_hint') }}</span></div><mat-button-toggle-group [value]="store.settings().theme" (change)="setTheme($event.value)"><mat-button-toggle value="system">{{ i18n.t('settings.theme.system') }}</mat-button-toggle><mat-button-toggle value="light">{{ i18n.t('settings.theme.light') }}</mat-button-toggle><mat-button-toggle value="dark">{{ i18n.t('settings.theme.dark') }}</mat-button-toggle></mat-button-toggle-group></div>
+        <div class="setting color-setting"><div><strong>{{ i18n.t('settings.color') }}</strong><span>{{ i18n.t('settings.color_hint') }}</span></div><div class="color-options" role="radiogroup" [attr.aria-label]="i18n.t('settings.color_aria')">
+          @for (option of colorOptions(); track option.value) {
             <button type="button" role="radio" class="color-option" [class.selected]="store.settings().color === option.value" [attr.aria-checked]="store.settings().color === option.value" (click)="setColor(option.value)"><span class="color-swatch" [style.background]="option.swatch"></span><span>{{ option.label }}</span></button>
           }
         </div></div>
+        <div class="setting"><div><strong>{{ i18n.t('settings.language') }}</strong><span>{{ i18n.t('settings.language_hint') }}</span></div><mat-button-toggle-group [value]="store.settings().uiLang" (change)="setLang($event.value)"><mat-button-toggle value="system">{{ i18n.t('settings.lang.system') }}</mat-button-toggle><mat-button-toggle value="zh">{{ i18n.t('settings.lang.zh') }}</mat-button-toggle><mat-button-toggle value="en">{{ i18n.t('settings.lang.en') }}</mat-button-toggle></mat-button-toggle-group></div>
       </div></section>
 
-      <section><h2 class="section-title">Schedule</h2><div class="settings-list surface">
-        <div class="setting"><div><strong>PowerSchool</strong><span>@if (store.schedule().syncedAt) { Last updated {{ store.schedule().syncedAt | date:'MMM d, HH:mm' }} } @else { Not connected }</span></div><button mat-stroked-button (click)="sync()" [disabled]="syncing()"><span class="material-symbols-rounded">sync</span>{{ syncing() ? 'Syncing' : 'Sync now' }}</button></div>
-        <div class="setting"><div><strong>Account</strong><span>Change your PowerSchool login.</span></div><button mat-button (click)="changeAccount()">Change account</button></div>
-        <div class="setting"><div><strong>Class reminders</strong><span>Notify {{ leadMinutes }} minutes before each class starts (macOS Notification Center).</span></div><mat-slide-toggle [checked]="store.settings().classRemindersEnabled" (change)="setClassReminders($event.checked)"></mat-slide-toggle></div>
+      <section><h2 class="section-title">{{ i18n.t('settings.schedule') }}</h2><div class="settings-list surface">
+        <div class="setting"><div><strong>{{ i18n.t('settings.powerschool') }}</strong><span>@if (store.schedule().syncedAt) { {{ i18n.t('settings.last_updated', { t: (store.schedule().syncedAt | date:'MMM d, HH:mm') || '' }) }} } @else { {{ i18n.t('settings.not_connected') }} }</span></div><button mat-stroked-button (click)="sync()" [disabled]="syncing()"><span class="material-symbols-rounded">sync</span>{{ syncing() ? i18n.t('settings.syncing') : i18n.t('settings.sync_now') }}</button></div>
+        <div class="setting"><div><strong>{{ i18n.t('settings.account') }}</strong><span>{{ i18n.t('settings.account_hint') }}</span></div><button mat-button (click)="changeAccount()">{{ i18n.t('settings.change_account') }}</button></div>
+        <div class="setting"><div><strong>{{ i18n.t('settings.reminders') }}</strong><span>{{ i18n.t('settings.reminders_hint', { n: leadMinutes }) }}</span></div><mat-slide-toggle [checked]="store.settings().classRemindersEnabled" (change)="setClassReminders($event.checked)"></mat-slide-toggle></div>
       </div></section>
 
-      <section><h2 class="section-title">Tuning</h2><div class="settings-list surface">
-        <div class="setting"><div><strong>Simulated time</strong><span>Preview the current-class card at another time.</span></div><mat-slide-toggle [checked]="store.settings().tuningEnabled" (change)="toggleTuning($event.checked)"></mat-slide-toggle></div>
+      <section><h2 class="section-title">{{ i18n.t('settings.tuning') }}</h2><div class="settings-list surface">
+        <div class="setting"><div><strong>{{ i18n.t('settings.sim_time') }}</strong><span>{{ i18n.t('settings.sim_time_hint') }}</span></div><mat-slide-toggle [checked]="store.settings().tuningEnabled" (change)="toggleTuning($event.checked)"></mat-slide-toggle></div>
         @if (store.settings().tuningEnabled) {
           <div class="tuning-panel"><input type="datetime-local" [value]="localDateTime()" (change)="setTime($event)"><div class="time-buttons"><button mat-stroked-button (click)="clock.shiftMinutes(-15)">-15 min</button><button mat-stroked-button (click)="clock.reset()">Now</button><button mat-stroked-button (click)="clock.shiftMinutes(15)">+15 min</button></div></div>
         }
       </div></section>
 
-      <section><h2 class="section-title">Updates</h2><div class="settings-list surface">
+      <section><h2 class="section-title">{{ i18n.t('settings.updates') }}</h2><div class="settings-list surface">
         <div class="setting"><div><strong>WLSAPlus {{ version }}</strong><span>{{ updater.message() }}</span>
           @if (updater.status().state === 'downloading' && updater.status().percent !== null) {
             <div class="update-progress"><progress [value]="updater.status().percent ?? 0" max="100"></progress><span>{{ updater.status().percent ?? 0 }}%</span></div>
           }
         </div>
           @if (updater.status().state === 'ready') {
-            <button mat-flat-button (click)="updater.install()"><span class="material-symbols-rounded">restart_alt</span>Restart to update</button>
+            <button mat-flat-button (click)="updater.install()"><span class="material-symbols-rounded">restart_alt</span>{{ i18n.t('settings.restart_update') }}</button>
           } @else {
-            <button mat-stroked-button (click)="updater.check()" [disabled]="!updater.supported() || updater.busy()"><span class="material-symbols-rounded">update</span>Check now</button>
+            <button mat-stroked-button (click)="updater.check()" [disabled]="!updater.supported() || updater.busy()"><span class="material-symbols-rounded">update</span>{{ i18n.t('settings.check_now') }}</button>
           }
         </div>
-        <div class="setting"><div><strong>Test builds (测试版更新)</strong><span>Also install beta versions before everyone else. Only turn this on if you were asked to test. @if (updater.supported()) { <a href="" class="update-log-link" (click)="$event.preventDefault(); updater.revealLog()">Show update log</a> }</span></div><mat-slide-toggle [checked]="updater.channel() === 'beta'" [disabled]="!updater.supported()" (change)="updater.setChannel($event.checked ? 'beta' : 'stable')"></mat-slide-toggle></div>
+        <div class="setting"><div><strong>{{ i18n.t('settings.beta') }}</strong><span>{{ i18n.t('settings.beta_hint') }} @if (updater.supported()) { <a href="" class="update-log-link" (click)="$event.preventDefault(); updater.revealLog()">{{ i18n.t('settings.show_log') }}</a> }</span></div><mat-slide-toggle [checked]="updater.channel() === 'beta'" [disabled]="!updater.supported()" (change)="updater.setChannel($event.checked ? 'beta' : 'stable')"></mat-slide-toggle></div>
       </div></section>
 
-      <section><h2 class="section-title">Local Data</h2><div class="settings-list surface danger-zone"><div class="setting"><div><strong>Clear this device</strong><span>Remove saved account information, schedule, and tasks.</span></div><button mat-stroked-button (click)="clearData()">Clear data</button></div></div></section>
-      <footer>WLSAPlus {{ version }} · Local-first student tools</footer>
+      <section><h2 class="section-title">{{ i18n.t('settings.local_data') }}</h2><div class="settings-list surface danger-zone"><div class="setting"><div><strong>{{ i18n.t('settings.clear') }}</strong><span>{{ i18n.t('settings.clear_hint') }}</span></div><button mat-stroked-button (click)="clearData()">{{ i18n.t('settings.clear_btn') }}</button></div></div></section>
+      <footer>{{ i18n.t('settings.footer', { v: version }) }}</footer>
     </div>
   `,
   styles: `
@@ -80,30 +82,36 @@ export class SettingsPage {
   private readonly service = inject(PowerSchoolService); private readonly router = inject(Router); private readonly snack = inject(MatSnackBar); private readonly dialog = inject(MatDialog);
   readonly syncing = signal(false);
   readonly leadMinutes = CLASS_REMINDER_LEAD_MINUTES;
-  readonly colors: { value: AppColor; label: string; swatch: string }[] = [
-    { value: 'default', label: 'Default', swatch: '#00677a' },
-    { value: 'red', label: 'Red', swatch: '#a63d4b' },
-    { value: 'orange', label: 'Orange', swatch: '#8b5000' },
-    { value: 'yellow', label: 'Yellow', swatch: '#705d00' },
-    { value: 'blue', label: 'Blue', swatch: '#315da8' },
-    { value: 'green', label: 'Green', swatch: '#356a35' },
-    { value: 'purple', label: 'Purple', swatch: '#6750a4' },
-    { value: 'pink', label: 'Pink', swatch: '#9a3e70' },
-    { value: 'rose', label: 'Rose', swatch: '#984061' },
+  readonly i18n = inject(I18nService);
+  private readonly colorSwatches: { value: AppColor; swatch: string }[] = [
+    { value: 'default', swatch: '#00677a' },
+    { value: 'red', swatch: '#a63d4b' },
+    { value: 'orange', swatch: '#8b5000' },
+    { value: 'yellow', swatch: '#705d00' },
+    { value: 'blue', swatch: '#315da8' },
+    { value: 'green', swatch: '#356a35' },
+    { value: 'purple', swatch: '#6750a4' },
+    { value: 'pink', swatch: '#9a3e70' },
+    { value: 'rose', swatch: '#984061' },
   ];
+  colorOptions(): { value: AppColor; label: string; swatch: string }[] {
+    this.i18n.lang();
+    return this.colorSwatches.map((c) => ({ ...c, label: this.i18n.t('color.' + c.value) }));
+  }
   setTheme(theme: ThemeMode): void { this.store.updateSettings({ theme }); }
+  setLang(uiLang: UiLang): void { this.store.updateSettings({ uiLang }); this.i18n.refresh(); }
   setClassReminders(enabled: boolean): void { this.store.updateSettings({ classRemindersEnabled: enabled }); }
   setColor(color: AppColor): void { this.store.updateSettings({ color }); }
   toggleTuning(enabled: boolean): void { this.store.updateSettings({ tuningEnabled: enabled, tunedTime: enabled ? (this.store.settings().tunedTime ?? new Date().toISOString()) : null }); }
   localDateTime(): string { const date = this.clock.now(); const offset = date.getTimezoneOffset(); return new Date(date.getTime() - offset * 60_000).toISOString().slice(0, 16); }
   setTime(event: Event): void { this.clock.setTunedTime((event.target as HTMLInputElement).value); }
-  async sync(): Promise<void> { this.syncing.set(true); try { await this.service.syncSaved(); this.snack.open('Schedule updated', undefined, { duration: 2500 }); } catch (error) { this.snack.open(error instanceof Error ? error.message : 'Sync failed', 'Dismiss'); } finally { this.syncing.set(false); } }
+  async sync(): Promise<void> { this.syncing.set(true); try { await this.service.syncSaved(); this.snack.open(this.i18n.t('settings.synced'), undefined, { duration: 2500 }); } catch (error) { this.snack.open(error instanceof Error ? error.message : this.i18n.t('settings.sync_fail'), this.i18n.t('settings.dismiss')); } finally { this.syncing.set(false); } }
   async changeAccount(): Promise<void> { this.service.cancelPendingSync(); await this.router.navigateByUrl('/connect'); }
   clearData(): void {
-    this.dialog.open(ConfirmDialogComponent, { data: { title: 'Clear this device?', message: 'Saved credentials, schedule, and tasks will be removed.', action: 'Clear data' } }).afterClosed().subscribe(async (confirmed) => {
+    this.dialog.open(ConfirmDialogComponent, { data: { title: this.i18n.t('settings.clear_title'), message: this.i18n.t('settings.clear_msg'), action: this.i18n.t('settings.clear_btn') } }).afterClosed().subscribe(async (confirmed) => {
       if (!confirmed) return;
       try { await this.service.disconnect(); await this.router.navigateByUrl('/connect'); }
-      catch (error) { this.snack.open(error instanceof Error ? error.message : 'Could not clear saved credentials. Try again.', 'Dismiss'); }
+      catch (error) { this.snack.open(error instanceof Error ? error.message : this.i18n.t('settings.clear_fail'), this.i18n.t('settings.dismiss')); }
     });
   }
 }

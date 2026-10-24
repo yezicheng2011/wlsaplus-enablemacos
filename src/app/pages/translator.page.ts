@@ -6,13 +6,14 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { MatSnackBar } from '@angular/material/snack-bar';
 import { TranslationService } from '../core/translation.service';
+import { I18nService } from '../core/i18n.service';
 
 @Component({
   selector: 'app-translator-page',
   imports: [FormsModule, RouterLink, MatButtonModule, MatProgressSpinnerModule, MatSelectModule],
   template: `
     <div class="page translator-page">
-      <header class="page-header"><a class="back icon-button" routerLink="/tools" aria-label="Back to tools"><span class="material-symbols-rounded">arrow_back</span></a><h1 class="page-title">Translator</h1></header>
+      <header class="page-header"><a class="back icon-button" routerLink="/tools" [attr.aria-label]="i18n.t('translator.back')"><span class="material-symbols-rounded">arrow_back</span></a><h1 class="page-title">{{ i18n.t('translator.title') }}</h1></header>
       <div class="language-bar surface"><mat-select [(value)]="source" aria-label="Source language">@for (language of sourceLanguages; track language.code) { <mat-option [value]="language.code">{{ language.label }}</mat-option> }</mat-select><button class="swap icon-button" (click)="swap()" [disabled]="source === 'auto'" aria-label="Swap languages"><span class="material-symbols-rounded">swap_horiz</span></button><mat-select [(value)]="target" aria-label="Target language">@for (language of targetLanguages; track language.code) { <mat-option [value]="language.code">{{ language.label }}</mat-option> }</mat-select></div>
       <section class="translation-workspace surface">
         <div class="text-pane"><textarea [(ngModel)]="input" maxlength="5000" placeholder="Enter text" aria-label="Text to translate"></textarea><span class="counter">{{ input.length }} / 5000</span></div>
@@ -31,6 +32,8 @@ import { TranslationService } from '../core/translation.service';
   `,
 })
 export class TranslatorPage {
+  readonly i18n = inject(I18nService);
+
   private readonly service = inject(TranslationService); private readonly snack = inject(MatSnackBar);
   readonly working = signal(false);
   input = ''; output = ''; source = 'auto'; target = 'en';

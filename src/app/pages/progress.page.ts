@@ -7,6 +7,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import type { AssignmentScore, AttendanceEvent, ProgressCourse } from '../core/models';
 import { LocalStore } from '../core/local-store.service';
 import { PowerSchoolService } from '../core/powerschool.service';
+import { I18nService } from '../core/i18n.service';
 
 @Component({
   selector: 'app-progress-page',
@@ -15,7 +16,7 @@ import { PowerSchoolService } from '../core/powerschool.service';
     <div class="page">
       <header class="page-header">
         <div>
-          <h1 class="page-title">Progress</h1>
+          <h1 class="page-title">{{ i18n.t('progress.title') }}</h1>
           @if (store.progress().syncedAt) {
             <span class="sync-label">Updated {{ store.progress().syncedAt | date:'MMM d, HH:mm' }}</span>
           }
@@ -191,6 +192,8 @@ import { PowerSchoolService } from '../core/powerschool.service';
   `,
 })
 export class ProgressPage {
+  readonly i18n = inject(I18nService);
+
   readonly store = inject(LocalStore);
   private readonly powerSchool = inject(PowerSchoolService);
   readonly view = signal<'grades' | 'attendance'>('grades');

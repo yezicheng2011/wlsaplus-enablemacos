@@ -3,6 +3,7 @@ import { DatePipe } from '@angular/common';
 import { MatButtonToggleModule } from '@angular/material/button-toggle';
 import { LocalStore } from '../core/local-store.service';
 import type { ClassSession } from '../core/models';
+import { I18nService } from '../core/i18n.service';
 import { RoomMapDirective } from '../shared/room-map.directive';
 
 @Component({
@@ -10,7 +11,7 @@ import { RoomMapDirective } from '../shared/room-map.directive';
   imports: [DatePipe, MatButtonToggleModule, RoomMapDirective],
   template: `
     <div class="page">
-      <header class="page-header"><h1 class="page-title">Schedule</h1><span class="sync-label">Updated {{ store.schedule().syncedAt | date:'MMM d, HH:mm' }}</span></header>
+      <header class="page-header"><h1 class="page-title">{{ i18n.t('schedule.title') }}</h1><span class="sync-label">Updated {{ store.schedule().syncedAt | date:'MMM d, HH:mm' }}</span></header>
       <mat-button-toggle-group [value]="view()" (change)="view.set($event.value)" aria-label="Schedule view"><mat-button-toggle value="week">Full Schedule</mat-button-toggle><mat-button-toggle value="courses">All Courses</mat-button-toggle></mat-button-toggle-group>
       @if (view() === 'week') {
         <div class="layout-row"><span>Layout</span><mat-button-toggle-group [value]="layout()" (change)="layout.set($event.value)" aria-label="Full schedule layout"><mat-button-toggle value="agenda"><span class="material-symbols-rounded">view_agenda</span>Agenda</mat-button-toggle><mat-button-toggle value="grid"><span class="material-symbols-rounded">calendar_view_week</span>Week Grid</mat-button-toggle></mat-button-toggle-group></div>
@@ -106,6 +107,8 @@ import { RoomMapDirective } from '../shared/room-map.directive';
   `,
 })
 export class SchedulePage {
+  readonly i18n = inject(I18nService);
+
   readonly store = inject(LocalStore);
   readonly view = signal<'week' | 'courses'>('week');
   readonly layout = signal<'agenda' | 'grid'>('agenda');

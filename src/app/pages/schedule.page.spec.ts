@@ -16,7 +16,7 @@ function session(id: string, localStart: string): ClassSession {
 
 async function render(sessions: ClassSession[]) {
   const schedule = signal<ScheduleSnapshot>({ syncedAt: '', weekStart: '', weekEnd: '', courses: [], sessions });
-  TestBed.configureTestingModule({ providers: [{ provide: LocalStore, useValue: { schedule } }] });
+  TestBed.configureTestingModule({ providers: [{ provide: LocalStore, useValue: { schedule, settings: signal({ theme: 'system', color: 'default', uiLang: 'en', tuningEnabled: false, tunedTime: null, classRemindersEnabled: true }) } }] });
   const fixture = TestBed.createComponent(SchedulePage);
   await fixture.whenStable();
   return fixture;

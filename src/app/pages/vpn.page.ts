@@ -5,17 +5,18 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSelectModule } from '@angular/material/select';
 import { VpnService } from '../core/vpn.service';
+import { I18nService } from '../core/i18n.service';
 
 @Component({
   selector: 'app-vpn-page',
   imports: [DatePipe, RouterLink, MatButtonModule, MatProgressSpinnerModule, MatSelectModule],
   template: `
     <div class="page tool-page">
-      <header class="page-header"><a class="back icon-button" routerLink="/tools" aria-label="Back to tools"><span class="material-symbols-rounded">arrow_back</span></a><div><h1 class="page-title">VPN</h1><span>WLSAPlus relay</span></div><span class="spacer"></span><a mat-stroked-button class="guide-link" [href]="guideUrl" target="_blank" rel="noopener noreferrer" (click)="openGuide($event)"><span class="material-symbols-rounded">help</span>How to use</a></header>
+      <header class="page-header"><a class="back icon-button" routerLink="/tools" [attr.aria-label]="i18n.t('map.back')"><span class="material-symbols-rounded">arrow_back</span></a><div><h1 class="page-title">{{ i18n.t('vpn.title') }}</h1><span>WLSAPlus relay</span></div><span class="spacer"></span><a mat-stroked-button class="guide-link" [href]="guideUrl" target="_blank" rel="noopener noreferrer" (click)="openGuide($event)"><span class="material-symbols-rounded">help</span>{{ i18n.t('vpn.how') }}</a></header>
 
       <section class="node-panel surface">
         <div class="node-heading">
-          <div><strong>Node</strong><span>Choose a relay node before connecting.</span></div>
+          <div><strong>{{ i18n.t('vpn.node') }}</strong><span>{{ i18n.t('vpn.node_hint') }}</span></div>
           <div class="node-actions">
             <button mat-stroked-button type="button" (click)="vpn.refreshNodes()" [disabled]="vpn.nodesLoading() || busy()">Refresh</button>
             <button mat-stroked-button type="button" (click)="vpn.testLatency()" [disabled]="vpn.latencyTesting() || !vpn.nodes().length || busy()">{{ vpn.latencyTesting() ? 'Testing…' : 'Test latency' }}</button>
@@ -52,7 +53,7 @@ import { VpnService } from '../core/vpn.service';
       </section>
       <section class="wechat-panel surface" [class.ok]="vpn.wechatResult()?.reachable === true" [class.bad]="vpn.wechatResult()?.reachable === false">
         <div class="wechat-copy">
-          <strong>WeChat check</strong>
+          <strong>{{ i18n.t('vpn.wechat') }}</strong>
           <span>@if (vpn.wechatTesting()) { Testing https://weixin.qq.com/… } @else if (vpn.wechatResult(); as result) { {{ result.message }} } @else { Probe WeChat reachability with VPN on or off (no WeChat app required). }</span>
         </div>
         <button mat-stroked-button type="button" (click)="vpn.testWeChat()" [disabled]="vpn.wechatTesting() || busy()">
@@ -81,6 +82,8 @@ import { VpnService } from '../core/vpn.service';
   `,
 })
 export class VpnPage {
+  readonly i18n = inject(I18nService);
+
   readonly vpn = inject(VpnService); readonly status = this.vpn.status;
   readonly guideUrl = 'https://wlsaplus.spacehubxyz.hk/guide/wechat/';
   readonly busy = computed(() => this.status().state === 'connecting' || this.status().state === 'disconnecting');

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, computed, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -9,6 +9,7 @@ import { UpdateService } from '../core/update.service';
 import { NoticeService } from '../core/notice.service';
 import { ClassReminderService } from '../core/class-reminder.service';
 import { FORUM_BRAND } from '../core/forum.config';
+import { I18nService } from '../core/i18n.service';
 
 interface NavItem { path: string; label: string; icon: string; tooltip?: string; brand?: 'forum' }
 
@@ -18,9 +19,9 @@ interface NavItem { path: string; label: string; icon: string; tooltip?: string;
   template: `
     <div class="app-frame">
       <aside class="rail">
-        <a class="brand" routerLink="/" aria-label="WLSAPlus home"><img src="icons/app-icon.svg" alt=""></a>
-        <nav aria-label="Main navigation">
-          @for (item of nav; track item.path) {
+        <a class="brand" routerLink="/" [attr.aria-label]="i18n.t('nav.home_aria')"><img src="icons/app-icon.svg" alt=""></a>
+        <nav [attr.aria-label]="i18n.t('nav.main')">
+          @for (item of nav(); track item.path) {
             <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }" [class.forum]="item.brand === 'forum'" [matTooltip]="item.tooltip ?? item.label" matTooltipPosition="right" [attr.aria-label]="item.tooltip ?? item.label">
               <span class="material-symbols-rounded">{{ item.icon }}</span><span>{{ item.label }}</span>
             </a>
@@ -33,7 +34,7 @@ interface NavItem { path: string; label: string; icon: string; tooltip?: string;
           <aside class="notice-alert" role="alertdialog" aria-modal="true" aria-live="polite">
             <span class="notice-icon material-symbols-rounded">campaign</span>
             <div class="notice-copy"><strong>{{ notice.notice()?.title }}</strong><span>{{ notice.notice()?.content }}</span></div>
-            <button mat-flat-button type="button" (click)="notice.dismiss()" aria-label="Dismiss notice">Got it</button>
+            <button mat-flat-button type="button" (click)="notice.dismiss()" [attr.aria-label]="i18n.t('notice.dismiss')">{{ i18n.t('notice.dismiss') }}</button>
           </aside>
         </div>
       }
@@ -41,16 +42,16 @@ interface NavItem { path: string; label: string; icon: string; tooltip?: string;
         <aside class="update-alert" aria-live="polite">
           <span class="update-icon material-symbols-rounded">system_update</span>
           <div class="update-copy">
-            <strong>@if (updater.status().state === 'ready') { Update ready } @else { Installing update }</strong>
+            <strong>@if (updater.status().state === 'ready') { {{ i18n.t('update.ready') }} } @else { {{ i18n.t('update.installing') }} }</strong>
             <span>{{ updater.message() }}</span>
           </div>
           @if (updater.status().state === 'ready') {
-            <button mat-flat-button (click)="updater.install()"><span class="material-symbols-rounded">restart_alt</span>Restart</button>
+            <button mat-flat-button (click)="updater.install()"><span class="material-symbols-rounded">restart_alt</span>{{ i18n.t('update.restart') }}</button>
           }
         </aside>
       }
-      <nav class="bottom-nav" aria-label="Main navigation">
-        @for (item of nav; track item.path) {
+      <nav class="bottom-nav" [attr.aria-label]="i18n.t('nav.main')">
+        @for (item of nav(); track item.path) {
           <a [routerLink]="item.path" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: item.path === '/' }" [class.forum]="item.brand === 'forum'" [attr.aria-label]="item.tooltip ?? item.label">
             <span class="material-symbols-rounded">{{ item.icon }}</span><span>{{ item.label }}</span>
           </a>
@@ -96,14 +97,18 @@ export class ShellComponent implements OnInit {
   private readonly powerSchool = inject(PowerSchoolService);
   readonly updater = inject(UpdateService);
   readonly notice = inject(NoticeService);
-  readonly nav: NavItem[] = [
-    { path: '/', label: 'Home', icon: 'home' },
-    { path: '/schedule', label: 'Schedule', icon: 'calendar_month' },
-    { path: '/progress', label: 'Progress', icon: 'monitoring' },
-    { path: '/forum', label: FORUM_BRAND.navLabel, icon: FORUM_BRAND.icon, tooltip: FORUM_BRAND.name, brand: 'forum' },
-    { path: '/tools', label: 'Tools', icon: 'build' },
-    { path: '/settings', label: 'Settings', icon: 'settings' },
-  ];
+  readonly i18n = inject(I18nService);
+  readonly nav = computed<NavItem[]>(() => {
+    this.i18n.lang();
+    return [
+      { path: '/', label: this.i18n.t('nav.home'), icon: 'home' },
+      { path: '/schedule', label: this.i18n.t('nav.schedule'), icon: 'calendar_month' },
+      { path: '/progress', label: this.i18n.t('nav.progress'), icon: 'monitoring' },
+      { path: '/forum', label: this.i18n.t('nav.forum'), icon: FORUM_BRAND.icon, tooltip: this.i18n.t('forum.name'), brand: 'forum' },
+      { path: '/tools', label: this.i18n.t('nav.tools'), icon: 'build' },
+      { path: '/settings', label: this.i18n.t('nav.settings'), icon: 'settings' },
+    ];
+  });
 
   constructor() {
     // Start syncing the schedule to the macOS class reminder scheduler.
@@ -111,6 +116,7 @@ export class ShellComponent implements OnInit {
   }
 
   async ngOnInit(): Promise<void> {
+    this.i18n.refresh();
     const credentials = await this.vault.get();
     if (!credentials) {
       if (!this.store.hasSchedule() && sessionStorage.getItem('wlsaplus:offline') !== 'true') await this.router.navigateByUrl('/connect');

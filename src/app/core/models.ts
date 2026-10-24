@@ -1,4 +1,5 @@
 export type ThemeMode = 'system' | 'light' | 'dark';
+export type UiLang = 'zh' | 'en' | 'system';
 export type AppColor = 'default' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'rose';
 
 export interface PowerSchoolCredentials {
@@ -186,6 +187,8 @@ export function todoDeadlineProgress(todo: Pick<TodoItem, 'createdAt' | 'endAt'>
 export interface AppSettings {
   theme: ThemeMode;
   color: AppColor;
+  /** UI language: explicit zh/en, or follow the OS (Chinese systems stay Chinese). */
+  uiLang: UiLang;
   tuningEnabled: boolean;
   tunedTime: string | null;
   /** macOS desktop: notify a few minutes before each class starts. */
