@@ -7,7 +7,7 @@ import CommonCrypto
 // https://www.v2fly.org/config/protocols/vmess.html
 // The latter defines alterId=0 as AEAD, >0 as legacy. The primary UUID is used
 // as the authentication ID; alter IDs are optional additional accepted identities.
-// Standard format (S=1), AES-128-GCM security=3. Optional masking/padding,
+// Standard format (S=1), body security AES-128-GCM (3) or ChaCha20-Poly1305 (4). Optional masking/padding,
 // authenticated-length experiments and multiplexing are deliberately not negotiated.
 
 enum VMessCrypto {
@@ -65,6 +65,28 @@ enum VMessCrypto {
     }
 }
 
+/// VMess body security. "auto" keeps AES-128-GCM, matching common clients on hardware with AES.
+public enum VMessSecurity: UInt8 {
+    case aes128gcm = 0x03
+    case chacha20poly1305 = 0x04
+
+    /// Accepts the common subscription spellings (case-insensitive); nil means "auto".
+    public init?(name: String?) {
+        switch (name ?? "auto").lowercased().trimmingCharacters(in: .whitespaces) {
+        case "", "auto", "aes-128-gcm": self = .aes128gcm
+        case "chacha20-poly1305", "chacha20-ietf-poly1305": self = .chacha20poly1305
+        default: return nil
+        }
+    }
+    var cipher: ShadowsocksCipher { self == .aes128gcm ? .aes128gcm : .chacha20poly1305 }
+    /// ChaCha20-Poly1305 expands the 16-byte body key to MD5(key) || MD5(MD5(key)).
+    func bodyKey(_ key: Data) -> Data {
+        guard self == .chacha20poly1305 else { return key }
+        let first = ProtocolCrypto.md5(key)
+        return first + ProtocolCrypto.md5(first)
+    }
+}
+
 /// CFB128 preserves state across partial header reads. AES itself is the system primitive.
 final class AESCFB128 {
     private let key: Data
@@ -100,6 +122,9 @@ final class VMessSession {
     private let responseIV: Data
     private let responseKey: Data
     private let responseAuth: UInt8
+    private let security: VMessSecurity
+    private let requestBodyKey: Data
+    private let responseBodyKey: Data
     private var requestCount: UInt32 = 0
     private var responseCount: UInt32 = 0
     private var headerSent = false
@@ -114,7 +139,7 @@ final class VMessSession {
 
     init(uuid: String, alterId: Int = 0, destinationHost: String, destinationPort: UInt16,
          udp: Bool, requestIV: Data? = nil, requestKey: Data? = nil,
-         responseAuth: UInt8? = nil) throws {
+         responseAuth: UInt8? = nil, security: VMessSecurity = .aes128gcm) throws {
         guard (0...65535).contains(alterId) else { throw ProxyError.configuration("Invalid VMess alterId") }
         identity = try VMessCrypto.uuidBytes(uuid)
         commandKey = ProtocolCrypto.md5(identity + VMessCrypto.commandSalt)
@@ -128,6 +153,9 @@ final class VMessSession {
         guard self.requestIV.count == 16, self.requestKey.count == 16 else { throw ProxyError.authentication }
         responseIV = aead ? Data(ProtocolCrypto.sha256(self.requestIV).prefix(16)) : ProtocolCrypto.md5(self.requestIV)
         responseKey = aead ? Data(ProtocolCrypto.sha256(self.requestKey).prefix(16)) : ProtocolCrypto.md5(self.requestKey)
+        self.security = security
+        requestBodyKey = security.bodyKey(self.requestKey)
+        responseBodyKey = security.bodyKey(responseKey)
         if !aead { legacyResponseCipher = try AESCFB128(key: responseKey, iv: responseIV, decrypt: true) }
     }
 
@@ -136,7 +164,7 @@ final class VMessSession {
         guard !headerSent else { throw ProxyError.malformed("VMess header already sent") }
         headerSent = true
         var command = Data([1]) + requestIV + requestKey
-        command.append(contentsOf: [responseAuth, 0x01, 0x03, 0, udp ? 0x02 : 0x01])
+        command.append(contentsOf: [responseAuth, 0x01, security.rawValue, 0, udp ? 0x02 : 0x01])
         command.append(address)
         command.append(WireBytes.be32(VMessCrypto.fnv1a(command)))
         let now = Int64(Date().timeIntervalSince1970)
@@ -184,7 +212,7 @@ final class VMessSession {
         while position < plain.count {
             let count = min(maxPlain, plain.count - position)
             let payload = Data(plain.dropFirst(position).prefix(count))
-            let encrypted = try ProtocolCrypto.seal(payload, key: requestKey,
+            let encrypted = try security.cipher.seal(payload, key: requestBodyKey,
                                                      nonce: bodyNonce(iv: requestIV, counter: requestCount))
             requestCount += 1
             result.append(WireBytes.be16(UInt16(encrypted.count)) + encrypted)
@@ -195,7 +223,7 @@ final class VMessSession {
 
     func finishWriting() throws -> Data {
         guard headerSent, !requestEnded else { throw ProxyError.closed }
-        let terminator = try ProtocolCrypto.seal(Data(), key: requestKey,
+        let terminator = try security.cipher.seal(Data(), key: requestBodyKey,
                                                   nonce: bodyNonce(iv: requestIV, counter: requestCount))
         requestCount += 1; requestEnded = true
         return WireBytes.be16(UInt16(terminator.count)) + terminator
@@ -218,7 +246,7 @@ final class VMessSession {
             }
             guard incoming.count >= payloadLength! else { break }
             let packet = take(payloadLength!)
-            let plain = try ProtocolCrypto.open(packet, key: responseKey,
+            let plain = try security.cipher.open(packet, key: responseBodyKey,
                                                  nonce: bodyNonce(iv: responseIV, counter: responseCount))
             responseCount += 1; payloadLength = nil
             if plain.isEmpty {

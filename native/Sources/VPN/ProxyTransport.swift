@@ -42,8 +42,8 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
         }
         switch type.lowercased() {
         case "ss", "shadowsocks":
-            guard cipher?.lowercased() == "aes-256-gcm", password != nil else {
-                throw ProxyError.unsupported("Shadowsocks requires aes-256-gcm and a password")
+            guard ShadowsocksCipher(name: cipher) != nil, password != nil else {
+                throw ProxyError.unsupported("Shadowsocks requires a password and one of aes-128-gcm, aes-256-gcm, chacha20-ietf-poly1305")
             }
             guard tls != true, network == nil || network == "tcp" else {
                 throw ProxyError.unsupported("Shadowsocks transport plugins are not supported")
@@ -55,8 +55,8 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
             guard (0...65535).contains(alterId ?? 0) else {
                 throw ProxyError.configuration("VMess alterId must be in 0...65535")
             }
-            guard ["auto", "aes-128-gcm"].contains((cipher ?? "auto").lowercased()) else {
-                throw ProxyError.unsupported("This VMess implementation supports auto and aes-128-gcm")
+            guard VMessSecurity(name: cipher) != nil else {
+                throw ProxyError.unsupported("This VMess implementation supports auto, aes-128-gcm and chacha20-poly1305")
             }
             guard ["tcp", "ws"].contains((network ?? "tcp").lowercased()) else {
                 throw ProxyError.unsupported("VMess requires TCP or WebSocket transport")
@@ -136,11 +136,15 @@ final class ProxyConnection {
                 guard let password = node.password, !password.isEmpty else {
                     throw ProxyError.configuration("Shadowsocks requires a non-empty password")
                 }
+                guard let method = ShadowsocksCipher(name: node.cipher) else {
+                    throw ProxyError.unsupported("Unsupported Shadowsocks cipher")
+                }
                 shadowsocks = try ShadowsocksSession(password: password, destinationHost: host,
-                                                      destinationPort: port, udp: datagram)
+                                                      destinationPort: port, udp: datagram, cipher: method)
             } else {
                 vmess = try VMessSession(uuid: node.uuid!, alterId: node.alterId ?? 0,
-                                         destinationHost: host, destinationPort: port, udp: datagram)
+                                         destinationHost: host, destinationPort: port, udp: datagram,
+                                         security: VMessSecurity(name: node.cipher) ?? .aes128gcm)
             }
             // 6s per resolved address, up to 4 addresses, fits inside the outer deadline.
             let network = try NetworkByteTransport(node: node, datagram: ss && datagram, queue: queue,

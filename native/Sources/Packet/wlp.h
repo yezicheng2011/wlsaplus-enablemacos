@@ -29,8 +29,9 @@ typedef struct {
  * IPv6 unfragmentable headers are limited to 2048 bytes.
  *
  * This is a small TCP proxy endpoint, not a general IP router: ICMP,
- * TCP urgent data, IPv6 jumbograms and IPsec are unsupported. No TCP option
- * is negotiated other than MSS; no window scaling, SACK, timestamps, or ECN.
+ * TCP urgent data, IPv6 jumbograms and IPsec are unsupported. Negotiated TCP
+ * options: MSS and window scaling (RFC 7323; the client's shift is honoured up
+ * to 14 and the engine announces shift 0). No SACK, timestamps, or ECN.
  */
 wlp_engine *wlp_new(wlp_callbacks callbacks, void *context);
 /* 0 accepted/handled; -1 malformed, unsupported, or resource exhausted. */
