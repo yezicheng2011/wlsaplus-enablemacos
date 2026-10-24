@@ -1,4 +1,4 @@
-// SSO for WLSAPlus 论坛 — see /workspace/wlsaplus-forum-brand/SSO_INTEGRATION.md §4.
+// SSO for WLSAPlus Forum — see /workspace/wlsaplus-forum-brand/SSO_INTEGRATION.md §4.
 //
 // The app never signs identity (no secrets / client_id ship in the app). Main forwards the
 // live PowerSchool session cookies (whitelisted names only) to the forum server, which checks

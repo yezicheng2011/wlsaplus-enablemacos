@@ -1,6 +1,6 @@
 #!/bin/bash
-# 旧版「一键安装 DMG」脚本已停用。
-# 2.0.0 起，同学请从源码编译：见同目录《说明书》或运行 编译wlsaplus.command
+# The old "one-click DMG install" script is retired.
+# Since 2.0.0, classmates should build from source: see the manual in this folder or run 编译wlsaplus.command
 echo -ne "\033]0;WLSAPlus 安装说明\007"
 echo "============================================"
 echo "  WLSAPlus 2.0.0 不再使用本「DMG 一键安装」脚本"

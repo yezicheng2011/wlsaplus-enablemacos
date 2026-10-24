@@ -5,7 +5,7 @@ electron-updater cannot be used. The app updates itself instead:
 
 1. **Check** (8 s after start, then every 6 h, or Settings → Updates → Check now):
    `https://wlsaplus.spacehubxyz.hk/api/latest` → `/download/<tag>/update-manifest.json`.
-   With **Settings → Updates → Test builds (测试版更新)** on (default for prerelease builds, or `--update-channel=beta`)
+   With **Settings → Updates → Test builds** on (default for prerelease builds, or `--update-channel=beta`)
    it also reads `/download/channel-beta/update-manifest.json`. Mirrors (gh-proxy) are only a fallback.
 2. **Verify the manifest**: Ed25519 signature (public key in `electron/update-config.cjs`, private key only in the
    GitHub secret `WLSAPLUS_UPDATE_ED25519_KEY`). Never a lower/equal version; stable channel never takes prereleases;

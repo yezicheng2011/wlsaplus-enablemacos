@@ -1,10 +1,10 @@
 #!/bin/bash
 # ============================================
-# WLSAPlus 2.0.0 一键从源码编译（macOS）
-# 依赖：Xcode 命令行工具；不需要 Node / Homebrew / 开发者账号
-# 若尚未克隆仓库，脚本会按序尝试国内镜像：
+# WLSAPlus 2.0.0 one-click build from source (macOS)
+# Requires: Xcode Command Line Tools; no Node / Homebrew / developer account needed
+# If the repository has not been cloned yet, the script tries mainland-China mirrors in order:
 #   gh-proxy.com → ghproxy.net → ghfast.top
-# （勿用常被墙的 ghproxy.com；失败则 zip 回退）
+# (avoid ghproxy.com, which is often blocked; falls back to a zip download on failure)
 # © daniel.ye
 # ============================================
 
@@ -25,7 +25,7 @@ fail() {
 }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# release-kit/ → 仓库根目录
+# release-kit/ → repository root
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NATIVE="$REPO_ROOT/native"
 VERSION="${WLSAPLUS_VERSION:-2.0.0}"

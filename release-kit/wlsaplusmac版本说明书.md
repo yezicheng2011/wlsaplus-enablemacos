@@ -1,37 +1,37 @@
-# WLSAPlus macOS 版本说明书（2.0.0）
+# WLSAPlus for macOS — User Manual (2.0.0)
 
-面向同学的安装方式：**按本文从源码编译**。不需要 Apple 开发者账号，也不需要用官网/GitHub 的一键 DMG 当主路径（那是开发者自测与应用内更新用的）。
+How classmates should install it: **build from source by following this guide**. You don't need an Apple Developer account, and you shouldn't treat the one-click DMG on the website / GitHub as the main install path (that is for developer self-testing and in-app updates).
 
 © daniel.ye
 
 ---
 
-## 这是什么
+## What this is
 
-- **产品**：WLSAPlus macOS 客户端（课表、成绩、考勤、开课提醒、校园工具、论坛、VPN）
-- **形态**：macOS **原生**应用（Swift / C），与 Windows / Android 版**相互独立、互不相通**
-- **VPN 内核**：**自研开源的 MockMini**（Apache-2.0；说明见 [mockmini.danielye2011.uk](https://mockmini.danielye2011.uk/)），不再使用旧版 mihomo / Clash Meta
-- **当前版本**：2.0.0
+- **Product**: the WLSAPlus macOS client (schedule, grades, attendance, class reminders, campus tools, forum, VPN)
+- **Form**: a **native** macOS app (Swift / C), **fully independent** of the Windows / Android editions
+- **VPN core**: **MockMini, our own open-source engine** (Apache-2.0; see [mockmini.danielye2011.uk](https://mockmini.danielye2011.uk/)); the old mihomo / Clash Meta core is no longer used
+- **Current version**: 2.0.0
 
-## 系统要求
+## System requirements
 
-- macOS **13** 或更新
-- **Intel（x86_64）与 Apple 芯片（arm64）** 都支持（编译产物为 universal）
-- 需要安装 **Xcode 命令行工具**（不是完整 Xcode App；体积小很多）
-- **不需要**：Homebrew、Node.js、npm、Apple Developer 付费账号
+- macOS **13** or later
+- Both **Intel (x86_64) and Apple silicon (arm64)** are supported (the build output is universal)
+- The **Xcode Command Line Tools** must be installed (not the full Xcode app — much smaller)
+- **Not needed**: Homebrew, Node.js, npm, a paid Apple Developer account
 
-## 安装：从源码编译（推荐）
+## Install: build from source (recommended)
 
-### 方式 A：终端复制命令（最清楚）
+### Option A: copy commands into Terminal (clearest)
 
-1. 打开「终端」（启动台 → 其他 → 终端）。
-2. 若从未装过命令行工具，先执行（弹出窗口按提示安装，装完再继续）：
+1. Open **Terminal** (Launchpad → Other → Terminal).
+2. If you've never installed the command line tools, run this first (follow the prompts in the pop-up window, then continue once it finishes):
 
 ```bash
 xcode-select --install
 ```
 
-3. 复制执行下面整段（**推荐国内镜像 gh-proxy.com**；勿与常被墙的 `ghproxy.com` 混淆。备选把主机换成 `ghproxy.net` 或 `ghfast.top`）：
+3. Copy and run the whole block below (**the gh-proxy.com mirror is recommended in mainland China**; don't confuse it with `ghproxy.com`, which is often blocked. As fallbacks, swap the host for `ghproxy.net` or `ghfast.top`):
 
 ```bash
 git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
@@ -40,7 +40,7 @@ WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
-若 `git clone` 失败，用同一镜像下载 zip 再编译：
+If `git clone` fails, download the zip through the same mirror and build:
 
 ```bash
 curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
@@ -50,9 +50,9 @@ WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
-能直连 GitHub 时也可改用 `https://github.com/yezicheng2011/wlsaplus-enablemacos.git`。
+If you can reach GitHub directly, use `https://github.com/yezicheng2011/wlsaplus-enablemacos.git` instead.
 
-4. （可选）装进「应用程序」：
+4. (Optional) Install into Applications:
 
 ```bash
 ditto out/WLSAPlus.app /Applications/WLSAPlus.app
@@ -60,84 +60,84 @@ xattr -cr /Applications/WLSAPlus.app
 open /Applications/WLSAPlus.app
 ```
 
-编译成功后，应用在 `wlsaplus-enablemacos/native/out/WLSAPlus.app`。
+After a successful build, the app is at `wlsaplus-enablemacos/native/out/WLSAPlus.app`.
 
-### 方式 B：双击一键编译脚本
+### Option B: double-click the one-click build script
 
-若你已经把本仓库克隆到本机：
+If you have already cloned this repository to your Mac:
 
-1. 在访达中打开仓库里的 `release-kit` 文件夹
-2. 双击 **`编译wlsaplus.command`**
-3. 若提示无法打开：右键 → 打开 → 打开；或先在终端执行 `chmod +x` 后再双击
-4. 脚本会检查命令行工具 → 编译 2.0.0 → 打开应用
+1. In Finder, open the `release-kit` folder in the repository
+2. Double-click **`编译wlsaplus.command`**
+3. If it says it can't be opened: right-click → Open → Open, or run `chmod +x` on it in Terminal first and then double-click
+4. The script checks the command line tools → builds 2.0.0 → opens the app
 
-> **国内镜像（推荐顺序）**：`gh-proxy.com` → `ghproxy.net` → `ghfast.top`（把 clone / zip URL 里的主机名换成对应即可）。勿用常被墙的 `ghproxy.com`（无连字符）。编译本身**不依赖** npm，也不下载境外 Electron / VPN 内核。
+> **Mirrors for mainland China (in order of preference)**: `gh-proxy.com` → `ghproxy.net` → `ghfast.top` (just replace the host name in the clone / zip URL). Don't use `ghproxy.com` (no hyphen), which is often blocked. The build itself does **not** depend on npm and does not download Electron or a VPN core from overseas.
 
-## 第一次打开：为什么显示「不安全」而不是「已损坏」
+## First launch: why it says "not safe" rather than "damaged"
 
-编译产物默认是 **自签名**（ad-hoc），**没有**也不需要 Apple 公证。
+The build output is **self-signed** (ad-hoc) by default; it is **not** notarized by Apple, and doesn't need to be.
 
-- **正常情况**：提示「无法验证开发者」或「不安全」→ 对应用 **右键 → 打开 → 打开**，或到「系统设置 → 隐私与安全性 → 仍要打开」。
-- **若仍显示「已损坏」**：多半是隔离属性（从网盘/浏览器拷过来时常见）。在终端执行：
+- **Normal case**: you see "developer cannot be verified" or "not safe" → **right-click the app → Open → Open**, or go to **System Settings → Privacy & Security → Open Anyway**.
+- **If it still says "damaged"**: this is usually the quarantine attribute (common when copied from cloud storage or a browser). Run in Terminal:
 
 ```bash
 xattr -cr /Applications/WLSAPlus.app
-# 或针对 out 目录里的包：
+# Or for the bundle in the out directory:
 # xattr -cr /path/to/wlsaplus-enablemacos/native/out/WLSAPlus.app
 ```
 
-然后再右键打开。同学之间互传时，优先传**自己编译好的 `.app`**，并提醒对方用右键打开；不要指望未公证的包像 App Store 应用一样静默通过。
+Then right-click → Open again. When sharing with classmates, prefer sending **a `.app` you built yourself** and remind them to open it with right-click; don't expect an un-notarized app to pass silently like an App Store app.
 
-## 使用说明（功能）
+## Using the app (features)
 
-### 课表与成绩
+### Schedule and grades
 
-在应用内 Connect / 同步 PowerSchool 后，可在课表与 Progress（成绩、作业、考勤）中查看。数据保存在本机；离线可看上次同步结果。首次从旧 Electron 版迁到 2.0.0 时，**账号密码需要重新登录**（旧加密格式不会自动解密迁移）。
+After you Connect / sync PowerSchool in the app, you can view them in Schedule and Progress (grades, assignments, attendance). Data is stored locally; the last sync is viewable offline. When moving from the old Electron version to 2.0.0 for the first time, **you need to sign in again** (the old encrypted format is not automatically decrypted and migrated).
 
-### WLSAPlus 论坛
+### WLSAPlus Forum
 
-左侧栏（窗口较窄时为底部栏）的 **Forum** 标签：
+The **Forum** tab in the sidebar (bottom bar when the window is narrow):
 
-- 已同步 PowerSchool 时可**自动登录**（只转交会话，密码不发给论坛；帖子仍匿名）
-- 浅色 / 深色跟随应用主题
-- 嵌入模式使用论坛底部导航
+- **Auto sign-in** when PowerSchool is synced (only the session is passed on; your password is never sent to the forum; posts stay anonymous)
+- Light / dark follows the app theme
+- Embed mode uses the forum's bottom navigation
 
-### VPN（MockMini）
+### VPN (MockMini)
 
-1. 打开 Tools → VPN
-2. 可先刷新节点、测延迟，再选中节点
-3. 点 Connect；若弹出管理员授权，输入本机密码并允许
-4. 断开时先在 VPN 页点 Disconnect（2.0.0 **没有**旧版 `clash` / mihomo 进程，不必再去活动监视器里杀 clash）
+1. Open Tools → VPN
+2. Optionally refresh nodes and test latency, then select a node
+3. Click Connect; if an administrator authorization prompt appears, enter your Mac password and allow it
+4. To disconnect, click Disconnect on the VPN page (2.0.0 has **no** old `clash` / mihomo process, so there's no need to kill clash in Activity Monitor)
 
-### 开课提醒
+### Class reminders
 
-设置里可开关 Class reminders。开启后，开课前约 5 分钟发 macOS 通知（需已同步课表）。
+Turn Class reminders on or off in Settings. When on, a macOS notification is sent about 5 minutes before class (requires a synced schedule).
 
-## 和 1.1.2 / 旧说明书的差别（一眼看懂）
+## Differences from 1.1.2 / the old manual (at a glance)
 
-| | 旧版 1.1.2 及更早 | 现在 2.0.0 |
+| | 1.1.2 and earlier | Now (2.0.0) |
 | --- | --- | --- |
-| 技术 | Electron + Node + `npm run electron:make` | 原生 Swift/C：`native/scripts/build.sh` |
-| 同学怎么装 | 构建包 / `working.command` / 或自备 Node 编译 | **git clone + build.sh**（或 `编译wlsaplus.command`） |
-| VPN | mihomo（Clash Meta） | **自研开源的 MockMini**（Apache-2.0） |
-| 关 VPN | 还可能要在活动监视器结束 `clash` | 应用内 Disconnect 即可 |
+| Technology | Electron + Node + `npm run electron:make` | Native Swift/C: `native/scripts/build.sh` |
+| How classmates install | Prebuilt package / `working.command` / or build with your own Node | **git clone + build.sh** (or `编译wlsaplus.command`) |
+| VPN | mihomo (Clash Meta) | **MockMini, our own open-source engine** (Apache-2.0) |
+| Turning off the VPN | Might also need to quit `clash` in Activity Monitor | Just click Disconnect in the app |
 
-## 常见问题
+## FAQ
 
-**Q：可以只下载 DMG、不编译吗？**  
-A：面向同学的正式路径是**源码编译**（本文）。GitHub Release / 应用内更新通道上的包供维护与自测；请以本说明书为准。
+**Q: Can I just download the DMG without building?**  
+A: The official path for classmates is **building from source** (this guide). Packages on GitHub Releases / the in-app update channel are for maintenance and self-testing; follow this manual.
 
-**Q：编译报错找不到 `xcrun` / `swiftc`？**  
-A：先执行 `xcode-select --install`，装完重开终端再编。
+**Q: The build fails because it can't find `xcrun` / `swiftc`?**  
+A: Run `xcode-select --install` first, then reopen Terminal and build again.
 
-**Q：要不要 `npm install`？**  
-A：日常装 2.0.0 **不要**。那是旧 Electron 树的命令。
+**Q: Do I need `npm install`?**  
+A: **No**, not for installing 2.0.0. That command is for the old Electron tree.
 
-**Q：版权与许可证？**  
-A：应用源码 Apache-2.0，见仓库 `LICENSE` / `NOTICE`。© daniel.ye
+**Q: Copyright and license?**  
+A: The app source code is Apache-2.0; see `LICENSE` / `NOTICE` in the repository. © daniel.ye
 
-## 相关链接
+## Links
 
-- 源码：<https://github.com/yezicheng2011/wlsaplus-enablemacos>
-- MockMini：<https://mockmini.danielye2011.uk/>
-- 官网：<https://wlsaplus.spacehubxyz.hk/>
+- Source code: <https://github.com/yezicheng2011/wlsaplus-enablemacos>
+- MockMini: <https://mockmini.danielye2011.uk/>
+- Official site: <https://wlsaplus.spacehubxyz.hk/>

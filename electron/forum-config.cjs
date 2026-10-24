@@ -1,4 +1,4 @@
-// WLSAPlus 论坛 (forum) configuration for the Electron main process.
+// WLSAPlus Forum configuration for the Electron main process.
 // Keep FORUM_URL / FORUM_FALLBACK_URL in sync with src/app/core/forum.config.ts
 // (forum-config.test.cjs enforces this).
 

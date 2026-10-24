@@ -1,4 +1,4 @@
-// WLSAPlus 论坛 (forum) — single place for forum URLs and brand.
+// WLSAPlus Forum — single place for forum URLs and brand.
 // Keep the URLs/partition in sync with electron/forum-config.cjs (checked by forum-config.test.cjs).
 // Brand colors live in src/styles.scss as --forum-accent / --forum-accent-soft / --forum-on-accent.
 

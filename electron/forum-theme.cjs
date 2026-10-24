@@ -1,4 +1,4 @@
-// WLSAPlus 论坛: make the forum follow the app's light/dark theme and mark embed mode.
+// WLSAPlus Forum: make the forum follow the app's light/dark theme and mark embed mode.
 // Cookie names live in forum-config.cjs (mirrored from src/app/core/forum.config.ts).
 
 const {

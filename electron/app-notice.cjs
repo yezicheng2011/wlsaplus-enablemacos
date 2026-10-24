@@ -1,4 +1,4 @@
-// In-app notice ("公告") served by the official WLSAPlus site. Fetched in the main process: the
+// In-app notice served by the official WLSAPlus site. Fetched in the main process: the
 // renderer runs from file:// (origin "null") and the site sends no CORS headers.
 const NOTICE_URL = 'https://wlsaplus.spacehubxyz.hk/notice.json';
 const NOTICE_TIMEOUT_MS = 8_000;

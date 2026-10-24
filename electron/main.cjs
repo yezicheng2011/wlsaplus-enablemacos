@@ -126,7 +126,7 @@ function configureExternalHelpLinks(win) {
   });
 }
 
-// WLSAPlus 论坛: the only <webview> allowed is the forum, in its own partition,
+// WLSAPlus Forum: the only <webview> allowed is the forum, in its own partition,
 // without the app preload. Popups and off-forum navigation go to the system browser.
 function configureForumWebview(win) {
   win.webContents.on('will-attach-webview', (event, webPreferences, params) => {

@@ -159,7 +159,7 @@ export class PowerSchoolService {
     return JSON.stringify([this.normalizeUrl(credentials.schoolUrl), credentials.username.trim()]);
   }
 
-  /** Signs the WLSAPlus 论坛 webview out so the next account doesn't inherit the forum login. */
+  /** Signs the WLSAPlus Forum webview out so the next account doesn't inherit the forum login. */
   private async clearForumSession(): Promise<void> {
     try { await window.wlsaplus?.forum?.clearSession(); } catch { /* Forum data is best-effort. */ }
   }

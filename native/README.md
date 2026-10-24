@@ -1,20 +1,20 @@
-# WLSAPlus 原生重写
+# WLSAPlus Native Rewrite
 
-这是 **当前支持的 macOS 产品路径**：独立编写的原生工程，使用 macOS 13+ 系统框架与 Apple 编译工具。与 Windows / Android 版本不共用代码与运行时；VPN / 网络栈亦为全新原生实现，不链接或分发 mihomo、gVisor、sing-box、WireGuard 等第三方内核。正式安装包与应用内更新从本目录构建发布（见仓库根目录 release workflow）。当前仍有列明场景的验证限制，不能把通过离线或 CI 抽测等同于完成了所有真实 Mac 场景验收。
+This is the **currently supported macOS product path**: an independently written native project that uses macOS 13+ system frameworks and Apple's build tools. It shares no code or runtime with the Windows / Android editions; the VPN / network stack is also a brand-new native implementation and does not link or distribute mihomo, gVisor, sing-box, WireGuard or any other third-party core. Official installers and in-app updates are built and released from this directory (see the release workflow at the repository root). Some listed scenarios still have validation limits — passing offline or CI spot checks is not the same as full acceptance across every real Mac scenario.
 
-界面保持 Home、Schedule、Progress、Forum、Tools、Settings 的功能入口。WebKit 仅显示本地 HTML/CSS/JavaScript；账号、文件、网络、通知、VPN 与更新由 Swift/C 实现。没有 npm、Swift Package、第三方 VPN 内核或第三方运行时依赖。
+The UI keeps the Home, Schedule, Progress, Forum, Tools and Settings entry points. WebKit only renders local HTML/CSS/JavaScript; accounts, files, networking, notifications, VPN and updates are implemented in Swift/C. There are no npm, Swift Package, third-party VPN core or third-party runtime dependencies.
 
-## 构建和检查
+## Build and check
 
-**普通用户安装请走源码编译**（仓库根 README 与 `release-kit/wlsaplusmac版本说明书.md`）。在已安装 Xcode 命令行工具的 Mac 上：
+**End users should install by building from source** (see the root README and `release-kit/wlsaplusmac版本说明书.md`). On a Mac with the Xcode Command Line Tools installed:
 
 ```sh
-# 推荐：直接编译 2.0.0（日常装应用不必先跑 test.sh）
+# Recommended: build 2.0.0 directly (no need to run test.sh just to install the app)
 WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
-开发者完整检查：
+Full developer check:
 
 ```sh
 bash scripts/test.sh
@@ -22,54 +22,54 @@ WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
-也可双击仓库 `release-kit/编译wlsaplus.command`。生成的应用同时包含 arm64 和 x86_64。默认 ad-hoc 签名（他人打开多为「无法验证开发者」，右键打开即可）；面向更新通道的正式包须使用原有固定证书与更新密钥。
+You can also double-click `release-kit/编译wlsaplus.command` in the repository. The resulting app contains both arm64 and x86_64. It is ad-hoc signed by default (others will usually see "developer cannot be verified"; right-click → Open works); official builds for the update channel must use the existing fixed certificate and update key.
 
-VPN 对外说明：内核为**自研开源的 MockMini**（Apache-2.0）。实现细节见下方「VPN」节与根目录 README。
+Public VPN description: the core is **MockMini, our own open-source engine** (Apache-2.0). See the "VPN" section below and the root README for implementation details.
 
-Linux 可以运行 C 数据包引擎、JavaScript 与 Swift Core 测试。Linux 的 Swift 语法检查不验证 Apple SDK 类型或系统行为，不能代替 macOS 构建。
+Linux can run the C packet engine, JavaScript and Swift Core tests. Swift syntax checks on Linux do not verify Apple SDK types or system behaviour and cannot replace a macOS build.
 
-Mac CI 已通过双架构构建、实际 WebKit 界面/原生桥接/课表解析器启动、现有 VMess 节点的真实隧道流量与网络恢复，以及原密钥和固定证书下的更新兼容检查。首次完整通过记录见 [Mac CI15](https://github.com/yezicheng2011/wlsaplus-enablemacos/actions/runs/39216072417)。这些是列明场景的验证，不能等同于全部功能与网络环境验收。
+Mac CI has passed the dual-architecture build, real WebKit UI / native bridge / schedule parser startup, real tunnel traffic and network recovery through existing VMess nodes, and update-compatibility checks with the original key and fixed certificate. The first fully passing run is [Mac CI15](https://github.com/yezicheng2011/wlsaplus-enablemacos/actions/runs/39216072417). These validate the listed scenarios only and are not equivalent to acceptance of every feature and network environment.
 
 ## VPN
 
-继续从原有订阅地址读取节点，支持该订阅声明的 Shadowsocks AES-256-GCM、VMess 旧版与 AEAD 认证，以及 TCP、TLS、WebSocket 和 UDP。加密调用 CryptoKit/CommonCrypto，网络调用 Network.framework，隧道使用系统 utun。协议与数据包处理代码为本工程新写，没有链接或分发 mihomo、gVisor、sing-box、WireGuard 等实现。
+Nodes are still read from the existing subscription URL. Supported: Shadowsocks AES-256-GCM as declared by that subscription, VMess legacy and AEAD authentication, plus TCP, TLS, WebSocket and UDP. Cryptography uses CryptoKit/CommonCrypto, networking uses Network.framework, and the tunnel uses the system utun. The protocol and packet-handling code is newly written for this project and does not link or distribute mihomo, gVisor, sing-box, WireGuard or similar implementations.
 
-本地 TCP 端点包含校验和、序列与确认、乱序缓冲、窗口、重传、FIN/RST，以及有界 IPv4/IPv6 分片重组。它仍是需要实际压力与互通验证的新实现：每个实例最多 128 个流，不协商窗口扩展/SACK/时间戳，不转发 ICMP 或 IPsec。详见 `Sources/Packet/README.md`。
+The local TCP endpoint implements checksums, sequence and acknowledgement numbers, out-of-order buffering, windowing, retransmission, FIN/RST, and bounded IPv4/IPv6 fragment reassembly. It is still a new implementation that needs real-world stress and interoperability testing: at most 128 flows per instance, no window-scaling/SACK/timestamp negotiation, and no forwarding of ICMP or IPsec. See `Sources/Packet/README.md` for details.
 
-提权辅助进程只有在协议出口验证、utun 配置、路由/DNS 事务及经隧道的 HTTPS 验证完成后才报告已连接。它监测父进程和物理网络变化，断开时恢复路由与 DNS；恢复失败会保留恢复日志并阻止安装更新。首次启动和连接会需要 macOS 管理员授权。
+The privileged helper only reports "connected" after protocol egress verification, utun configuration, the route/DNS transaction and an HTTPS check through the tunnel have all completed. It watches the parent process and physical network changes and restores routes and DNS on disconnect; if restoration fails, it keeps a recovery log and blocks update installation. The first launch and first connection require macOS administrator authorization.
 
-真实节点抽测使用独立测试实现验证了 4 个现有 VMess TCP/TLS 节点接受主 UUID 的旧版认证。Mac CI 已使用原生客户端和现有 VMess 节点通过 utun、HTTPS 204、UDP DNS、C 引擎 TCP/UDP 流量及双向代理字节检查；随机 DNS 查询还核对了发出、认证响应和成功写回 utun 三个环节。断开后原路由/DNS 与辅助进程退出检查均通过。先前抽测中 SS 与部分 WS 节点曾在 TCP 建连阶段耗尽单次连接预算（AAAA 优先或不可达地址占满探测时间，尚未进入协议协商）。现已改为解析后按 IPv4→IPv6 逐地址短超时拨号，并由冒烟在 VMess 通过后对 SS/WS 做软探测日志。协议互通与真实用户网络仍需 Mac 实机验收。
+Real-node spot checks used a standalone test implementation to verify that 4 existing VMess TCP/TLS nodes accept legacy authentication with the primary UUID. Mac CI has used the native client and existing VMess nodes to pass utun, HTTPS 204, UDP DNS, C-engine TCP/UDP traffic and bidirectional proxy byte checks; random DNS queries also verified the send, authenticated response and successful write-back to utun stages. After disconnecting, the original route/DNS and helper-exit checks all passed. In earlier spot checks, SS and some WS nodes exhausted the per-connection budget during TCP connect (AAAA-first or unreachable addresses consumed the probe time before protocol negotiation began). This now dials each resolved address IPv4 → IPv6 with short timeouts, and the smoke test soft-probes SS/WS and logs the result after VMess passes. Protocol interoperability and real user networks still need acceptance testing on real Macs.
 
-## 应用内更新兼容
+## In-app update compatibility
 
-保留原 Bundle ID `cn.org.wlsash.wlsaplus`、产品标识 `wlsaplus-macos`、原 Ed25519 公钥、代码签名证书指纹、更新站点、镜像候选、清单 format=1 与启动确认参数。原版更新器检查的是应用标识、版本、处理器和签名，不要求 Electron 资源，因此可以接受按这些条件正确签名的新原生包。
+The original bundle ID `cn.org.wlsash.wlsaplus`, product identifier `wlsaplus-macos`, original Ed25519 public key, code-signing certificate fingerprint, update site, mirror candidates, manifest format=1 and launch-confirmation parameters are all preserved. The original updater checks the app identifier, version, processor and signature and does not require Electron resources, so it accepts a new native package that is correctly signed under those conditions.
 
-新实现包括稳定/测试通道、版本与回滚黑名单检查、系统断点续传下载、大小/SHA-256 校验、ZIP 安全检查、代码签名验证、退出前断开 VPN、替换/备份和 90 秒启动确认回滚。新版本仍通过设置中的更新按钮下载和重启安装。
+The new implementation includes stable/test channels, version and rollback blocklist checks, resumable system downloads, size/SHA-256 verification, ZIP safety checks, code-signature verification, disconnecting the VPN before quitting, replacement/backup, and a 90-second launch-confirmation rollback. New versions are still downloaded and installed with a restart via the update button in Settings.
 
-发布准备使用已有 CI secrets（不生成替代密钥）：
+Release preparation uses the existing CI secrets (no replacement keys are generated):
 
 ```sh
 WLSAPLUS_VERSION=2.0.0-beta.1 bash scripts/release.sh
 ```
 
-需要先导入原固定代码签名证书，并设置 `WLSAPLUS_UPDATE_ED25519_KEY`。输出文件名和清单格式保持旧版兼容。`release.sh` 只在本地准备产物；仓库根目录的发布工作流取代原 Electron 产物流程，稳定版生成草稿，测试版更新现有 beta 通道。稳定草稿验收后发布时须选中「Set as the latest release」（CLI：`gh release edit v版本 --draft=false --latest`），旧版和新版的稳定更新按钮才能发现它。必须在真实 Mac 上验证旧版 1.1.2 → 新版、下次原生版本升级、取消授权、非可写 Applications 目录、断点续传与强制回滚。
+You must first import the original fixed code-signing certificate and set `WLSAPLUS_UPDATE_ED25519_KEY`. Output file names and the manifest format remain compatible with older versions. `release.sh` only prepares artifacts locally; the release workflow at the repository root replaces the old Electron artifact pipeline — stable releases are created as drafts, and test builds update the existing beta channel. When publishing an accepted stable draft you must tick "Set as the latest release" (CLI: `gh release edit v<version> --draft=false --latest`) so that the stable update button in both old and new versions can find it. The following must be verified on a real Mac: upgrading from 1.1.2 → the new version, the next native-to-native upgrade, cancelling authorization, a non-writable Applications folder, resumed downloads and forced rollback.
 
-`scripts/signed-update-compat.sh` 是可选的签名兼容测试。Mac CI 已用原 secrets 签名测试副本、生成原公钥可验证的清单，并通过原仓库未修改的 1.1.2 更新器完成 arm64/x64 下载、解包、签名、架构及就绪检查；原安装辅助脚本也已通过临时目标替换与新原生应用启动确认。原生安装辅助进程自身也已通过改名的临时 `.app` 从 1.1.2 测试副本到 2.0.0 测试副本的替换、启动确认与备份清理检查。测试不发布产物，使用的是更新器模块和临时目标，不能替代完整旧 Electron 应用的升级验收。单独运行本目录时需将 `WLSAPLUS_LEGACY_ELECTRON_DIR` 指向原仓库的 `electron` 目录，并显式设置 `WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`。
+`scripts/signed-update-compat.sh` is an optional signing-compatibility test. Mac CI has used the original secrets to sign a test copy, generated a manifest verifiable with the original public key, and completed arm64/x64 download, unpacking, signature, architecture and readiness checks through the unmodified 1.1.2 updater from the original repository; the original install helper script has also passed replacement into a temporary target and launch confirmation of the new native app. The native install helper itself has passed replacement, launch confirmation and backup cleanup from a renamed temporary `.app` 1.1.2 test copy to a 2.0.0 test copy. The test publishes no artifacts and uses the updater module and temporary targets, so it cannot replace an upgrade acceptance test of the full old Electron app. To run it from this directory alone, point `WLSAPLUS_LEGACY_ELECTRON_DIR` at the original repository's `electron` directory and explicitly set `WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`.
 
-## 功能与数据
+## Features and data
 
-PowerSchool 登录使用原服务器公开的 HTML/JSON 接口，密码只存入系统 Keychain，网页解析通过 inert DOM 执行，不运行服务器脚本。保存账号后在启动和每 15 分钟自动同步，后台失败保留缓存，手动操作优先。可识别的假期空课表不会阻止成绩刷新。课表、成绩、作业、考勤、任务与设置保存在本机。通知以真实时间在上课前五分钟触发，不受显示时间模拟影响。
+PowerSchool sign-in uses the original server's public HTML/JSON endpoints; the password is stored only in the system Keychain, and pages are parsed in an inert DOM without running server scripts. Once an account is saved, the app syncs at launch and every 15 minutes; background failures keep the cache, and manual actions take priority. A recognizably empty holiday schedule does not block grade refreshes. Schedules, grades, assignments, attendance, tasks and settings are stored locally. Notifications fire five minutes before class based on real time and are unaffected by simulated display time.
 
-成绩表按分组表头和课程信息识别各列，支持多学期与额外列，成绩、学期和详情链接保持对应。明确选中的学期即使未公布成绩也不会被其他学期替代。文字提取排除隐藏提示并保留可见成绩符号和 HTML 段落间隔；原有错误缓存需重新同步后刷新。
+The grades table identifies columns by grouped headers and course information, supports multiple terms and extra columns, and keeps grades, terms and detail links aligned. An explicitly selected term is never replaced by another term even if its grades haven't been published. Text extraction excludes hidden hints and keeps visible grade symbols and HTML paragraph breaks; previously cached incorrect data is refreshed after a re-sync.
 
-论坛使用隔离的 WebKit 数据存储与主机白名单，支持主题/嵌入协议，以及仅转交允许的 PowerSchool 会话 Cookie 的一次性 SSO。密码不会转交论坛。翻译继续使用现有在线服务接口。校园地图重新绘制为楼宇示意图，包含楼宇资料和教室楼号定位，不声称是精确测绘的楼层平面图。
+The forum uses an isolated WebKit data store and a host allow-list, supports the theme/embed protocol, and a one-time SSO that hands over only the allowed PowerSchool session cookies. Passwords are never passed to the forum. Translation still uses the existing online service API. The campus map has been redrawn as a building diagram with building details and classroom-to-building lookup; it does not claim to be an accurately surveyed floor plan.
 
-首次启动会只读解析原 Chromium 本地存储的有效 LevelDB 清单、数据表和日志，迁移课表、成绩、任务、外观与节点选择。迁移会验证校验和、删除记录、压缩格式和文件稳定性；遇到无法安全识别的数据会提示并保留原目录，不猜测或覆盖。合成样本已覆盖迁移逻辑，真实用户数据库仍需验证。旧版账号密码的 Electron 加密格式没有被解密迁移，首次使用原生版需要重新登录。
+On first launch, the app performs a read-only parse of the valid LevelDB manifest, tables and logs of the original Chromium local storage, and migrates schedules, grades, tasks, appearance and node selection. Migration verifies checksums, deletion records, compression formats and file stability; when data cannot be safely identified, it shows a notice and leaves the original directory untouched, without guessing or overwriting. Synthetic samples cover the migration logic; real user databases still need verification. The old version's Electron-encrypted account password is not decrypted or migrated, so you need to sign in again the first time you use the native version.
 
-## 代码来源和权利边界
+## Code origin and rights boundaries
 
-新代码及素材来源记录见 `PROVENANCE.md`。独立重写与不存在任何第三方知识产权是不同问题；操作系统、编译器、公开协议、服务名称和服务端本身的权利不属于本工程。这里不声明已经完成法律审查、专利检索或可证明的净室开发认证，也不改写原仓库历史代码的版权与许可证。
+See `PROVENANCE.md` for the provenance of new code and assets. An independent rewrite is a different question from the absence of any third-party intellectual property; rights in the operating system, compilers, public protocols, service names and the servers themselves do not belong to this project. No claim is made here of a completed legal review, patent search or certifiable clean-room development, and the copyright and licensing of the original repository's historical code are not changed.
 
-## 许可证
+## License
 
-本原生栈（含 Packet / VPN 协议实现）以 **Apache License 2.0** 授权，见仓库根目录 `LICENSE`。实现为原创 Swift/C，不包含 mihomo / clash / sing-box / gVisor 等第三方内核源码或二进制。
+This native stack (including the Packet / VPN protocol implementation) is licensed under the **Apache License 2.0**; see `LICENSE` at the repository root. The implementation is original Swift/C and contains no source code or binaries from mihomo / clash / sing-box / gVisor or other third-party cores.
