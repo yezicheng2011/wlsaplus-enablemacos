@@ -14,6 +14,7 @@ enum ProtocolTests {
         try primitiveVectors()
         try shadowsocksFrames()
         try shadowsocksCipherFrames()
+        try aes128Vectors()
         try vmessFrames()
         try vmessChaChaFrames()
         try websocketFrames()
@@ -151,6 +152,23 @@ enum ProtocolTests {
     private static func vmessSession(_ alter: Int, udp: Bool = false) throws -> VMessSession {
         try VMessSession(uuid: user, alterId: alter, destinationHost: "example.com", destinationPort: 443,
                           udp: udp, requestIV: iv, requestKey: key, responseAuth: 0x42)
+    }
+    private static func aes128Vectors() throws {
+        // FIPS 197 appendix C.1 and appendix B, plus NIST SP 800-38A F.1.1 ECB-AES128 (4 blocks).
+        try check(try VMessCrypto.aesBlock(hex("00112233445566778899aabbccddeeff"), key: hex("000102030405060708090a0b0c0d0e0f"))
+                  == hex("69c4e0d86a7b0430d8cdb78070b4c55a"), "FIPS 197 C.1 AES-128")
+        try check(try VMessCrypto.aesBlock(hex("3243f6a8885a308d313198a2e0370734"), key: hex("2b7e151628aed2a6abf7158809cf4f3c"))
+                  == hex("3925841d02dc09fbdc118597196a0b32"), "FIPS 197 appendix B AES-128")
+        let ecbKey = hex("2b7e151628aed2a6abf7158809cf4f3c")
+        let plain = ["6bc1bee22e409f96e93d7e117393172a", "ae2d8a571e03ac9c9eb76fac45af8e51",
+                     "30c81c46a35ce411e5fbc1191a0a52ef", "f69f2445df4f9b17ad2b417be66c3710"]
+        let cipher = ["3ad77bb40d7a3660a89ecaf32466ef97", "f5d3d58503b9699de785895a96fdbaaf",
+                      "43b1cd7f598ece23881b00e3ed030688", "7b0c785e27e8ad3f8223207104725dd4"]
+        for (p, c) in zip(plain, cipher) {
+            try check(try VMessCrypto.aesBlock(hex(p), key: ecbKey) == hex(c), "SP 800-38A ECB-AES128 block \(p.prefix(8))")
+        }
+        try fails("AES-128 rejects a short key") { _ = try VMessCrypto.aesBlock(hex("00112233445566778899aabbccddeeff"), key: Data(count: 15)) }
+        try fails("AES-128 rejects a short block") { _ = try VMessCrypto.aesBlock(Data(count: 15), key: ecbKey) }
     }
     private static func vmessFrames() throws {
         for alter in [1, 0] {

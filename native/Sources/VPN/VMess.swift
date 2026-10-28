@@ -1,6 +1,5 @@
 import Foundation
 import CryptoKit
-import CommonCrypto
 
 // Original implementation derived from published protocol descriptions, not a proxy core:
 // https://www.v2fly.org/en_US/developer/protocols/vmess.html
@@ -46,17 +45,7 @@ enum VMessCrypto {
     }
     static func aesBlock(_ block: Data, key: Data) throws -> Data {
         guard key.count == 16, block.count == 16 else { throw ProxyError.authentication }
-        var result = [UInt8](repeating: 0, count: 32)
-        var written = 0
-        let status = key.withUnsafeBytes { keyPointer in
-            block.withUnsafeBytes { blockPointer in
-                CCCrypt(CCOperation(kCCEncrypt), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionECBMode),
-                        keyPointer.baseAddress, 16, nil, blockPointer.baseAddress, 16,
-                        &result, 32, &written)
-            }
-        }
-        guard status == kCCSuccess, written == 16 else { throw ProxyError.authentication }
-        return Data(result.prefix(written))
+        return Data(try AES128(key: key).encrypt([UInt8](block)))
     }
     static func uuidBytes(_ string: String) throws -> Data {
         guard let uuid = UUID(uuidString: string) else { throw ProxyError.configuration("Invalid VMess UUID") }
@@ -87,21 +76,21 @@ public enum VMessSecurity: UInt8 {
     }
 }
 
-/// CFB128 preserves state across partial header reads. AES itself is the system primitive.
+/// CFB128 preserves state across partial header reads. The block cipher is AES128 (FIPS 197).
 final class AESCFB128 {
-    private let key: Data
+    private let cipher: AES128
     private let decrypt: Bool
     private var feedback: [UInt8]
     private var stream = [UInt8](repeating: 0, count: 16)
     private var index = 0
     init(key: Data, iv: Data, decrypt: Bool) throws {
         guard key.count == 16, iv.count == 16 else { throw ProxyError.authentication }
-        self.key = key; feedback = [UInt8](iv); self.decrypt = decrypt
+        cipher = try AES128(key: key); feedback = [UInt8](iv); self.decrypt = decrypt
     }
     func update(_ input: Data) throws -> Data {
         var output = Data(); output.reserveCapacity(input.count)
         for byte in input {
-            if index == 0 { stream = [UInt8](try VMessCrypto.aesBlock(Data(feedback), key: key)) }
+            if index == 0 { stream = cipher.encrypt(feedback) }
             let converted = byte ^ stream[index]
             output.append(converted)
             feedback[index] = decrypt ? byte : converted
