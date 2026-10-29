@@ -248,6 +248,24 @@ enum ProtocolTests {
         try check(WebSocketWire.accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", "RFC6455 handshake accept")
         let masked = try WebSocketWire.clientFrame(Data("Hello".utf8), opcode: 1, mask: hex("37fa213d"))
         try check(masked == hex("818537fa213d7f9f4d5158"), "RFC6455 client masking example")
+        // Every length-encoding boundary, against a naive per-byte reference, with a sliced
+        // (non-zero startIndex) payload to catch index-base mistakes.
+        let mask = hex("a1b2c3d4"); let mb = [UInt8](mask)
+        for length in [0, 1, 3, 4, 5, 125, 126, 127, 65535, 65536, 65537, 300_001] {
+            let backing = Data((0..<(length + 7)).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+            let payload = backing.subdata(in: 7..<(length + 7))
+            let sliced = backing[7...]
+            var expected = Data([0x82])
+            if length < 126 { expected.append(0x80 | UInt8(length)) }
+            else if length <= 65535 { expected.append(0xfe); expected.append(WireBytes.be16(UInt16(length))) }
+            else { expected.append(0xff); expected.append(WireBytes.be64(UInt64(length))) }
+            expected.append(mask)
+            for (index, value) in [UInt8](payload).enumerated() { expected.append(value ^ mb[index & 3]) }
+            try check(try WebSocketWire.clientFrame(payload, mask: mask) == expected, "WebSocket masking length \(length)")
+            try check(try WebSocketWire.clientFrame(sliced, mask: mask) == expected, "WebSocket masking sliced length \(length)")
+        }
+        try fails("WebSocket oversized client frame") { _ = try WebSocketWire.clientFrame(Data(count: 2 * 1024 * 1024 + 1)) }
+        try fails("WebSocket oversized control frame") { _ = try WebSocketWire.clientFrame(Data(count: 126), opcode: 9) }
         var decoder = WebSocketFrameDecoder()
         let stream = hex("020361626389017880026465")
         var binary = [Data](); var pings = [Data]()
