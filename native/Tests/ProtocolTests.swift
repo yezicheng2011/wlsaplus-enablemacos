@@ -18,9 +18,44 @@ enum ProtocolTests {
         try vmessFrames()
         try vmessChaChaFrames()
         try websocketFrames()
+        try streamCoalescing()
         try configurationValidation()
         try endpointResolver()
     }
+    private static func streamCoalescing() throws {
+        try check(StreamCoalescer.coalesce([]) == [], "Coalesce: nothing in, nothing out")
+        try check(StreamCoalescer.coalesce([Data("a".utf8)]) == [Data("a".utf8)], "Coalesce: one chunk untouched")
+        try check(StreamCoalescer.coalesce([Data(), Data("ab".utf8), Data(), Data("c".utf8)]) == [Data("abc".utf8)],
+                  "Coalesce: empty chunks dropped, order kept")
+        try check(StreamCoalescer.coalesce([Data([1, 2]), Data([3, 4]), Data([5])], limit: 4) == [Data([1, 2, 3, 4]), Data([5])],
+                  "Coalesce: exact limit fills one write")
+        try check(StreamCoalescer.coalesce([Data([1]), Data(repeating: 7, count: 9), Data([2])], limit: 4)
+                  == [Data([1]), Data(repeating: 7, count: 9), Data([2])], "Coalesce: oversize chunk passes alone")
+        // Randomized: bytes and order are identical, writes respect the limit.
+        var seed: UInt32 = 0x9e3779b9
+        for _ in 0..<200 {
+            var chunks = [Data]()
+            for _ in 0..<Int(seed % 9) {
+                seed = seed &* 1_664_525 &+ 1_013_904_223
+                chunks.append(Data(repeating: UInt8(truncatingIfNeeded: seed >> 24), count: Int(seed >> 8) % 70))
+            }
+            seed = seed &* 1_664_525 &+ 1_013_904_223; let limit = Int(seed >> 16) % 120 + 1
+            let writes = StreamCoalescer.coalesce(chunks, limit: limit)
+            try check(writes.reduce(Data(), +) == chunks.reduce(Data(), +), "Coalesce: bytes identical")
+            try check(writes.allSatisfy { !$0.isEmpty }, "Coalesce: no empty writes")
+            for (i, w) in writes.enumerated() where w.count > limit {
+                try check(chunks.contains(w), "Coalesce: only a single oversize chunk may exceed the limit (\(i))")
+            }
+            try check(writes.count <= max(1, chunks.filter { !$0.isEmpty }.count), "Coalesce: never more writes than chunks")
+        }
+        // Shadowsocks: header plus a 40 000-byte write (three AEAD chunks) leave as one write.
+        let session = try ShadowsocksSession(password: "password", destinationHost: "example.com", destinationPort: 443, udp: false)
+        let header = try session.requestHeader()
+        let chunks = try session.encodeStream(Data(repeating: 5, count: 40_000))
+        let merged = StreamCoalescer.coalesce([header] + chunks)
+        try check(merged.count == 1 && merged[0] == ([header] + chunks).reduce(Data(), +), "Coalesce: SS header + 3 chunks in one write")
+    }
+
     private static func check(_ condition: Bool, _ message: String) throws {
         if !condition { throw Failure(description: message) }
     }

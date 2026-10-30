@@ -171,12 +171,20 @@ final class ProxyConnection {
     private func transportReady() {
         guard !closed else { return }
         do {
-            if let shadowsocks, !datagram { transport?.send(try shadowsocks.requestHeader()) }
-            if let vmess { transport?.send(try vmess.requestHeader()) }
             ready = true
             timeout?.cancel(); timeout = nil
             let waiting = pending; pending.removeAll(); pendingBytes = 0
-            for packet in waiting { try transmit(packet) }
+            if streamWrites {
+                // Header and early data leave together: one TLS record / WebSocket frame
+                // instead of one per queued write, and no header-only first segment.
+                var chunks = [Data]()
+                if let shadowsocks { chunks.append(try shadowsocks.requestHeader()) }
+                if let vmess { chunks.append(try vmess.requestHeader()) }
+                for packet in waiting { chunks += try encode(packet) }
+                for write in StreamCoalescer.coalesce(chunks) { transport?.send(write) }
+            } else {
+                for packet in waiting { try transmit(packet) }
+            }
             if finishPending { try finishTransportWriting() }
             onReady?()
         } catch { fail(error) }
@@ -195,13 +203,19 @@ final class ProxyConnection {
         do { try transmit(data) } catch { fail(error) }
     }
 
+    /// False only for Shadowsocks UDP, whose socket sends one datagram per write; every other
+    /// path is a byte stream whose wire chunks may be merged into fewer writes.
+    private var streamWrites: Bool { !(shadowsocks != nil && datagram) }
+
+    private func encode(_ data: Data) throws -> [Data] {
+        if let shadowsocks { return datagram ? [try shadowsocks.encodeDatagram(data)] : try shadowsocks.encodeStream(data) }
+        if let vmess { return try vmess.encodeBody(data) }
+        return []
+    }
+
     private func transmit(_ data: Data) throws {
-        if let shadowsocks {
-            if datagram { transport?.send(try shadowsocks.encodeDatagram(data)) }
-            else { for chunk in try shadowsocks.encodeStream(data) { transport?.send(chunk) } }
-        } else if let vmess {
-            for chunk in try vmess.encodeBody(data) { transport?.send(chunk) }
-        }
+        let chunks = try encode(data)
+        for chunk in streamWrites ? StreamCoalescer.coalesce(chunks) : chunks { transport?.send(chunk) }
     }
 
     private func finishWritingOnQueue() {
@@ -340,5 +354,33 @@ final class SaltReplayCache {
         entries.insert(identity); order.append(identity)
         if order.count - offset > 16_384 { entries.remove(order[offset]); offset += 1 }
         if offset >= 16_384 { order.removeFirst(offset); offset = 0 }
+    }
+}
+
+/// Joins consecutive stream wire chunks into as few writes as possible, keeping order and
+/// bytes exactly, and never building one write larger than `limit` unless a single input
+/// chunk already is. Stream protocols (Shadowsocks AEAD chunks, VMess body chunks, the
+/// opening header plus early data) have their own framing, so how the bytes are split
+/// into writes is invisible to the server. Fewer writes means fewer TLS records, fewer
+/// WebSocket frames and fewer transport sends. Never use it for a UDP socket, where each
+/// write is one datagram.
+enum StreamCoalescer {
+    /// 256 KiB stays far below the 2 MiB WebSocket frame cap and bounds copy size.
+    static let defaultLimit = 256 * 1024
+
+    static func coalesce(_ chunks: [Data], limit: Int = defaultLimit) -> [Data] {
+        guard chunks.count > 1 else { return chunks.filter { !$0.isEmpty } }
+        let total = chunks.reduce(0) { $0 + $1.count }
+        var writes = [Data](); var current = Data()
+        for chunk in chunks where !chunk.isEmpty {
+            if !current.isEmpty, current.count + chunk.count > limit {
+                writes.append(current); current = Data()
+            }
+            if current.isEmpty, chunk.count >= limit { writes.append(chunk); continue }
+            if current.isEmpty { current.reserveCapacity(min(limit, total)) }
+            current.append(chunk)
+        }
+        if !current.isEmpty { writes.append(current) }
+        return writes
     }
 }
