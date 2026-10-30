@@ -22,7 +22,7 @@ This is experimental code. A real macOS CI smoke passed with an existing VMess
 node, utun TCP/UDP traffic, routed HTTPS, correlated DNS replies, and route/DNS
 restoration. That is a bounded integration check; it has not passed a TCP
 conformance suite, sustained throughput tests, or a security audit. Its retransmission
-timer is conservative and does not estimate RTT. It does not implement ICMP, path MTU discovery, SACK, window scaling, timestamps, ECN,
+timer is conservative and does not estimate RTT. It does not implement ICMP, path MTU discovery, SACK, timestamps, ECN,
 urgent data, IPv6 jumbograms, or IPsec. It is a local proxy endpoint, not a
 production replacement for a mature general-purpose TCP stack. UDP datagrams
 are preserved. IP reassembly is bounded to sixteen partial datagrams (about

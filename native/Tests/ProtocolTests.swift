@@ -13,11 +13,49 @@ enum ProtocolTests {
     static func run() throws {
         try primitiveVectors()
         try shadowsocksFrames()
+        try shadowsocksCipherFrames()
+        try aes128Vectors()
         try vmessFrames()
+        try vmessChaChaFrames()
         try websocketFrames()
+        try streamCoalescing()
         try configurationValidation()
         try endpointResolver()
     }
+    private static func streamCoalescing() throws {
+        try check(StreamCoalescer.coalesce([]) == [], "Coalesce: nothing in, nothing out")
+        try check(StreamCoalescer.coalesce([Data("a".utf8)]) == [Data("a".utf8)], "Coalesce: one chunk untouched")
+        try check(StreamCoalescer.coalesce([Data(), Data("ab".utf8), Data(), Data("c".utf8)]) == [Data("abc".utf8)],
+                  "Coalesce: empty chunks dropped, order kept")
+        try check(StreamCoalescer.coalesce([Data([1, 2]), Data([3, 4]), Data([5])], limit: 4) == [Data([1, 2, 3, 4]), Data([5])],
+                  "Coalesce: exact limit fills one write")
+        try check(StreamCoalescer.coalesce([Data([1]), Data(repeating: 7, count: 9), Data([2])], limit: 4)
+                  == [Data([1]), Data(repeating: 7, count: 9), Data([2])], "Coalesce: oversize chunk passes alone")
+        // Randomized: bytes and order are identical, writes respect the limit.
+        var seed: UInt32 = 0x9e3779b9
+        for _ in 0..<200 {
+            var chunks = [Data]()
+            for _ in 0..<Int(seed % 9) {
+                seed = seed &* 1_664_525 &+ 1_013_904_223
+                chunks.append(Data(repeating: UInt8(truncatingIfNeeded: seed >> 24), count: Int(seed >> 8) % 70))
+            }
+            seed = seed &* 1_664_525 &+ 1_013_904_223; let limit = Int(seed >> 16) % 120 + 1
+            let writes = StreamCoalescer.coalesce(chunks, limit: limit)
+            try check(writes.reduce(Data(), +) == chunks.reduce(Data(), +), "Coalesce: bytes identical")
+            try check(writes.allSatisfy { !$0.isEmpty }, "Coalesce: no empty writes")
+            for (i, w) in writes.enumerated() where w.count > limit {
+                try check(chunks.contains(w), "Coalesce: only a single oversize chunk may exceed the limit (\(i))")
+            }
+            try check(writes.count <= max(1, chunks.filter { !$0.isEmpty }.count), "Coalesce: never more writes than chunks")
+        }
+        // Shadowsocks: header plus a 40 000-byte write (three AEAD chunks) leave as one write.
+        let session = try ShadowsocksSession(password: "password", destinationHost: "example.com", destinationPort: 443, udp: false)
+        let header = try session.requestHeader()
+        let chunks = try session.encodeStream(Data(repeating: 5, count: 40_000))
+        let merged = StreamCoalescer.coalesce([header] + chunks)
+        try check(merged.count == 1 && merged[0] == ([header] + chunks).reduce(Data(), +), "Coalesce: SS header + 3 chunks in one write")
+    }
+
     private static func check(_ condition: Bool, _ message: String) throws {
         if !condition { throw Failure(description: message) }
     }
@@ -94,9 +132,78 @@ enum ProtocolTests {
         try check(try ProxyAddress.socks("2001:db8::1", 443).count == 19, "IPv6 address encoding")
     }
 
+    // aes-128-gcm and chacha20-ietf-poly1305 fixtures: Python cryptography 43 (OpenSSL),
+    // generator verified against the aes-256-gcm fixtures above. Distinct passwords keep the
+    // process-wide salt replay cache from colliding with other fixtures.
+    private static func shadowsocksCipherFrames() throws {
+        let cases: [(ShadowsocksCipher, String, String, String)] = [
+            (.aes128gcm, "mockmini-aes128",
+             "101112131415161718191a1b1c1d1e1fea725cfab8ac4bb49d780d4f3b184f2f02228bc49a361d48e7e600e83e5f450ddb3c1ce9ba5f430e148ebef328801ad2c97ec805e8fa827050d4cb408a963cc242ff9842dad58b463c4ac630",
+             "202122232425262728292a2b2c2d2e2ffad7c10a16b0ade7ee35265f27863f467a27c5602edce1ba1131"),
+            (.chacha20poly1305, "mockmini-chacha",
+             "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f41c9f5d76cbe27348e4edafa9fb2bcccdf5864973341633a3ce29005d1198176a0b1b30bc46040765db84f52eb0504c3c75a39842b8e528c95d37e91b3a33127a8f616a46f3d584596c8026a",
+             "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3fc018e2f48dd5674861fe247e9974e7279eadbcfc5602db9b26b2"),
+        ]
+        try check(ShadowsocksKeys.master(password: "mockmini-aes128", count: 16) == hex("88ff720dcec21d15a48a267f945a2cb9"), "SS 16-byte EVP_BytesToKey")
+        try check(ShadowsocksKeys.subkey(master: hex("88ff720dcec21d15a48a267f945a2cb9"), salt: Data((0..<16).map(UInt8.init))) == hex("7705848c18c6b4977467cf850f9bcfc2"), "SS 16-byte HKDF-SHA1 subkey")
+        for (cipher, password, tcp, udp) in cases {
+            let name = cipher.rawValue
+            let vector = hex(tcp)
+            try fails("SS \(name) tampered payload tag") {
+                let fresh = try ShadowsocksSession(password: password, destinationHost: "example.com", destinationPort: 443, udp: false, cipher: cipher)
+                var bad = vector; bad[cipher.saltSize + 2] ^= 1
+                _ = try fresh.decodeStream(bad)
+            }
+            let session = try ShadowsocksSession(password: password, destinationHost: "example.com", destinationPort: 443, udp: false, cipher: cipher)
+            let header = try session.requestHeader()
+            try check(header.count == cipher.saltSize + 18 + 15 + 16, "SS \(name) outbound salt size")
+            var decoded = [Data]()
+            for byte in vector { decoded += try session.decodeStream(Data([byte])) }
+            try check(decoded == [Data("hello".utf8), Data("bye".utf8)], "SS \(name) stream split at every byte")
+            try session.finishReceiving()
+            let large = try session.encodeStream(Data(repeating: 9, count: 40_000))
+            try check(large.count == 3 && large[0].count == 18 + 0x3fff + 16, "SS \(name) bounded chunking")
+            let datagrams = try ShadowsocksSession(password: password, destinationHost: "192.0.2.1", destinationPort: 53, udp: true, cipher: cipher)
+            try check(try datagrams.decodeDatagram(hex(udp)) == Data("dns".utf8), "SS \(name) UDP fixture")
+            try fails("SS \(name) replayed UDP salt") { _ = try datagrams.decodeDatagram(hex(udp)) }
+            let outgoing = try datagrams.encodeDatagram(Data("q".utf8))
+            try check(outgoing.count == cipher.saltSize + 7 + 1 + 16, "SS \(name) UDP packet layout")
+            let wrong = try ShadowsocksSession(password: password, destinationHost: "192.0.2.1", destinationPort: 53, udp: true,
+                                               cipher: cipher == .aes128gcm ? .aes256gcm : .aes128gcm)
+            try fails("SS \(name) packet rejected under another cipher") { _ = try wrong.decodeDatagram(outgoing) }
+        }
+        for spelling in ["aes-128-gcm", "AES-256-GCM", "chacha20-ietf-poly1305", "chacha20-poly1305"] {
+            let node = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
+                                 cipher: spelling, password: "secret")
+            try node.validate()
+        }
+        for spelling in ["rc4-md5", "aes-256-cfb", "2022-blake3-aes-128-gcm", "none", ""] {
+            let node = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
+                                 cipher: spelling, password: "secret")
+            try fails("Unsupported Shadowsocks cipher \(spelling)") { try node.validate() }
+        }
+    }
+
     private static func vmessSession(_ alter: Int, udp: Bool = false) throws -> VMessSession {
         try VMessSession(uuid: user, alterId: alter, destinationHost: "example.com", destinationPort: 443,
                           udp: udp, requestIV: iv, requestKey: key, responseAuth: 0x42)
+    }
+    private static func aes128Vectors() throws {
+        // FIPS 197 appendix C.1 and appendix B, plus NIST SP 800-38A F.1.1 ECB-AES128 (4 blocks).
+        try check(try VMessCrypto.aesBlock(hex("00112233445566778899aabbccddeeff"), key: hex("000102030405060708090a0b0c0d0e0f"))
+                  == hex("69c4e0d86a7b0430d8cdb78070b4c55a"), "FIPS 197 C.1 AES-128")
+        try check(try VMessCrypto.aesBlock(hex("3243f6a8885a308d313198a2e0370734"), key: hex("2b7e151628aed2a6abf7158809cf4f3c"))
+                  == hex("3925841d02dc09fbdc118597196a0b32"), "FIPS 197 appendix B AES-128")
+        let ecbKey = hex("2b7e151628aed2a6abf7158809cf4f3c")
+        let plain = ["6bc1bee22e409f96e93d7e117393172a", "ae2d8a571e03ac9c9eb76fac45af8e51",
+                     "30c81c46a35ce411e5fbc1191a0a52ef", "f69f2445df4f9b17ad2b417be66c3710"]
+        let cipher = ["3ad77bb40d7a3660a89ecaf32466ef97", "f5d3d58503b9699de785895a96fdbaaf",
+                      "43b1cd7f598ece23881b00e3ed030688", "7b0c785e27e8ad3f8223207104725dd4"]
+        for (p, c) in zip(plain, cipher) {
+            try check(try VMessCrypto.aesBlock(hex(p), key: ecbKey) == hex(c), "SP 800-38A ECB-AES128 block \(p.prefix(8))")
+        }
+        try fails("AES-128 rejects a short key") { _ = try VMessCrypto.aesBlock(hex("00112233445566778899aabbccddeeff"), key: Data(count: 15)) }
+        try fails("AES-128 rejects a short block") { _ = try VMessCrypto.aesBlock(Data(count: 15), key: ecbKey) }
     }
     private static func vmessFrames() throws {
         for alter in [1, 0] {
@@ -137,10 +244,63 @@ enum ProtocolTests {
         try check(chunks.count == 4 && chunks.allSatisfy { $0.count <= 0x4002 }, "VMess bounded large-stream chunks")
     }
 
+    // Same public example identity, security=4. Fixtures from an independent Python
+    // implementation that first reproduces every AES-128-GCM fixture above.
+    private static let chachaAeadRequest = "0fadc0039741be1da55e11960db326ed2dbba3205532edc48d4f97eb951073d8443a05060708090a0b0caff7359c252a748a975d305d497b1f5bb39dbaa569c658420d48a48ddf8a0313f772298eaab385c46df3aa7c114a574fd8cac35b37f8b062af33eeb5827a2813194f4419d90dc30389"
+    private static let chachaLegacyRequest = "5e47a5ab744b87b3cbeffd8e6cbc906b153bb895fd69fdf57afdb47022206f14997fd7ddb340ceb3ed9aebc6aa44c71725ec1ef88a49d2b0c432ae0f9d78689d896268ccfc3af53a3f"
+    private static let chachaAeadResponse = "9bdfb1639712b6a6348d0087b8d1af379ecf70afb5ebb377066e79586918c758b5afc6888061001be647892a54ecd8b0a3650771b7701b3a4437942b2cc38a85f85e65"
+    private static let chachaLegacyResponse = "372343ca001b22e73b78a96970a566911b3916ef87b83eb868cff35adf5ec67244"
+    private static func vmessChaChaFrames() throws {
+        try check(VMessSecurity.chacha20poly1305.bodyKey(key) == hex("1bf42e241816ba29ff5f307bb1bc1d168b39e04ece3e33ab822442d7e6cefd5f"), "VMess ChaCha body key expansion")
+        try check(VMessSecurity(name: nil) == .aes128gcm && VMessSecurity(name: "AUTO") == .aes128gcm, "VMess auto keeps AES-128-GCM")
+        try check(VMessSecurity(name: "chacha20-ietf-poly1305") == .chacha20poly1305, "VMess ChaCha spelling alias")
+        try check(VMessSecurity(name: "none") == nil && VMessSecurity(name: "zero") == nil, "VMess unauthenticated security rejected")
+        for alter in [1, 0] {
+            func make() throws -> VMessSession {
+                try VMessSession(uuid: user, alterId: alter, destinationHost: "example.com", destinationPort: 443,
+                                 udp: false, requestIV: iv, requestKey: key, responseAuth: 0x42, security: .chacha20poly1305)
+            }
+            let session = try make()
+            let request = try session.requestHeader(timestamp: 1_700_000_000,
+                                                    authRandom: hex("01020304"), nonce: hex("05060708090a0b0c"))
+            try check(request == hex(alter == 0 ? chachaAeadRequest : chachaLegacyRequest), "VMess ChaCha request wire fixture alterId=\(alter)")
+            try check(try session.encodeBody(Data("hello VMess".utf8)) == [hex("001b8aa8b3dd91970d0f2138e4a5f05e5b37344a99aac4a060c5f05422")], "VMess ChaCha request body wire fixture")
+            let vector = hex(alter == 0 ? chachaAeadResponse : chachaLegacyResponse)
+            var decoded = [Data]()
+            for byte in vector { decoded += try session.decodeResponse(Data([byte])) }
+            try check(decoded == [Data("hello VMess".utf8)], "VMess ChaCha response split at every byte alterId=\(alter)")
+            try session.finishReceiving()
+            try check(try session.finishWriting() == hex("0010b43dee00b470c0dae2f5a20fb3d27125"), "VMess ChaCha authenticated termination fixture")
+            let altered = try make()
+            var bad = vector; bad[bad.count - 1] ^= 1
+            try fails("VMess ChaCha tampered body tag") { _ = try altered.decodeResponse(bad) }
+            let aesReader = try vmessSession(alter)
+            try fails("VMess AES session rejects ChaCha body") { _ = try aesReader.decodeResponse(vector) }
+        }
+    }
+
     private static func websocketFrames() throws {
         try check(WebSocketWire.accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", "RFC6455 handshake accept")
         let masked = try WebSocketWire.clientFrame(Data("Hello".utf8), opcode: 1, mask: hex("37fa213d"))
         try check(masked == hex("818537fa213d7f9f4d5158"), "RFC6455 client masking example")
+        // Every length-encoding boundary, against a naive per-byte reference, with a sliced
+        // (non-zero startIndex) payload to catch index-base mistakes.
+        let mask = hex("a1b2c3d4"); let mb = [UInt8](mask)
+        for length in [0, 1, 3, 4, 5, 125, 126, 127, 65535, 65536, 65537, 300_001] {
+            let backing = Data((0..<(length + 7)).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ 7) })
+            let payload = backing.subdata(in: 7..<(length + 7))
+            let sliced = backing[7...]
+            var expected = Data([0x82])
+            if length < 126 { expected.append(0x80 | UInt8(length)) }
+            else if length <= 65535 { expected.append(0xfe); expected.append(WireBytes.be16(UInt16(length))) }
+            else { expected.append(0xff); expected.append(WireBytes.be64(UInt64(length))) }
+            expected.append(mask)
+            for (index, value) in [UInt8](payload).enumerated() { expected.append(value ^ mb[index & 3]) }
+            try check(try WebSocketWire.clientFrame(payload, mask: mask) == expected, "WebSocket masking length \(length)")
+            try check(try WebSocketWire.clientFrame(sliced, mask: mask) == expected, "WebSocket masking sliced length \(length)")
+        }
+        try fails("WebSocket oversized client frame") { _ = try WebSocketWire.clientFrame(Data(count: 2 * 1024 * 1024 + 1)) }
+        try fails("WebSocket oversized control frame") { _ = try WebSocketWire.clientFrame(Data(count: 126), opcode: 9) }
         var decoder = WebSocketFrameDecoder()
         let stream = hex("020361626389017880026465")
         var binary = [Data](); var pings = [Data]()
@@ -199,7 +359,9 @@ enum ProtocolTests {
         try fails("Negative alterId") { try node.validate() }
         node.alterId = 65_536
         try fails("Too large alterId") { try node.validate() }
-        node.alterId = 0; node.cipher = "unknown"
+        node.alterId = 0; node.cipher = "chacha20-poly1305"
+        try node.validate()
+        node.cipher = "unknown"
         try fails("Unsupported VMess cipher") { try node.validate() }
         var ss = ProxyNode(id: "ss", name: "SS", type: "ss", server: "example.com", port: 8388,
                            cipher: "aes-256-gcm", password: "secret")

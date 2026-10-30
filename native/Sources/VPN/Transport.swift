@@ -286,16 +286,26 @@ enum WebSocketWire {
         if opcode >= 8, payload.count > 125 { throw ProxyError.bufferLimit }
         let mask = try suppliedMask ?? ProtocolCrypto.random(4)
         guard mask.count == 4 else { throw ProxyError.randomness }
-        var result = Data([0x80 | opcode])
-        if payload.count < 126 { result.append(0x80 | UInt8(payload.count)) }
+        var header = Data([0x80 | opcode])
+        if payload.count < 126 { header.append(0x80 | UInt8(payload.count)) }
         else if payload.count <= 65535 {
-            result.append(0x80 | 126); result.append(WireBytes.be16(UInt16(payload.count)))
+            header.append(0x80 | 126); header.append(WireBytes.be16(UInt16(payload.count)))
         } else {
-            result.append(0x80 | 127); result.append(WireBytes.be64(UInt64(payload.count)))
+            header.append(0x80 | 127); header.append(WireBytes.be64(UInt64(payload.count)))
         }
-        result.append(mask)
+        header.append(mask)
+        // One allocation, then mask in place. Appending byte by byte cost one Data growth check
+        // per payload byte, which dominated WebSocket upload CPU for large writes.
+        var result = Data(count: header.count + payload.count)
         let m = [UInt8](mask)
-        for (index, value) in payload.enumerated() { result.append(value ^ m[index & 3]) }
+        result.withUnsafeMutableBytes { (out: UnsafeMutableRawBufferPointer) in
+            let bytes = out.bindMemory(to: UInt8.self)
+            header.withUnsafeBytes { h in for i in 0..<h.count { bytes[i] = h[i] } }
+            payload.withUnsafeBytes { (p: UnsafeRawBufferPointer) in
+                let base = header.count
+                for i in 0..<p.count { bytes[base + i] = p[i] ^ m[i & 3] }
+            }
+        }
         return result
     }
 

@@ -374,7 +374,7 @@ static void test_tcp_option_policy(void) {
         packet *synack = last(o);
         size_t off = offset(synack);
         size_t hdr = (synack->bytes[off + 12] >> 4) * 4u;
-        /* SYN-ACK carries at most MSS (kind 2); never SACK/WScale/timestamp. */
+        /* Without a client WS offer the SYN-ACK carries only MSS; never SACK/WScale/timestamp. */
         assert(hdr == 20 || hdr == 24);
         for (size_t i = 20; i + 1 < hdr;) {
             uint8_t kind = synack->bytes[off + i];
@@ -388,6 +388,62 @@ static void test_tcp_option_policy(void) {
     wlp_remote_abort(e, o->id);
     wlp_free(e);
     free(o);
+}
+
+/* RFC 7323 window scaling: echo WS (shift 0) only when offered; scale later windows. */
+static size_t scaled_first_flight(int offer, uint8_t shift, int *synack_header, int *synack_shift) {
+    observer *o = calloc(1, sizeof(*o)); assert(o);
+    wlp_engine *e = engine(o);
+    uint8_t p[512], opts[4] = {1, 3, 3, shift};   /* NOP + window scale */
+    size_t n = tcp_syn_opts(p, 4, 1000, 65535, offer ? opts : NULL, offer ? 4 : 0);
+    assert(wlp_input(e, p, n) == 0 && o->connects == 1);
+    wlp_remote_open(e, o->id);
+    packet *synack = last(o);
+    assert(flags(synack) == (SYN | ACK));
+    size_t off = offset(synack), hdr = (synack->bytes[off + 12] >> 4) * 4u;
+    *synack_header = (int)hdr; *synack_shift = -1;
+    for (size_t i = 20; i < hdr;) {
+        uint8_t kind = synack->bytes[off + i];
+        if (kind == 0) break;
+        if (kind == 1) { ++i; continue; }
+        assert(kind == 2 || kind == 3);
+        if (kind == 3) { assert(synack->bytes[off + i + 1] == 3); *synack_shift = synack->bytes[off + i + 2]; }
+        i += synack->bytes[off + i + 1];
+    }
+    uint32_t server = sequence(synack) + 1;
+    n = tcp(p, 4, 1001, server, ACK, 1, NULL, 0);   /* raw window 1 */
+    assert(wlp_input(e, p, n) == 0);
+    uint8_t data[1000]; memset(data, 'w', sizeof(data));
+    size_t before_count = o->packet_count;
+    assert(wlp_remote_data(e, o->id, data, sizeof(data)) == 0);
+    size_t sent = 0;
+    for (size_t i = before_count; i < o->packet_count; ++i) sent += payload_size(&o->packets[i]);
+    wlp_remote_abort(e, o->id);
+    wlp_free(e); free(o);
+    return sent;
+}
+static void test_window_scaling(void) {
+    int hdr, shift;
+    /* No offer: window 1 means one byte in flight, no WS option echoed. */
+    assert(scaled_first_flight(0, 0, &hdr, &shift) == 1);
+    assert(hdr == 24 && shift == -1);
+    /* Shift 7: raw window 1 is 128 bytes. */
+    assert(scaled_first_flight(1, 7, &hdr, &shift) == 128);
+    assert(hdr == 28 && shift == 0);
+    /* Shift 0 offered: scaling on, but window unchanged. */
+    assert(scaled_first_flight(1, 0, &hdr, &shift) == 1);
+    assert(hdr == 28 && shift == 0);
+    /* Oversized shift is clamped to 14 (16 KiB here), still bounded by the initial cwnd. */
+    size_t clamped = scaled_first_flight(1, 30, &hdr, &shift);
+    assert(clamped > 128 && clamped <= 2u * 1200u);
+
+    /* Malformed WS length on SYN is rejected. */
+    observer *o = calloc(1, sizeof(*o)); assert(o);
+    wlp_engine *e = engine(o);
+    uint8_t p[512], bad[4] = {3, 4, 7, 0};
+    size_t n = tcp_syn_opts(p, 4, 5, 8192, bad, 4);
+    assert(wlp_input(e, p, n) == -1 && o->connects == 0);
+    wlp_free(e); free(o);
 }
 
 static void test_malformed(void) {
@@ -419,10 +475,10 @@ int main(void) {
     test_limits_timeouts_and_fast_retransmit();
     test_fragment_reassembly(4, 0); test_fragment_reassembly(6, 0); test_fragment_reassembly(6, 1);
     test_maximum_fragment_payload(4); test_maximum_fragment_payload(6);
-    test_fragment_rejection_and_expiry(); test_tcp_option_policy(); test_malformed();
+    test_fragment_rejection_and_expiry(); test_tcp_option_policy(); test_window_scaling(); test_malformed();
 #ifndef __APPLE__
     char name[32]; errno = 0; assert(wl_tun_open(name, sizeof(name)) == -1 && errno == ENOTSUP);
 #endif
-    puts("packet tests passed: TCP loss/order/window/FIN/RST/wrap/limits/options; IPv4/IPv6 UDP/fragments; malformed corpus");
+    puts("packet tests passed: TCP loss/order/window/FIN/RST/wrap/limits/options/window-scaling; IPv4/IPv6 UDP/fragments; malformed corpus");
     return 0;
 }

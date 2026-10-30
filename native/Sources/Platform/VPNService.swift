@@ -214,7 +214,7 @@ import Darwin
         case "ss":
             return catalog.filter {
                 ["ss", "shadowsocks"].contains($0.type.lowercased()) &&
-                ($0.cipher ?? "").lowercased() == "aes-256-gcm" &&
+                ShadowsocksCipher(name: $0.cipher) != nil &&
                 $0.password != nil
             }.prefix(2).map(\.id)
         case "ws":
