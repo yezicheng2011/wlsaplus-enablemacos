@@ -85,6 +85,15 @@ enum ProtocolTests {
         try check(kdf == hex("9cb322b8eeb3fb387601a64e09fe065f09367d37926acd6f744f3f73a4001867"), "VMess nested HMAC KDF")
         try check(VMessCrypto.crc32(Data("123456789".utf8)) == 0xcbf43926, "IEEE CRC32")
         try check(VMessCrypto.fnv1a(Data("hello".utf8)) == 0x4f9f2cab, "FNV1a")
+        try check(try VMessCrypto.aesBlock(hex("00112233445566778899aabbccddeeff"),
+                                            key: hex("000102030405060708090a0b0c0d0e0f")) ==
+                  hex("69c4e0d86a7b0430d8cdb78070b4c55a"), "FIPS 197 AES-128 block")
+        try fails("AES-128 rejects short key") {
+            _ = try VMessCrypto.aesBlock(Data(repeating: 0, count: 16), key: Data(repeating: 0, count: 15))
+        }
+        try fails("AES-128 rejects short block") {
+            _ = try VMessCrypto.aesBlock(Data(repeating: 0, count: 15), key: Data(repeating: 0, count: 16))
+        }
         let aesKey = hex("2b7e151628aed2a6abf7158809cf4f3c")
         let clear = hex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e5130c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710")
         let encrypted = hex("3b3fd92eb72dad20333449f8e83cfb4ac8a64537a0b3a93fcde3cdad9f1ce58b26751f67a3cbb140b1808cf187a4f4dfc04b05357c5d1c0eeac4c66f9ff7f2e6")
