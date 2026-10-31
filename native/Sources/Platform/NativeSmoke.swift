@@ -66,7 +66,24 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         var outcome: Result<Void, Error>
         do {
             stage("subscription")
-            _ = try await service.nodes()
+            do {
+                _ = try await service.nodes()
+            } catch {
+                stage("subscription-last-stage \(service.smokeSubscriptionStage)")
+                stage("subscription-content-type \(service.smokeSubscriptionContentType)")
+                if let diagnostic = error as? VPNHTTPSDiagnosticError,
+                   case .httpStatus(let status) = diagnostic {
+                    stage("subscription-http-status \(status)")
+                } else {
+                    let failure = error as NSError
+                    if failure.domain == NSURLErrorDomain {
+                        stage("subscription-url-error-code \(failure.code)")
+                    } else {
+                        stage("subscription-other-error")
+                    }
+                }
+                throw Failure.blocked("subscription")
+            }
             let candidates = service.smokeCandidates()
             guard !candidates.isEmpty else { throw Failure.blocked("legacy VMess TCP/TLS candidates") }
             var passed = false

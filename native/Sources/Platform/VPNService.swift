@@ -20,6 +20,8 @@ import Darwin
     private(set) var smokeNetworkSetup: String?
     private(set) var smokeNetworkFlags = [String]()
     private(set) var smokeNetworkInterfaceClass: String?
+    private(set) var smokeSubscriptionStage = "not-started"
+    private(set) var smokeSubscriptionContentType = "unavailable"
     #endif
     private let sessionURL: URL
     private(set) var status: [String: Any] = ["state": "disconnected", "connected": false, "canDisconnect": false]
@@ -43,11 +45,37 @@ import Darwin
 
     func nodes() async throws -> [String: Any] {
         let url = URL(string: "https://vpnrelay.02studio.xyz/api/subscribe?format=clash")!
-        let (data, _) = try await VPNHTTPS.fetch(url, maximum: 2 * 1024 * 1024, timeout: 25)
+        #if NATIVE_INTEGRATION_TESTS
+        smokeSubscriptionStage = "request-started"
+        #endif
+        let (data, response) = try await VPNHTTPS.fetch(url, maximum: 2 * 1024 * 1024, timeout: 25)
+        #if NATIVE_INTEGRATION_TESTS
+        smokeSubscriptionStage = "http-success"
+        switch response.mimeType?.lowercased() ?? "" {
+        case "application/json": smokeSubscriptionContentType = "json"
+        case "application/x-yaml", "application/yaml", "text/yaml": smokeSubscriptionContentType = "yaml"
+        case "text/plain": smokeSubscriptionContentType = "text"
+        case "text/html": smokeSubscriptionContentType = "html"
+        case "": smokeSubscriptionContentType = "missing"
+        default: smokeSubscriptionContentType = "other"
+        }
+        #endif
         guard let text = String(data: data, encoding: .utf8) else { throw AppError("The VPN subscription is not UTF-8.") }
+        #if NATIVE_INTEGRATION_TESTS
+        smokeSubscriptionStage = "utf8-success"
+        #endif
         let normalized = try SubscriptionImporter.nodes(text)
+        #if NATIVE_INTEGRATION_TESTS
+        smokeSubscriptionStage = "format-parse-success"
+        #endif
         let decoded = try JSONDecoder().decode([ProxyNode].self, from: jsonData(normalized))
+        #if NATIVE_INTEGRATION_TESTS
+        smokeSubscriptionStage = "json-decode-success"
+        #endif
         for node in decoded { try node.validate() }
+        #if NATIVE_INTEGRATION_TESTS
+        smokeSubscriptionStage = "node-validation-success"
+        #endif
         catalog = decoded
         let selected = store.value["vpnNode"] as? String
         return ["nodes": publicNodes(), "selectedNode": catalog.contains(where: { $0.id == selected }) ? selected! : (catalog.first?.id ?? "")]
@@ -388,6 +416,12 @@ private final class HTTPSRedirectPolicy: NSObject, URLSessionTaskDelegate {
     }
 }
 
+#if NATIVE_INTEGRATION_TESTS
+enum VPNHTTPSDiagnosticError: Error {
+    case httpStatus(Int)
+}
+#endif
+
 enum VPNHTTPS {
     static func fetch(_ url: URL, maximum: Int, timeout: TimeInterval) async throws -> (Data, HTTPURLResponse) {
         guard url.scheme == "https" else { throw AppError("VPN downloads require HTTPS.") }
@@ -399,6 +433,11 @@ enum VPNHTTPS {
         var request = URLRequest(url: url); request.timeoutInterval = timeout
         request.setValue("WLSAPlus-Native/2", forHTTPHeaderField: "User-Agent")
         let (bytes, raw) = try await session.bytes(for: request)
+        #if NATIVE_INTEGRATION_TESTS
+        if let http = raw as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw VPNHTTPSDiagnosticError.httpStatus(http.statusCode)
+        }
+        #endif
         guard let response = raw as? HTTPURLResponse, (200...299).contains(response.statusCode),
               response.url?.scheme == "https", response.expectedContentLength <= maximum else { throw AppError("The HTTPS endpoint returned an invalid response.") }
         var data = Data(); data.reserveCapacity(min(maximum, 65_536))
