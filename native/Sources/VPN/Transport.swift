@@ -116,12 +116,14 @@ final class NetworkByteTransport: ByteTransport {
             tcp.keepaliveIdle = 60
             // Keep each SYN attempt shorter than the outer probe so failover can run.
             tcp.connectionTimeout = Int(self.perAttemptSeconds)
-            if case .systemTLS(let name) = plan.security {
+            if case .systemTLS(let name, let insecure) = plan.security {
                 let tls = NWProtocolTLS.Options()
                 sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, name)
                 sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
                 // Explicit chain and hostname validation also covers IP endpoints with custom SNI.
+                // insecure=true honors Clash skip-cert-verify (WLSAPlus adaptation of MockMini).
                 sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, trust, complete in
+                    if insecure { complete(true); return }
                     let secTrust = sec_trust_copy_ref(trust).takeRetainedValue()
                     let policy = SecPolicyCreateSSL(true, name as CFString)
                     guard SecTrustSetPolicies(secTrust, policy) == errSecSuccess else { complete(false); return }

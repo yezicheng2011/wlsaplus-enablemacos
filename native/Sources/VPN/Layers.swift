@@ -33,7 +33,7 @@ protocol ProxySession: AnyObject {
 /// Dial, security and framing layers for one node, derived without touching the network.
 struct TransportPlan: Equatable {
     enum Dial: Equatable { case tcp, udp }
-    enum Security: Equatable { case none, systemTLS(serverName: String) }
+    enum Security: Equatable { case none, systemTLS(serverName: String, insecure: Bool) }
     enum Framing: Equatable { case raw, webSocket(path: String, host: String) }
 
     var dial: Dial
@@ -44,7 +44,6 @@ struct TransportPlan: Equatable {
     var framingCarriesEOF: Bool { framing == .raw }
 
     static func make(for node: ProxyNode, datagramSocket: Bool) throws -> TransportPlan {
-        guard node.skipCertVerify != true else { throw ProxyError.unsupported("Insecure TLS is disabled") }
         if datagramSocket { return TransportPlan(dial: .udp, security: .none, framing: .raw) }
         var security = Security.none
         if node.usesTLS {
@@ -52,7 +51,7 @@ struct TransportPlan: Equatable {
             guard !name.isEmpty, name.utf8.allSatisfy({ $0 > 32 && $0 < 127 }) else {
                 throw ProxyError.configuration("Invalid TLS server name")
             }
-            security = .systemTLS(serverName: name)
+            security = .systemTLS(serverName: name, insecure: node.skipCertVerify == true)
         }
         var framing = Framing.raw
         if (node.network ?? "tcp").lowercased() == "ws" {

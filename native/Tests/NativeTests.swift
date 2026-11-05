@@ -24,7 +24,7 @@ import Foundation
         let trojan = subscription.first { ($0["type"] as? String)?.lowercased() == "trojan" }
         try expect(trojan?["password"] as? String == "secret", "Trojan password mapped")
         try expect(trojan?["serverName"] as? String == "proxy.example.test", "Trojan sni mapped to serverName")
-        try expect(trojan?["skipCertVerify"] == nil, "skip-cert-verify omitted so MockMini can verify TLS")
+        try expect(trojan?["skipCertVerify"] as? Bool == true, "skip-cert-verify mapped for Clash Trojan")
         let nested = try SubscriptionImporter.nodes("proxies:\n  - name: a\n    type: vmess\n    server: example.test\n    port: 443\n    uuid: 11111111-1111-1111-1111-111111111111\n    ws-opts:\n      path: /websocket\n      headers:\n        Host: proxy.example.test\nrules:\n  - MATCH,a\n")
         try expect(nested.first?["wsHost"] as? String == "proxy.example.test", "block nested Host")
         for s in ["proxies:\n  - {name: x, server: x, port: 0, type: ss}", "proxies:\n  - {name: x, name: y, port: 1, server: x, type: ss}", "proxies:\n  - &x {name: x}", "proxies:\n  - {name: x, server: x, port: 1, type: ss, plugin: external}"] {

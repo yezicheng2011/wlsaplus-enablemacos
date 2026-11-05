@@ -157,7 +157,7 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
             }
             guard passed else {
                 if reachedReady { throw Failure.assertion("routed egress") }
-                throw Failure.blocked("live VMess endpoint readiness")
+                throw Failure.blocked("live proxy endpoint readiness")
             }
             outcome = .success(())
         } catch let error as Failure { outcome = .failure(error) }
@@ -176,7 +176,7 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         }
         switch outcome {
         case .success:
-            stage("pass VMess native utun TCP UDP DNS rollback")
+            stage("pass proxy native utun TCP UDP DNS rollback")
             // Soft authenticated probes for SS / WS. Failures are logged only; they must
             // not fail the VMess smoke after the dial failover fix lands.
             await softProbe(service, kind: "ss")

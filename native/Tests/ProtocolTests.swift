@@ -399,7 +399,7 @@ enum ProtocolTests {
         var node = ProxyNode(id: "vless", name: "VLESS", type: "vless", server: "example.com", port: 443,
                              uuid: user, tls: true, network: "ws", wsPath: "/vless", udp: true)
         try node.validate()
-        try check(try TransportPlan.make(for: node, datagramSocket: false) == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "example.com"),
+        try check(try TransportPlan.make(for: node, datagramSocket: false) == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "example.com", insecure: false),
                                       framing: .webSocket(path: "/vless", host: "example.com:443")), "VLESS WS+TLS plan")
         node.cipher = "none"; try node.validate()
         node.cipher = "aes-128-gcm"
@@ -535,7 +535,7 @@ enum ProtocolTests {
                              cipher: "auto", uuid: user, alterId: 1, tls: true, udp: true)
         try node.validate()
         node.skipCertVerify = true
-        try fails("Insecure TLS config") { try node.validate() }
+        try node.validate()  // WLSAPlus honors Clash skip-cert-verify
         node.skipCertVerify = false; node.alterId = -1
         try fails("Negative alterId") { try node.validate() }
         node.alterId = 65_536
@@ -573,7 +573,9 @@ enum ProtocolTests {
         trojan.network = nil; trojan.tls = nil; trojan.password = ""
         try fails("Trojan empty password") { try trojan.validate() }
         trojan.password = "secret"; trojan.skipCertVerify = true
-        try fails("Trojan insecure TLS") { try trojan.validate() }
+        try trojan.validate()  // WLSAPlus allows Trojan skip-cert-verify
+        try check(try TransportPlan.make(for: trojan, datagramSocket: false).security ==
+                  .systemTLS(serverName: "example.com", insecure: true), "Trojan insecure TLS plan")
         try check(ProxyError.dial("x").errorDescription == "x", "dial error surfaces message")
     }
 
@@ -586,16 +588,16 @@ enum ProtocolTests {
         var vmess = ProxyNode(id: "v", name: "V", type: "vmess", server: "192.0.2.7", port: 8443, uuid: user,
                               tls: true, network: "ws", wsPath: "/ray")
         let ws = try TransportPlan.make(for: vmess, datagramSocket: false)
-        try check(ws == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "192.0.2.7"),
+        try check(ws == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "192.0.2.7", insecure: false),
                                       framing: .webSocket(path: "/ray", host: "192.0.2.7:8443")), "VMess WS+TLS plan defaults")
         try check(!ws.framingCarriesEOF, "WebSocket framing cannot carry EOF")
         vmess.serverName = "cdn.example"; vmess.wsHost = "front.example"; vmess.wsPath = nil
-        try check(try TransportPlan.make(for: vmess, datagramSocket: false) == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "cdn.example"),
+        try check(try TransportPlan.make(for: vmess, datagramSocket: false) == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "cdn.example", insecure: false),
                                       framing: .webSocket(path: "/", host: "front.example")), "VMess SNI, Host and default path")
         vmess.server = "2001:db8::7"; vmess.wsHost = nil
         try check(try TransportPlan.make(for: vmess, datagramSocket: false).framing == .webSocket(path: "/", host: "[2001:db8::7]:8443"), "IPv6 Host literal")
         let trojan = ProxyNode(id: "t", name: "T", type: "trojan", server: "example.com", port: 443, password: "secret")
-        try check(try TransportPlan.make(for: trojan, datagramSocket: false).security == .systemTLS(serverName: "example.com"), "Trojan implies system TLS")
+        try check(try TransportPlan.make(for: trojan, datagramSocket: false).security == .systemTLS(serverName: "example.com", insecure: false), "Trojan implies system TLS")
         // The four layer combinations: protocol-framing-security.
         var plain = trojan; plain.tls = false
         try check(try TransportPlan.make(for: plain, datagramSocket: false) == TransportPlan(dial: .tcp, security: .none, framing: .raw), "trojan-raw tcp-none plan")
@@ -603,7 +605,7 @@ enum ProtocolTests {
         try check(try TransportPlan.make(for: plain, datagramSocket: false) == TransportPlan(dial: .tcp, security: .none,
                   framing: .webSocket(path: "/t", host: "example.com:443")), "trojan-websocket-none plan")
         var wsss = ss; wsss.network = "ws"; wsss.tls = true; wsss.wsPath = "/ss"
-        try check(try TransportPlan.make(for: wsss, datagramSocket: false) == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "example.com"),
+        try check(try TransportPlan.make(for: wsss, datagramSocket: false) == TransportPlan(dial: .tcp, security: .systemTLS(serverName: "example.com", insecure: false),
                   framing: .webSocket(path: "/ss", host: "example.com:8388")), "shadowsocks-websocket-systemtls plan")
         try check(try TransportPlan.make(for: wsss, datagramSocket: true) == TransportPlan(dial: .udp, security: .none, framing: .raw), "SS UDP stays on the datagram socket")
         vmess.serverName = "bad name"
@@ -611,7 +613,8 @@ enum ProtocolTests {
         vmess.serverName = nil; vmess.wsPath = "ray"
         try fails("WebSocket path without leading slash") { _ = try TransportPlan.make(for: vmess, datagramSocket: false) }
         vmess.wsPath = "/ray"; vmess.skipCertVerify = true
-        try fails("Plan refuses insecure TLS") { _ = try TransportPlan.make(for: vmess, datagramSocket: false) }
+        try check(try TransportPlan.make(for: vmess, datagramSocket: false).security ==
+                  .systemTLS(serverName: "cdn.example", insecure: true), "Plan allows Clash skip-cert-verify")
     }
 
     #if canImport(Network)

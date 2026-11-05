@@ -56,9 +56,8 @@ public struct ProxyNode: Codable, Hashable, Identifiable, Sendable {
     public func validate() throws {
         guard !server.isEmpty, !server.contains(where: { $0.isWhitespace || $0.isNewline }),
               port != 0 else { throw ProxyError.configuration("Missing server address or port") }
-        guard skipCertVerify != true else {
-            throw ProxyError.unsupported("Disabling TLS certificate verification is not supported")
-        }
+        // WLSAPlus adaptation: Clash Trojan lists often set skip-cert-verify. MockMini
+        // upstream rejects that; we accept the flag and honor it in TransportPlan/TLS.
         switch type.lowercased() {
         case "ss", "shadowsocks":
             guard ShadowsocksCipher(name: cipher) != nil, password != nil else {
