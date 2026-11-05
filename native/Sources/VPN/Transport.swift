@@ -1,7 +1,7 @@
+#if canImport(Network)   // Network.framework sockets and system TLS
 import Foundation
 import Network
 import Security
-import CryptoKit
 import Dispatch
 import Darwin
 
@@ -95,17 +95,17 @@ final class NetworkByteTransport: ByteTransport {
     /// Hard cap on addresses actually dialed (IPv4-first list may be longer).
     private static let maxDialCandidates = 4
 
-    init(node: ProxyNode, datagram: Bool, queue: DispatchQueue,
+    /// Dial and security layers: TCP or UDP, with system TLS inside Network.framework.
+    init(server: String, port serverPort: UInt16, plan: TransportPlan, queue: DispatchQueue,
          perAttemptSeconds: TimeInterval = 6) throws {
         self.queue = queue
-        self.datagram = datagram
+        self.datagram = plan.dial == .udp
         self.perAttemptSeconds = max(2, min(perAttemptSeconds, 20))
-        guard let port = NWEndpoint.Port(rawValue: node.port), node.port != 0 else {
+        guard let port = NWEndpoint.Port(rawValue: serverPort), serverPort != 0 else {
             throw ProxyError.configuration("Invalid proxy port")
         }
         self.port = port
-        guard node.skipCertVerify != true else { throw ProxyError.unsupported("Insecure TLS is disabled") }
-        let resolved = try ProxyEndpointResolver.addresses(host: node.server, port: node.port)
+        let resolved = try ProxyEndpointResolver.addresses(host: server, port: serverPort)
         candidates = Array(resolved.prefix(Self.maxDialCandidates))
         if datagram {
             parameters = NWParameters.udp
@@ -116,12 +116,8 @@ final class NetworkByteTransport: ByteTransport {
             tcp.keepaliveIdle = 60
             // Keep each SYN attempt shorter than the outer probe so failover can run.
             tcp.connectionTimeout = Int(self.perAttemptSeconds)
-            if node.tls == true {
+            if case .systemTLS(let name) = plan.security {
                 let tls = NWProtocolTLS.Options()
-                let name = node.serverName?.isEmpty == false ? node.serverName! : node.server
-                guard !name.isEmpty, name.utf8.allSatisfy({ $0 > 32 && $0 < 127 }) else {
-                    throw ProxyError.configuration("Invalid TLS server name")
-                }
                 sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, name)
                 sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
                 // Explicit chain and hostname validation also covers IP endpoints with custom SNI.
@@ -275,131 +271,20 @@ final class NetworkByteTransport: ByteTransport {
     }
 }
 
-// Original RFC6455 client framing; no extensions or early-data dialect is negotiated.
-// https://www.rfc-editor.org/rfc/rfc6455
-enum WebSocketWire {
-    static func accept(_ key: String) -> String {
-        Data(Insecure.SHA1.hash(data: Data((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8))).base64EncodedString()
-    }
-    static func clientFrame(_ payload: Data, opcode: UInt8 = 2, mask suppliedMask: Data? = nil) throws -> Data {
-        guard payload.count <= 2 * 1024 * 1024 else { throw ProxyError.bufferLimit }
-        if opcode >= 8, payload.count > 125 { throw ProxyError.bufferLimit }
-        let mask = try suppliedMask ?? ProtocolCrypto.random(4)
-        guard mask.count == 4 else { throw ProxyError.randomness }
-        var result = Data([0x80 | opcode])
-        if payload.count < 126 { result.append(0x80 | UInt8(payload.count)) }
-        else if payload.count <= 65535 {
-            result.append(0x80 | 126); result.append(WireBytes.be16(UInt16(payload.count)))
-        } else {
-            result.append(0x80 | 127); result.append(WireBytes.be64(UInt64(payload.count)))
+/// Builds the dial → security → framing stack a TransportPlan describes. System TLS lives
+/// inside the dial (Network.framework); a custom security layer would wrap `dialed` here.
+enum TransportStack {
+    static func make(node: ProxyNode, plan: TransportPlan, queue: DispatchQueue) throws -> ByteTransport {
+        // 6s per resolved address, up to 4 addresses, fits inside the outer 28s deadline.
+        let dialed = try NetworkByteTransport(server: node.server, port: node.port, plan: plan,
+                                              queue: queue, perAttemptSeconds: 6)
+        switch plan.framing {
+        case .raw: return dialed
+        case .webSocket(let path, let host):
+            // Upgrade budget sits inside the outer 28s dial window after TCP is ready.
+            return try WebSocketByteTransport(base: dialed, path: path, host: host, queue: queue,
+                                              upgradeSeconds: 12)
         }
-        result.append(mask)
-        let m = [UInt8](mask)
-        for (index, value) in payload.enumerated() { result.append(value ^ m[index & 3]) }
-        return result
-    }
-
-    static func validateUpgrade(_ response: Data, key: String) throws {
-        guard let text = String(data: response, encoding: .utf8) else { throw ProxyError.malformed("Invalid WebSocket HTTP response") }
-        let lines = text.components(separatedBy: "\r\n")
-        guard let first = lines.first else { throw ProxyError.malformed("Missing WebSocket HTTP status") }
-        let status = first.split(separator: " ", omittingEmptySubsequences: true)
-        guard status.count >= 2, status[0].hasPrefix("HTTP/1.") else {
-            throw ProxyError.malformed("Missing or unsupported WebSocket HTTP version")
-        }
-        guard status[1] == "101" else {
-            let code = String(status[1])
-            throw ProxyError.malformed("The server refused the WebSocket upgrade (HTTP \(code))")
-        }
-        var headers = [String: [String]]()
-        for line in lines.dropFirst() where !line.isEmpty {
-            guard let colon = line.firstIndex(of: ":"), line.first != " ", line.first != "\t" else {
-                throw ProxyError.malformed("Invalid WebSocket HTTP header")
-            }
-            let name = line[..<colon].lowercased()
-            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-            headers[name, default: []].append(value)
-        }
-        func containsToken(_ field: String, _ token: String) -> Bool {
-            (headers[field] ?? []).flatMap { $0.lowercased().split(separator: ",").map(String.init) }
-                .contains { $0.trimmingCharacters(in: .whitespaces) == token }
-        }
-        guard containsToken("upgrade", "websocket"), containsToken("connection", "upgrade"),
-              headers["sec-websocket-accept"] == [accept(key)],
-              headers["sec-websocket-extensions"] == nil, headers["sec-websocket-protocol"] == nil else {
-            throw ProxyError.authentication
-        }
-    }
-}
-
-enum WebSocketEvent {
-    case binary(Data), ping(Data), pong, close(Data)
-}
-
-struct WebSocketFrameDecoder {
-    private var buffer = Data()
-    private var fragments: Data?
-    private var ended = false
-
-    mutating func receive(_ data: Data) throws -> [WebSocketEvent] {
-        guard !ended || data.isEmpty else { throw ProxyError.malformed("WebSocket data after close") }
-        guard buffer.count + data.count <= 2 * 1024 * 1024 + 65_550 else { throw ProxyError.bufferLimit }
-        buffer.append(data)
-        var output = [WebSocketEvent]()
-        while buffer.count >= 2 {
-            let h = [UInt8](buffer.prefix(10))
-            let fin = h[0] & 0x80 != 0; let opcode = h[0] & 15
-            guard h[0] & 0x70 == 0, h[1] & 0x80 == 0 else {
-                throw ProxyError.malformed("Invalid WebSocket server frame flags")
-            }
-            var length = UInt64(h[1] & 127); var header = 2
-            if length == 126 {
-                guard h.count >= 4 else { break }
-                length = (UInt64(h[2]) << 8) | UInt64(h[3]); header = 4
-                guard length >= 126 else { throw ProxyError.malformed("Noncanonical WebSocket length") }
-            } else if length == 127 {
-                guard h.count >= 10 else { break }
-                length = h[2..<10].reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }; header = 10
-                guard length > 65535, h[2] & 0x80 == 0 else { throw ProxyError.malformed("Invalid WebSocket length") }
-            }
-            guard length <= 2 * 1024 * 1024 else { throw ProxyError.bufferLimit }
-            if opcode >= 8 {
-                guard fin, length <= 125 else { throw ProxyError.malformed("Invalid WebSocket control frame") }
-            }
-            guard buffer.count >= header + Int(length) else { break }
-            let payload = Data(buffer.dropFirst(header).prefix(Int(length)))
-            buffer = Data(buffer.dropFirst(header + Int(length)))
-            switch opcode {
-            case 0:
-                guard fragments != nil else { throw ProxyError.malformed("Unexpected WebSocket continuation") }
-                guard fragments!.count + payload.count <= 2 * 1024 * 1024 else { throw ProxyError.bufferLimit }
-                fragments!.append(payload)
-                if fin { output.append(.binary(fragments!)); fragments = nil }
-            case 2:
-                guard fragments == nil else { throw ProxyError.malformed("Overlapping WebSocket messages") }
-                if fin { output.append(.binary(payload)) } else { fragments = payload }
-            case 8:
-                guard payload.count != 1 else { throw ProxyError.malformed("Invalid WebSocket close payload") }
-                if payload.count >= 2 {
-                    let code = WireBytes.uint16(payload)
-                    guard (1000...4999).contains(code), ![1004, 1005, 1006, 1015].contains(code),
-                          String(data: payload.dropFirst(2), encoding: .utf8) != nil else {
-                        throw ProxyError.malformed("Invalid WebSocket close status")
-                    }
-                }
-                ended = true; output.append(.close(payload))
-                guard buffer.isEmpty else { throw ProxyError.malformed("WebSocket data after close") }
-                return output
-            case 9: output.append(.ping(payload))
-            case 10: output.append(.pong)
-            default: throw ProxyError.malformed("Unsupported WebSocket frame opcode")
-            }
-        }
-        return output
-    }
-
-    func finish() throws {
-        guard buffer.isEmpty, fragments == nil else { throw ProxyError.malformed("Truncated WebSocket frame") }
     }
 }
 
@@ -419,25 +304,12 @@ final class WebSocketByteTransport: ByteTransport {
     private var decoder = WebSocketFrameDecoder()
     private var upgradeTimeout: DispatchWorkItem?
 
-    init(base: ByteTransport, node: ProxyNode, queue: DispatchQueue,
+    /// Framing layer; `path` and `host` come validated from `TransportPlan`.
+    init(base: ByteTransport, path: String, host: String, queue: DispatchQueue,
          upgradeSeconds: TimeInterval = 12) throws {
         self.base = base
         self.queue = queue
         self.upgradeSeconds = max(3, min(upgradeSeconds, 30))
-        let path = node.wsPath?.isEmpty == false ? node.wsPath! : "/"
-        let literal = node.server.contains(":") ? "[\(node.server)]" : node.server
-        // Prefer an explicit Host header from the subscription. When absent, include
-        // the port so non-443 WebSocket backends still see a canonical authority.
-        let host: String
-        if let configured = node.wsHost, !configured.isEmpty {
-            host = configured
-        } else {
-            host = "\(literal):\(node.port)"
-        }
-        guard path.hasPrefix("/"), path.utf8.allSatisfy({ $0 > 32 && $0 < 127 }),
-              !host.isEmpty, host.utf8.allSatisfy({ $0 > 32 && $0 < 127 }) else {
-            throw ProxyError.configuration("Invalid WebSocket Host or path")
-        }
         key = try ProtocolCrypto.random(16).base64EncodedString()
         request = Data(("GET \(path) HTTP/1.1\r\nHost: \(host)\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
                         "Sec-WebSocket-Key: \(key)\r\nSec-WebSocket-Version: 13\r\n\r\n").utf8)
@@ -522,3 +394,4 @@ final class WebSocketByteTransport: ByteTransport {
         } catch { fail(error) }
     }
 }
+#endif

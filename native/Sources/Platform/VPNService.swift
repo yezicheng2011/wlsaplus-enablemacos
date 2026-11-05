@@ -83,7 +83,7 @@ import Darwin
             do { try node.validate(); supported.append(node) } catch { continue }
         }
         guard !supported.isEmpty else {
-            throw AppError("This subscription has no Shadowsocks or VMess nodes that WLSAPlus can use yet.")
+            throw AppError("This subscription has no Shadowsocks, VMess, Trojan, or VLESS nodes that WLSAPlus can use yet.")
         }
         catalog = supported
         let selected = store.value["vpnNode"] as? String
@@ -275,6 +275,12 @@ import Darwin
                 ($0.network ?? "tcp").lowercased() == "ws" &&
                 UUID(uuidString: $0.uuid ?? "") != nil
             }.prefix(2).map(\.id)
+        case "trojan":
+            return catalog.filter {
+                $0.type.lowercased() == "trojan" &&
+                ($0.network ?? "tcp").lowercased() == "tcp" &&
+                $0.password != nil
+            }.prefix(2).map(\.id)
         default: return []
         }
     }
@@ -283,7 +289,7 @@ import Darwin
             throw AppError("Soft probe node is unavailable.")
         }
         var attempt = node
-        if attempt.tls == true, attempt.serverName?.isEmpty != false {
+        if attempt.usesTLS, attempt.serverName?.isEmpty != false {
             attempt.serverName = node.server
         }
         if (attempt.network ?? "tcp").lowercased() == "ws", attempt.wsHost?.isEmpty != false {
@@ -294,6 +300,12 @@ import Darwin
     }
 
     func smokeCandidates() -> [String] {
+        // Prefer Trojan TCP (release default subscription), then legacy VMess TCP probes.
+        let trojan = catalog.filter {
+            $0.type.lowercased() == "trojan" && ($0.network ?? "tcp").lowercased() == "tcp" &&
+            $0.password != nil
+        }
+        if let id = trojan.first?.id { return [id] }
         let candidates = catalog.filter {
             $0.type.lowercased() == "vmess" && ($0.alterId ?? 0) > 0 &&
             ($0.network ?? "tcp").lowercased() == "tcp" && $0.udp == true

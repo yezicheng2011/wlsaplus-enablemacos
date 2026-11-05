@@ -79,7 +79,9 @@ struct SubscriptionImporter {
             guard seen.insert(name).inserted else { throw AppError("Subscription node names must be unique.") }
             let ws = p["ws-opts"] as? [String: Any] ?? [:], headers = ws["headers"] as? [String: Any] ?? [:]
             var normalized: [String: Any] = ["id": name, "name": name, "type": type, "server": server, "port": number.intValue]
-            for (source, target) in [("cipher", "cipher"), ("password", "password"), ("uuid", "uuid"), ("alterId", "alterId"), ("tls", "tls"), ("servername", "serverName"), ("sni", "serverName"), ("skip-cert-verify", "skipCertVerify"), ("network", "network"), ("udp", "udp")] {
+            // Map Clash keys onto ProxyNode. Intentionally omit skip-cert-verify: MockMini
+            // always verifies TLS, and many Trojan lists set the flag even when the cert is valid.
+            for (source, target) in [("cipher", "cipher"), ("password", "password"), ("uuid", "uuid"), ("alterId", "alterId"), ("tls", "tls"), ("servername", "serverName"), ("sni", "serverName"), ("network", "network"), ("udp", "udp"), ("flow", "flow")] {
                 if let item = p[source] { normalized[target] = item }
             }
             if let path = ws["path"] { normalized["wsPath"] = path }

@@ -6,6 +6,14 @@
 extern "C" {
 #endif
 
+/* Build-time limits; override with -D for tighter embeddings or stress builds. */
+#ifndef WLP_FLOW_LIMIT
+#define WLP_FLOW_LIMIT 1024u   /* concurrent TCP + UDP flows per engine */
+#endif
+#ifndef WLP_TX_BUFFERS
+#define WLP_TX_BUFFERS 128u    /* 256 KiB TCP send queues held at once (32 MiB) */
+#endif
+
 typedef struct wlp_engine wlp_engine;
 typedef struct {
     void (*connect)(void *context, uint64_t flow, const char *host, uint16_t port, int udp);
@@ -21,16 +29,21 @@ typedef struct {
  * callback. Call tick with monotonic milliseconds before processing traffic and
  * at least every 100 ms thereafter. Raw packets exclude the utun AF prefix.
  *
- * Per-engine limit: 128 flows. Per-TCP-flow: 32 KiB receive reassembly and 256 KiB
- * unacknowledged/unsent remote data. UDP waits for remote_open with at most 32
- * datagrams / 64 KiB. Overflow resets TCP or drops the offending UDP datagram.
+ * Per-engine limit: WLP_FLOW_LIMIT flows (1024). Per-TCP-flow: 32 KiB receive
+ * reassembly and 256 KiB unacknowledged/unsent remote data. Both buffers are
+ * allocated on first use and released after a second without use, so idle flows
+ * hold none. While WLP_TX_BUFFERS send queues are held, wlp_remote_capacity
+ * reports 0 for a flow that has none; resume when it turns nonzero. UDP waits
+ * for remote_open with at most 32 datagrams / 64 KiB. Overflow resets TCP or
+ * drops the offending UDP datagram.
  * Fragment reassembly: at most 16 datagrams (~1.2 MiB), 15-second expiry;
  * overlapping/inconsistent fragments reject the entire datagram until expiry.
  * IPv6 unfragmentable headers are limited to 2048 bytes.
  *
  * This is a small TCP proxy endpoint, not a general IP router: ICMP,
- * TCP urgent data, IPv6 jumbograms and IPsec are unsupported. No TCP option
- * is negotiated other than MSS; no window scaling, SACK, timestamps, or ECN.
+ * TCP urgent data, IPv6 jumbograms and IPsec are unsupported. Negotiated TCP
+ * options: MSS and window scaling (RFC 7323; the client's shift is honoured up
+ * to 14 and the engine announces shift 0). No SACK, timestamps, or ECN.
  */
 wlp_engine *wlp_new(wlp_callbacks callbacks, void *context);
 /* 0 accepted/handled; -1 malformed, unsupported, or resource exhausted. */
