@@ -66,6 +66,14 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         var outcome: Result<Void, Error>
         do {
             stage("subscription")
+            // Live subscription URL comes from CI secret/env only — never hardcoded in source.
+            let smokeURL = (
+                ProcessInfo.processInfo.environment["WLSAPLUS_SMOKE_SUBSCRIPTION_URL"]
+                    ?? ProcessInfo.processInfo.environment["WLSAPLUS_DEFAULT_SUBSCRIPTION_URL"]
+                    ?? ""
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !smokeURL.isEmpty else { throw Failure.blocked("subscription URL env") }
+            _ = try service.setSubscription(url: smokeURL)
             _ = try await service.nodes()
             let candidates = service.smokeCandidates()
             guard !candidates.isEmpty else { throw Failure.blocked("legacy VMess TCP/TLS candidates") }
