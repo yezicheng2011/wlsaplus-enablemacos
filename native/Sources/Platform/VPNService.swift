@@ -89,21 +89,11 @@ import Darwin
     }
 
     nonisolated static func validateSubscriptionURL(_ raw: String) throws -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { throw AppError("Enter a Clash subscription URL.") }
-        guard trimmed.count <= 2048 else { throw AppError("The subscription URL is too long.") }
-        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme == "https" else {
-            throw AppError("Subscription URLs must use https://.")
-        }
-        guard url.user == nil, url.password == nil else {
-            throw AppError("Subscription URLs must not embed usernames or passwords.")
-        }
-        guard let host = url.host, !host.isEmpty else { throw AppError("Enter a complete https:// subscription URL.") }
-        return url.absoluteString
+        try validateClashSubscriptionURL(raw)
     }
 
     nonisolated private static func subscriptionURL(from raw: String) throws -> URL {
-        let normalized = try validateSubscriptionURL(raw)
+        let normalized = try validateClashSubscriptionURL(raw)
         guard let url = URL(string: normalized) else { throw AppError("Enter a complete https:// subscription URL.") }
         return url
     }

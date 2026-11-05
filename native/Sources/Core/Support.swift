@@ -25,6 +25,21 @@ enum AppIdentity {
     }
 }
 
+/// Normalize and validate a Clash HTTPS subscription URL. Shared by VPNService and NativeTests.
+func validateClashSubscriptionURL(_ raw: String) throws -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { throw AppError("Enter a Clash subscription URL.") }
+    guard trimmed.count <= 2048 else { throw AppError("The subscription URL is too long.") }
+    guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme == "https" else {
+        throw AppError("Subscription URLs must use https://.")
+    }
+    guard url.user == nil, url.password == nil else {
+        throw AppError("Subscription URLs must not embed usernames or passwords.")
+    }
+    guard let host = url.host, !host.isEmpty else { throw AppError("Enter a complete https:// subscription URL.") }
+    return url.absoluteString
+}
+
 func jsonData(_ value: Any) throws -> Data {
     guard JSONSerialization.isValidJSONObject(value) else { throw AppError("Invalid JSON data.") }
     return try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes])
