@@ -77,8 +77,15 @@ import Darwin
         guard let text = String(data: data, encoding: .utf8) else { throw AppError("The VPN subscription is not UTF-8.") }
         let normalized = try SubscriptionImporter.nodes(text)
         let decoded = try JSONDecoder().decode([ProxyNode].self, from: jsonData(normalized))
-        for node in decoded { try node.validate() }
-        catalog = decoded
+        // Clash lists often include Trojan/select/etc. Keep only protocols this build can dial.
+        var supported: [ProxyNode] = []
+        for node in decoded {
+            do { try node.validate(); supported.append(node) } catch { continue }
+        }
+        guard !supported.isEmpty else {
+            throw AppError("This subscription has no Shadowsocks or VMess nodes that WLSAPlus can use yet.")
+        }
+        catalog = supported
         let selected = store.value["vpnNode"] as? String
         var result: [String: Any] = [
             "nodes": publicNodes(),
