@@ -66,17 +66,21 @@ struct SubscriptionImporter {
     private static func normalize(_ nodes: [[String: Any]]) throws -> [[String: Any]] {
         var result: [[String: Any]] = [], seen = Set<String>()
         for p in nodes {
+            // Skip non-proxy entries (e.g. select groups mistakenly listed under proxies).
+            guard let type = p["type"] as? String else { continue }
+            let lower = type.lowercased()
+            if ["select", "url-test", "fallback", "load-balance", "relay"].contains(lower) { continue }
             guard let name = p["name"] as? String, !name.isEmpty, name.utf8.count <= 1024,
                   let server = p["server"] as? String, !server.isEmpty, server.utf8.count <= 253,
                   !server.contains(where: { $0.isWhitespace || $0.isNewline }),
-                  let type = p["type"] as? String,
                   let number = p["port"] as? NSNumber, number.doubleValue == Double(number.intValue), (1...65535).contains(number.intValue) else {
                 throw AppError("A subscription node is incomplete or invalid.")
             }
             guard seen.insert(name).inserted else { throw AppError("Subscription node names must be unique.") }
             let ws = p["ws-opts"] as? [String: Any] ?? [:], headers = ws["headers"] as? [String: Any] ?? [:]
             var normalized: [String: Any] = ["id": name, "name": name, "type": type, "server": server, "port": number.intValue]
-            for (source, target) in [("cipher", "cipher"), ("password", "password"), ("uuid", "uuid"), ("alterId", "alterId"), ("tls", "tls"), ("servername", "serverName"), ("sni", "serverName"), ("skip-cert-verify", "skipCertVerify"), ("network", "network"), ("udp", "udp")] {
+            // Map Clash keys onto ProxyNode. skip-cert-verify is honored by TransportPlan TLS.
+            for (source, target) in [("cipher", "cipher"), ("password", "password"), ("uuid", "uuid"), ("alterId", "alterId"), ("tls", "tls"), ("servername", "serverName"), ("sni", "serverName"), ("skip-cert-verify", "skipCertVerify"), ("network", "network"), ("udp", "udp"), ("flow", "flow")] {
                 if let item = p[source] { normalized[target] = item }
             }
             if let path = ws["path"] { normalized["wsPath"] = path }

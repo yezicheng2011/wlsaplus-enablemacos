@@ -157,6 +157,13 @@ import WebKit
         case "translate": return try await services.translate(args)
         case "forum.open": return try await services.openForum(parent: window)
         case "map.open": return try services.openMap(room: args["room"] as? String ?? "")
+        case "vpn.subscription": return vpn.subscriptionInfo()
+        case "vpn.setSubscription":
+            let info = try vpn.setSubscription(url: args["url"] as? String ?? "")
+            browser.event("state", state()); return info
+        case "vpn.clearSubscription":
+            let info = try vpn.clearSubscription()
+            browser.event("state", state()); return info
         case "vpn.nodes": return try await vpn.nodes()
         case "vpn.connect": return try await vpn.connect(nodeId: args["nodeId"] as? String ?? "")
         case "vpn.disconnect": return try await vpn.disconnect()

@@ -41,16 +41,68 @@ import Darwin
         }
     }
 
+    func subscriptionInfo() -> [String: Any] {
+        let saved = (store.value["vpnSubscriptionURL"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let suggested = AppIdentity.defaultSubscriptionURL
+        return [
+            "url": saved,
+            "configured": !saved.isEmpty,
+            "suggestedURL": suggested,
+        ]
+    }
+
+    func setSubscription(url raw: String) throws -> [String: Any] {
+        let normalized = try Self.validateSubscriptionURL(raw)
+        try store.set("vpnSubscriptionURL", normalized)
+        catalog = []
+        measurements = [:]
+        return subscriptionInfo()
+    }
+
+    func clearSubscription() throws -> [String: Any] {
+        try store.set("vpnSubscriptionURL", nil)
+        catalog = []
+        measurements = [:]
+        try store.set("vpnNode", nil)
+        return subscriptionInfo()
+    }
+
     func nodes() async throws -> [String: Any] {
-        let url = URL(string: "https://vpnrelay.02studio.xyz/api/subscribe?format=clash")!
+        let saved = (store.value["vpnSubscriptionURL"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !saved.isEmpty else {
+            throw AppError("Add a Clash subscription URL before loading nodes.")
+        }
+        let url = try Self.subscriptionURL(from: saved)
         let (data, _) = try await VPNHTTPS.fetch(url, maximum: 2 * 1024 * 1024, timeout: 25)
         guard let text = String(data: data, encoding: .utf8) else { throw AppError("The VPN subscription is not UTF-8.") }
         let normalized = try SubscriptionImporter.nodes(text)
         let decoded = try JSONDecoder().decode([ProxyNode].self, from: jsonData(normalized))
-        for node in decoded { try node.validate() }
-        catalog = decoded
+        // Clash lists often include Trojan/select/etc. Keep only protocols this build can dial.
+        var supported: [ProxyNode] = []
+        for node in decoded {
+            do { try node.validate(); supported.append(node) } catch { continue }
+        }
+        guard !supported.isEmpty else {
+            throw AppError("This subscription has no Shadowsocks, VMess, Trojan, or VLESS nodes that WLSAPlus can use yet.")
+        }
+        catalog = supported
         let selected = store.value["vpnNode"] as? String
-        return ["nodes": publicNodes(), "selectedNode": catalog.contains(where: { $0.id == selected }) ? selected! : (catalog.first?.id ?? "")]
+        var result: [String: Any] = [
+            "nodes": publicNodes(),
+            "selectedNode": catalog.contains(where: { $0.id == selected }) ? selected! : (catalog.first?.id ?? ""),
+        ]
+        result.merge(subscriptionInfo()) { current, _ in current }
+        return result
+    }
+
+    nonisolated static func validateSubscriptionURL(_ raw: String) throws -> String {
+        try validateClashSubscriptionURL(raw)
+    }
+
+    nonisolated private static func subscriptionURL(from raw: String) throws -> URL {
+        let normalized = try validateClashSubscriptionURL(raw)
+        guard let url = URL(string: normalized) else { throw AppError("Enter a complete https:// subscription URL.") }
+        return url
     }
 
     func connect(nodeId: String) async throws -> [String: Any] {
@@ -223,6 +275,12 @@ import Darwin
                 ($0.network ?? "tcp").lowercased() == "ws" &&
                 UUID(uuidString: $0.uuid ?? "") != nil
             }.prefix(2).map(\.id)
+        case "trojan":
+            return catalog.filter {
+                $0.type.lowercased() == "trojan" &&
+                ($0.network ?? "tcp").lowercased() == "tcp" &&
+                $0.password != nil
+            }.prefix(2).map(\.id)
         default: return []
         }
     }
@@ -231,7 +289,7 @@ import Darwin
             throw AppError("Soft probe node is unavailable.")
         }
         var attempt = node
-        if attempt.tls == true, attempt.serverName?.isEmpty != false {
+        if attempt.usesTLS, attempt.serverName?.isEmpty != false {
             attempt.serverName = node.server
         }
         if (attempt.network ?? "tcp").lowercased() == "ws", attempt.wsHost?.isEmpty != false {
@@ -242,6 +300,12 @@ import Darwin
     }
 
     func smokeCandidates() -> [String] {
+        // Prefer Trojan TCP (release default subscription), then legacy VMess TCP probes.
+        let trojan = catalog.filter {
+            $0.type.lowercased() == "trojan" && ($0.network ?? "tcp").lowercased() == "tcp" &&
+            $0.password != nil
+        }
+        if let id = trojan.first?.id { return [id] }
         let candidates = catalog.filter {
             $0.type.lowercased() == "vmess" && ($0.alterId ?? 0) > 0 &&
             ($0.network ?? "tcp").lowercased() == "tcp" && $0.udp == true

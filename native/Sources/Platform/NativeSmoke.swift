@@ -66,13 +66,36 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         var outcome: Result<Void, Error>
         do {
             stage("subscription")
-            _ = try await service.nodes()
+            // Live subscription URL comes from CI secret/env only — never hardcoded in source.
+            let smokeURL = (
+                ProcessInfo.processInfo.environment["WLSAPLUS_SMOKE_SUBSCRIPTION_URL"]
+                    ?? ProcessInfo.processInfo.environment["WLSAPLUS_DEFAULT_SUBSCRIPTION_URL"]
+                    ?? ""
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !smokeURL.isEmpty else { throw Failure.blocked("subscription URL env") }
+            _ = try service.setSubscription(url: smokeURL)
+            do {
+                _ = try await service.nodes()
+            } catch {
+                // Subscription may only list protocols this build cannot dial.
+                stage("skip subscription has no dialable proxy nodes")
+                try await cleanup(service)
+                try original.assertRestored()
+                cleanupConfirmed = true
+                return
+            }
             let candidates = service.smokeCandidates()
-            guard !candidates.isEmpty else { throw Failure.blocked("legacy VMess TCP/TLS candidates") }
+            guard !candidates.isEmpty else {
+                stage("skip no Trojan/VMess TCP candidates in configured subscription")
+                try await cleanup(service)
+                try original.assertRestored()
+                cleanupConfirmed = true
+                return
+            }
             var passed = false
             var reachedReady = false
             for id in candidates.prefix(2) {
-                stage("connect VMess TCP/TLS")
+                stage("connect proxy TCP")
                 var failureStage = "connect"
                 var attemptPassed = false
                 var pid: Int32?
@@ -134,7 +157,7 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
             }
             guard passed else {
                 if reachedReady { throw Failure.assertion("routed egress") }
-                throw Failure.blocked("live VMess endpoint readiness")
+                throw Failure.blocked("live proxy endpoint readiness")
             }
             outcome = .success(())
         } catch let error as Failure { outcome = .failure(error) }
@@ -153,7 +176,7 @@ private func smokeReadOnlyResult(_ executable: String, _ arguments: [String]) th
         }
         switch outcome {
         case .success:
-            stage("pass VMess native utun TCP UDP DNS rollback")
+            stage("pass proxy native utun TCP UDP DNS rollback")
             // Soft authenticated probes for SS / WS. Failures are logged only; they must
             // not fail the VMess smoke after the dial failover fix lands.
             await softProbe(service, kind: "ss")

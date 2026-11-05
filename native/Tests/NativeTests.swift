@@ -20,7 +20,11 @@ import Foundation
         try expect(hugeA < hugeB, "no integer overflow")
         for s in ["1", "1.0", "1.0.0-01", "01.0.0", "1.0.0/../x", "1.0.0\n"] { try rejects("version \(s)") { _ = try SemanticVersion(s) } }
         let subscription = try trySubscription()
-        try expect(subscription.count == 2, "node import preserves both protocols")
+        try expect(subscription.count == 3, "node import preserves SS, VMess, and Trojan")
+        let trojan = subscription.first { ($0["type"] as? String)?.lowercased() == "trojan" }
+        try expect(trojan?["password"] as? String == "secret", "Trojan password mapped")
+        try expect(trojan?["serverName"] as? String == "proxy.example.test", "Trojan sni mapped to serverName")
+        try expect(trojan?["skipCertVerify"] as? Bool == true, "skip-cert-verify mapped for Clash Trojan")
         let nested = try SubscriptionImporter.nodes("proxies:\n  - name: a\n    type: vmess\n    server: example.test\n    port: 443\n    uuid: 11111111-1111-1111-1111-111111111111\n    ws-opts:\n      path: /websocket\n      headers:\n        Host: proxy.example.test\nrules:\n  - MATCH,a\n")
         try expect(nested.first?["wsHost"] as? String == "proxy.example.test", "block nested Host")
         for s in ["proxies:\n  - {name: x, server: x, port: 0, type: ss}", "proxies:\n  - {name: x, name: y, port: 1, server: x, type: ss}", "proxies:\n  - &x {name: x}", "proxies:\n  - {name: x, server: x, port: 1, type: ss, plugin: external}"] {
@@ -66,9 +70,15 @@ import Foundation
         #if os(macOS)
         try ProtocolTests.run()
         #endif
+        let accepted = try validateClashSubscriptionURL("https://example.test/clash.yaml")
+        try expect(accepted == "https://example.test/clash.yaml", "https subscription accepted")
+        for bad in ["", "http://example.test/x", "ftp://example.test/x", "https://user:pass@example.test/x", "not-a-url"] {
+            try rejects("subscription \(bad.prefix(40))") { _ = try validateClashSubscriptionURL(bad) }
+        }
+        try rejects("subscription too long") { _ = try validateClashSubscriptionURL("https://example.test/" + String(repeating: "a", count: 2100)) }
         print("Native core: \(assertions) assertions passed")
     }
     static func trySubscription() throws -> [[String: Any]] {
-        try SubscriptionImporter.nodes("proxies:\n  - {name: 'SS, one', server: proxy.example.test, port: 443, type: ss, cipher: aes-256-gcm, password: 'a:b', udp: true}\n  - {name: VMess, server: proxy.example.test, port: 80, type: vmess, uuid: 11111111-1111-1111-1111-111111111111, alterId: 1, udp: true}\nrules:\n  - MATCH,VMess\n")
+        try SubscriptionImporter.nodes("proxies:\n  - {name: 'SS, one', server: proxy.example.test, port: 443, type: ss, cipher: aes-256-gcm, password: 'a:b', udp: true}\n  - {name: VMess, server: proxy.example.test, port: 80, type: vmess, uuid: 11111111-1111-1111-1111-111111111111, alterId: 1, udp: true}\n  - {name: Trojan, server: proxy.example.test, port: 443, type: trojan, password: secret, sni: proxy.example.test, skip-cert-verify: true, udp: true}\nrules:\n  - MATCH,Trojan\n")
     }
 }

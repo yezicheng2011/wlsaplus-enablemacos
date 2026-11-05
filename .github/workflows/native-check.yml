@@ -50,6 +50,9 @@ jobs:
       - name: Native VPN and network restoration
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         working-directory: ${{ steps.location.outputs.dir }}
+        env:
+          # Clash HTTPS subscription for live smoke only (same secret as release suggestion).
+          WLSAPLUS_DEFAULT_SUBSCRIPTION_URL: ${{ secrets.WLSAPLUS_DEFAULT_SUBSCRIPTION_URL }}
         run: bash scripts/vpn-smoke.sh
       - uses: actions/upload-artifact@v4
         if: always()

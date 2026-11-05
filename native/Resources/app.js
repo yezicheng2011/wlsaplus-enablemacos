@@ -220,7 +220,7 @@
   if (typeof document === 'undefined') return;
 
   let app = normalizeState();
-  const ui = {page:'home',tool:'',scheduleMode:'day',date:new Date(),progressTab:'grades',query:'',courseFilter:'all',todoFilter:'all',quickTitle:'',roomQuery:'',tunedInput:'',nodes:[],selectedNode:'',translation:{from:'auto',to:'en',input:'',output:'',detected:''},pending:new Set(),dismissedNotice:'',vpnCheck:'',vpnError:'',updateLog:'',loadError:'',mapResult:null,timelineHours:72,timelineStart:''};
+  const ui = {page:'home',tool:'',scheduleMode:'day',date:new Date(),progressTab:'grades',query:'',courseFilter:'all',todoFilter:'all',quickTitle:'',roomQuery:'',tunedInput:'',nodes:[],selectedNode:'',subscriptionURL:'',suggestedSubscriptionURL:'',subscriptionLoaded:false,translation:{from:'auto',to:'en',input:'',output:'',detected:''},pending:new Set(),dismissedNotice:'',vpnCheck:'',vpnError:'',updateLog:'',loadError:'',mapResult:null,timelineHours:72,timelineStart:''};
   let toastTimer;
   const $ = selector => document.querySelector(selector);
   const busy = key => ui.pending.has(key);
@@ -336,7 +336,16 @@
     const connected = vpnConnected(), transitioning = ['connecting','disconnecting','starting','stopping'].includes(vpnState());
     const recoverable = !connected && (app.vpn.cleanupRequired === true || app.vpn.canDisconnect === true), disconnectAction = connected || recoverable;
     const title = connected?'Connected':transitioning?(vpnState().includes('disconnect')||vpnState()==='stopping'?'Disconnecting…':'Connecting…'):'Not connected';
-    return `<div class="narrow"><section class="card connection-status"><div class="vpn-emblem${connected?' connected':''}">${icon('shield')}</div><div><h2>${title}</h2><p>${h(app.vpn.message || (connected?app.vpn.nodeName || 'Native VPN is active.':'Choose a node to get started.'))}</p>${connected&&app.vpn.connectedAt?`<p class="tiny">Since ${h(formatTime(app.vpn.connectedAt))}</p>`:''}</div>${btn(recoverable?'Recover network':connected?'Disconnect':busy('vpn-connect')?'Connecting…':'Connect',disconnectAction?'vpn-disconnect':'vpn-connect',{primary:!disconnectAction,icon:disconnectAction?'close':'shield',disabled:transitioning || busy('vpn-connect') || busy('vpn-disconnect') || (!disconnectAction&&!ui.selectedNode)})}</section>${ui.vpnError?`<div class="error-message" role="alert">${h(ui.vpnError)}</div>`:''}<section class="card"><div class="card-header"><h2>Available nodes</h2><div class="button-row">${btn('Test latency','vpn-latency',{icon:'wifi',disabled:busy('vpn-latency') || !ui.nodes.length})}${btn('Refresh nodes','vpn-nodes',{icon:'sync',iconOnly:true,disabled:busy('vpn-nodes')})}</div></div>${busy('vpn-nodes')?'<div class="loading-inline"><span class="spinner"></span>Fetching subscription nodes…</div>':ui.nodes.length?`<div role="radiogroup" aria-label="VPN node">${ui.nodes.map(node=>`<label class="node-row"><input type="radio" name="vpn-node" value="${h(node.id)}"${ui.selectedNode===String(node.id)?' checked':''}${connected||transitioning?' disabled':''}><span class="node-name">${h(node.name || node.id)}${node.region?`<small>${h(node.region)}</small>`:''}</span><span class="node-latency">${node.latency!=null?`${h(node.latency)} ms`:'Not tested'}</span></label>`).join('')}</div>`:empty('wifi','No VPN nodes available','Refresh to load the configured subscription. The native service reports any configuration or connection errors.')}</section><section class="card" style="margin-top:20px"><div class="card-header"><h2>Connection checks</h2></div><p class="small muted">Check whether WeChat is reachable with your current network connection.</p>${btn('Check WeChat','vpn-wechat',{icon:'wifi',disabled:busy('vpn-wechat')})}${ui.vpnCheck?`<p class="inline-note whitespace" role="status">${h(ui.vpnCheck)}</p>`:''}</section><p class="inline-note">A connected status is shown only when the native VPN service confirms it. macOS may request network permissions.</p></div>`;
+    const hasSubscription = Boolean(ui.subscriptionURL);
+    const subscriptionCard = `<section class="card"><div class="card-header"><h2>Subscription</h2><div class="button-row">${btn(hasSubscription?'Change subscription':'Add subscription','vpn-add-subscription',{icon:hasSubscription?'edit':'plus',subtle:true})}${hasSubscription?btn('Remove subscription','vpn-clear-subscription',{icon:'trash',subtle:true,danger:true,disabled:busy('vpn-subscription') || connected || transitioning}):''}</div></div>${hasSubscription?`<p class="small whitespace no-margin">Using <span class="mono">${h(ui.subscriptionURL)}</span></p><p class="inline-note no-margin" style="margin-top:10px">Nodes are fetched from this Clash HTTPS subscription and stored only on this Mac.</p>`:empty('plus','Add a Clash subscription','Paste an https:// Clash subscription URL to load VPN nodes. Source builds start empty; release builds may suggest a default URL.',btn('Add subscription','vpn-add-subscription',{primary:true,icon:'plus'}))}</section>`;
+    const nodesBody = !hasSubscription
+      ? empty('wifi','No subscription yet','Add a Clash subscription URL above to load available nodes.')
+      : busy('vpn-nodes')
+        ? '<div class="loading-inline"><span class="spinner"></span>Fetching subscription nodes…</div>'
+        : ui.nodes.length
+          ? `<div role="radiogroup" aria-label="VPN node">${ui.nodes.map(node=>`<label class="node-row"><input type="radio" name="vpn-node" value="${h(node.id)}"${ui.selectedNode===String(node.id)?' checked':''}${connected||transitioning?' disabled':''}><span class="node-name">${h(node.name || node.id)}${node.region?`<small>${h(node.region)}</small>`:''}</span><span class="node-latency">${node.latency!=null?`${h(node.latency)} ms`:'Not tested'}</span></label>`).join('')}</div>`
+          : empty('wifi','No VPN nodes available','Refresh to load nodes from your subscription. The native service reports any configuration or connection errors.',btn('Refresh nodes','vpn-nodes',{icon:'sync',subtle:true,disabled:busy('vpn-nodes')}));
+    return `<div class="narrow"><section class="card connection-status"><div class="vpn-emblem${connected?' connected':''}">${icon('shield')}</div><div><h2>${title}</h2><p>${h(app.vpn.message || (connected?app.vpn.nodeName || 'Native VPN is active.':hasSubscription?'Choose a node to get started.':'Add a subscription to get started.'))}</p>${connected&&app.vpn.connectedAt?`<p class="tiny">Since ${h(formatTime(app.vpn.connectedAt))}</p>`:''}</div>${btn(recoverable?'Recover network':connected?'Disconnect':busy('vpn-connect')?'Connecting…':'Connect',disconnectAction?'vpn-disconnect':'vpn-connect',{primary:!disconnectAction,icon:disconnectAction?'close':'shield',disabled:transitioning || busy('vpn-connect') || busy('vpn-disconnect') || (!disconnectAction&&(!hasSubscription || !ui.selectedNode))})}</section>${ui.vpnError?`<div class="error-message" role="alert">${h(ui.vpnError)}</div>`:''}${subscriptionCard}<section class="card" style="margin-top:20px"><div class="card-header"><h2>Available nodes</h2><div class="button-row">${btn('Test latency','vpn-latency',{icon:'wifi',disabled:busy('vpn-latency') || !ui.nodes.length})}${btn('Refresh nodes','vpn-nodes',{icon:'sync',iconOnly:true,disabled:busy('vpn-nodes') || !hasSubscription})}</div></div>${nodesBody}</section><section class="card" style="margin-top:20px"><div class="card-header"><h2>Connection checks</h2></div><p class="small muted">Check whether WeChat is reachable with your current network connection.</p>${btn('Check WeChat','vpn-wechat',{icon:'wifi',disabled:busy('vpn-wechat')})}${ui.vpnCheck?`<p class="inline-note whitespace" role="status">${h(ui.vpnCheck)}</p>`:''}</section><p class="inline-note">A connected status is shown only when the native VPN service confirms it. macOS may request network permissions.</p></div>`;
   }
   function translatorView() {
     const translation = ui.translation;
@@ -384,7 +393,7 @@
     ui.page = page; ui.tool = tool;
     if (root.location.hash !== `#${page}`) root.history.replaceState(null,'',`#${page}`);
     render(); $('#main').focus({preventScroll:true}); $('#main').scrollIntoView({block:'start'});
-    if (page==='tools' && tool==='vpn' && !ui.nodes.length) loadNodes();
+    if (page==='tools' && tool==='vpn') ensureVpnSubscription({refreshNodes:true});
   }
   function openDialog(title,subtitle,body) {
     ui.dialogNonce = (ui.dialogNonce || 0)+1;
@@ -424,10 +433,45 @@
       if (ui.dialogNonce===nonce && $('#dialog').open) $('#dialog .dialog-body').innerHTML = `<div class="error-message" role="alert">${h(errorText(error))}</div><p class="small muted">Your last synchronized course grade is ${h(course.grade || 'not provided')}.</p><div class="dialog-actions">${btn('Close','dialog-close')}</div>`;
     }
   }
-  async function loadNodes() {
+  function applySubscriptionInfo(info) {
+    if (!info || typeof info !== 'object') return;
+    ui.subscriptionURL = typeof info.url === 'string' ? info.url : '';
+    ui.suggestedSubscriptionURL = typeof info.suggestedURL === 'string' ? info.suggestedURL : '';
+    ui.subscriptionLoaded = true;
+  }
+  async function ensureVpnSubscription(options = {}) {
+    if (!isNativeAvailable()) return;
+    const refreshNodes = options.refreshNodes === true;
+    return run('vpn-subscription',async () => {
+      const info = await native('vpn.subscription');
+      applySubscriptionInfo(info);
+      if (refreshNodes && ui.subscriptionURL) await loadNodes({quiet:true});
+      else if (!ui.subscriptionURL) { ui.nodes=[]; ui.selectedNode=''; }
+    },error=>{ui.vpnError=errorText(error);});
+  }
+  function openSubscriptionDialog() {
+    const current = ui.subscriptionURL || '';
+    const suggested = ui.suggestedSubscriptionURL || '';
+    const initial = current || suggested;
+    openDialog(current?'Change subscription':'Add subscription','Use a Clash HTTPS subscription URL.',
+      `<form id="vpn-subscription-form"><div id="dialog-error" class="error-message" role="alert" hidden></div><div class="field"><label for="vpn-subscription-url">Clash subscription URL</label><input id="vpn-subscription-url" type="url" inputmode="url" placeholder="https://" value="${h(initial)}" required autocomplete="off" spellcheck="false" maxlength="2048"><p class="field-hint">Only https:// URLs are accepted. The URL is saved on this Mac and used to fetch Clash proxy nodes.</p></div><div class="dialog-actions">${btn('Cancel','dialog-close')}<button type="submit" class="button primary"${busy('vpn-subscription')?' disabled':''}>${icon('plus')}${current?'Save subscription':'Add subscription'}</button></div></form>`);
+    queueMicrotask(()=>{$('#vpn-subscription-url')?.focus();$('#vpn-subscription-url')?.select();});
+  }
+  async function loadNodes(options = {}) {
+    const quiet = options.quiet === true;
     return run('vpn-nodes',async () => {
-      ui.vpnError='';
+      if (!quiet) ui.vpnError='';
+      if (!ui.subscriptionURL) {
+        const info = await native('vpn.subscription');
+        applySubscriptionInfo(info);
+      }
+      if (!ui.subscriptionURL) {
+        ui.nodes=[]; ui.selectedNode='';
+        if (!quiet) ui.vpnError='Add a Clash subscription URL before loading nodes.';
+        return;
+      }
       const result = await native('vpn.nodes');
+      applySubscriptionInfo(result);
       const nodes = Array.isArray(result) ? result : result?.nodes;
       ui.nodes = Array.isArray(nodes) ? nodes.filter(node=>node.id!=null).map(node=>({...node,id:String(node.id)})) : [];
       if (!ui.nodes.some(node=>node.id===ui.selectedNode)) ui.selectedNode=ui.nodes.some(node=>node.id===String(result?.selectedNode))?String(result.selectedNode):ui.nodes[0]?.id || '';
@@ -512,13 +556,16 @@
       case 'timeline-zoom-in': case 'timeline-zoom-out': {const levels=[6,12,24,48,72,168],at=levels.indexOf(ui.timelineHours);ui.timelineHours=levels[Math.max(0,Math.min(levels.length-1,at+(action==='timeline-zoom-in'?-1:1)))];render();break;}
       case 'update-channel': await saveSettings({channel:value});break;
       case 'clear-data': openDialog('Clear local data?','This removes the saved data from this Mac.',`<p class="small muted">The saved PowerSchool account, cached school records and to-dos will be removed. You can reconnect your account afterwards.</p><div class="dialog-actions">${btn('Cancel','dialog-close')}${btn('Clear local data','confirm-clear-data',{danger:true,icon:'trash'})}</div>`);break;
-      case 'confirm-clear-data': await run('clear-data',async ()=>{await native('app.clear');await reloadState();ui.nodes=[];ui.selectedNode='';ui.translation.input='';ui.translation.output='';ui.quickTitle='';ui.mapResult=null;closeDialog();toast('Local data cleared.');},error=>setDialogError(errorText(error)));break;
+      case 'confirm-clear-data': await run('clear-data',async ()=>{await native('app.clear');await reloadState();ui.nodes=[];ui.selectedNode='';ui.subscriptionURL='';ui.subscriptionLoaded=false;ui.translation.input='';ui.translation.output='';ui.quickTitle='';ui.mapResult=null;closeDialog();toast('Local data cleared.');},error=>setDialogError(errorText(error)));break;
       case 'appearance': await saveSettings({appearance:value}); break;
       case 'accent': await saveSettings({accent:value}); break;
       case 'school-logout':
         await run('logout',async ()=>{await native('school.logout');await reloadState();closeDialog();toast('Signed out of PowerSchool.');},error=>setDialogError(errorText(error))); break;
       case 'forum-open': await run('forum',async ()=>{await native('forum.open');}); break;
       case 'vpn-nodes': await loadNodes(); break;
+      case 'vpn-add-subscription': openSubscriptionDialog(); break;
+      case 'vpn-clear-subscription':
+        await run('vpn-subscription',async ()=>{ui.vpnError='';await native('vpn.clearSubscription');ui.subscriptionURL='';ui.nodes=[];ui.selectedNode='';ui.subscriptionLoaded=true;toast('Subscription removed.');},error=>{ui.vpnError=errorText(error);}); break;
       case 'vpn-connect':
         await run('vpn-connect',async ()=>{ui.vpnError='';await native('vpn.connect',{nodeId:ui.selectedNode});await reloadState();},error=>{ui.vpnError=errorText(error);}); break;
       case 'vpn-disconnect':
@@ -600,6 +647,18 @@
       try{item=normalizeTodo({...previous,title:$('#todo-edit-title').value,details:$('#todo-details').value,endAt:$('#todo-end-at').value?new Date($('#todo-end-at').value).toISOString():'',color:ui.todoEditColor,icon:ui.todoEditIcon,timeType:form.querySelector('[name="todo-time-type"]:checked').value});}catch(error){setDialogError(errorText(error));return;}
       setFormBusy(form,true);setDialogError('');
       await run('todos',async ()=>{const items=previous?app.todos.map(todo=>todo.id===item.id?item:todo):[...app.todos,item];await native('todos.save',{items});await reloadState();closeDialog();toast(previous?'To-do saved.':'To-do added.');},error=>setDialogError(errorText(error)));
+      setFormBusy(form,false);return;
+    }
+    if(form.id==='vpn-subscription-form'){
+      const url=$('#vpn-subscription-url').value.trim();
+      setDialogError('');setFormBusy(form,true);
+      await run('vpn-subscription',async ()=>{
+        const info=await native('vpn.setSubscription',{url});
+        applySubscriptionInfo(info);
+        closeDialog();
+        toast('Subscription saved.');
+        await loadNodes();
+      },error=>setDialogError(errorText(error)));
       setFormBusy(form,false);return;
     }
     if(form.id==='translation-form'){await translateText();return;}

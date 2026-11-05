@@ -13,9 +13,31 @@ enum AppIdentity {
     static let certificate = "764D4389AAFA0C50311E39C17DDFA1981ABEF86C"
     static let requirement = "identifier \"\(bundle)\" and certificate leaf = H\"\(certificate)\""
     static let publicKeyDER = "MCowBQYDK2VwAyEAFdlAH6S/8HdZHKQ8MR0OnzWFUtAerd/mfJwy0jVsoNM="
+    /// Optional Clash subscription URL baked into release builds only via Info.plist.
+    /// Empty for source builds. Never commit a real URL into the repository.
+    static var defaultSubscriptionURL: String {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "WLSAPlusDefaultSubscriptionURL") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw
+    }
     static var support: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("WLSAPlus", isDirectory: true)
     }
+}
+
+/// Normalize and validate a Clash HTTPS subscription URL. Shared by VPNService and NativeTests.
+func validateClashSubscriptionURL(_ raw: String) throws -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { throw AppError("Enter a Clash subscription URL.") }
+    guard trimmed.count <= 2048 else { throw AppError("The subscription URL is too long.") }
+    guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme == "https" else {
+        throw AppError("Subscription URLs must use https://.")
+    }
+    guard url.user == nil, url.password == nil else {
+        throw AppError("Subscription URLs must not embed usernames or passwords.")
+    }
+    guard let host = url.host, !host.isEmpty else { throw AppError("Enter a complete https:// subscription URL.") }
+    return url.absoluteString
 }
 
 func jsonData(_ value: Any) throws -> Data {

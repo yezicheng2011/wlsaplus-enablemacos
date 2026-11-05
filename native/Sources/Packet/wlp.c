@@ -8,11 +8,15 @@
 #include <string.h>
 #include <unistd.h>
 
-#define FLOW_LIMIT 128u
+#define FLOW_LIMIT WLP_FLOW_LIMIT
+#define TX_BUFFERS WLP_TX_BUFFERS
+#define BUCKETS 1024u          /* power of two; tuple and id hash buckets */
+#define RELEASE_MS 1000u       /* unused per-flow buffers are freed after this */
 #define RX_LIMIT 32768u
 #define TX_LIMIT 262144u
 #define UDP_PENDING 65536u
 #define MSS_LIMIT 1200u
+#define WSCALE_MAX 14u
 #define MAX_PACKET 65575u
 #define FRAGMENT_LIMIT 16u
 #define FRAGMENT_HEADER 2048u
@@ -35,10 +39,15 @@ typedef struct datagram {
 } datagram;
 
 typedef struct flow {
-    struct flow *next;
+    struct flow *next, *prev, *tuple_next, *id_next;
+    unsigned bucket;           /* tuple hash bucket */
     uint64_t id, created, active, sent_at, probe_at, wait_at;
+    uint64_t payload_at, queued_at;  /* last client payload / last remote data */
     uint8_t version, protocol, source[16], destination[16];
-    uint16_t source_port, destination_port, mss, peer_window;
+    uint16_t source_port, destination_port, mss;
+    uint32_t peer_window;      /* already scaled by peer_shift */
+    uint8_t peer_shift;        /* RFC 7323 shift the client announced (0..14) */
+    int window_scaling;        /* client offered WS on SYN; we echo shift 0 */
     uint32_t iss, receive_next, send_una, send_next, tx_sequence;
     uint32_t window_sequence, window_ack, congestion, threshold;
     uint32_t receive_fin_sequence;
@@ -47,6 +56,7 @@ typedef struct flow {
     int state, remote_ready, remote_eof, receive_fin, pending_fin;
     int sent_fin, acked_fin, close_notified;
     uint32_t fin_sequence;
+    /* Allocated on first use; receive_present is a bitmap over receive_bytes. */
     uint8_t *receive_bytes, *receive_present, *transmit_bytes;
     size_t transmit_length;
     datagram *datagrams, *datagrams_tail;
@@ -69,8 +79,10 @@ struct wlp_engine {
     wlp_callbacks callbacks;
     void *context;
     flow *flows;
+    flow *by_tuple[BUCKETS], *by_id[BUCKETS];
     fragment *fragments;
-    unsigned count, fragment_count;
+    unsigned count, fragment_count, transmit_buffers;
+    uint32_t hash_seed;
     uint64_t next_id, now;
     int random_fd, time_known;
     uint16_t ip_id;
@@ -301,14 +313,28 @@ static int reassemble(wlp_engine *engine, const uint8_t *packet, size_t length,
     return 2;
 }
 
+/* Seeded FNV-1a over the tuple; the seed keeps bucket placement unpredictable. */
+static unsigned tuple_bucket(const wlp_engine *engine, uint8_t version, uint8_t protocol,
+                             const uint8_t *source, const uint8_t *destination,
+                             uint16_t source_port, uint16_t destination_port) {
+    size_t n = version == 4 ? 4 : 16;
+    uint8_t head[6] = {version, protocol, (uint8_t)(source_port >> 8), (uint8_t)source_port,
+                       (uint8_t)(destination_port >> 8), (uint8_t)destination_port};
+    uint32_t h = engine->hash_seed ^ UINT32_C(2166136261);
+    for (size_t i = 0; i < sizeof(head); ++i) h = (h ^ head[i]) * UINT32_C(16777619);
+    for (size_t i = 0; i < n; ++i) h = (h ^ source[i]) * UINT32_C(16777619);
+    for (size_t i = 0; i < n; ++i) h = (h ^ destination[i]) * UINT32_C(16777619);
+    return (h ^ h >> 16) & (BUCKETS - 1);
+}
 static flow *find_id(wlp_engine *engine, uint64_t id) {
-    for (flow *f = engine->flows; f; f = f->next) if (f->id == id) return f;
+    for (flow *f = engine->by_id[id & (BUCKETS - 1)]; f; f = f->id_next) if (f->id == id) return f;
     return NULL;
 }
 static flow *find_tuple(wlp_engine *engine, const parsed *p) {
     size_t n = p->version == 4 ? 4 : 16;
     uint16_t source = get16(p->transport), destination = get16(p->transport + 2);
-    for (flow *f = engine->flows; f; f = f->next)
+    unsigned bucket = tuple_bucket(engine, p->version, p->protocol, p->source, p->destination, source, destination);
+    for (flow *f = engine->by_tuple[bucket]; f; f = f->tuple_next)
         if (f->version == p->version && f->protocol == p->protocol &&
             f->source_port == source && f->destination_port == destination &&
             memcmp(f->source, p->source, n) == 0 && memcmp(f->destination, p->destination, n) == 0) return f;
@@ -329,16 +355,39 @@ static void notify_close(wlp_engine *engine, flow *f) {
         engine->callbacks.close(engine->context, f->id);
     }
 }
+static int ensure_receive(flow *f) {
+    if (f->receive_bytes) return 0;
+    f->receive_bytes = malloc(RX_LIMIT);
+    f->receive_present = calloc(RX_LIMIT / 8, 1);
+    if (f->receive_bytes && f->receive_present) return 0;
+    free(f->receive_bytes); free(f->receive_present);
+    f->receive_bytes = f->receive_present = NULL;
+    return -1;
+}
+static void release_receive(flow *f) {
+    free(f->receive_bytes); free(f->receive_present);
+    f->receive_bytes = f->receive_present = NULL;
+}
+static void release_transmit(wlp_engine *engine, flow *f) {
+    if (!f->transmit_bytes) return;
+    free(f->transmit_bytes);
+    f->transmit_bytes = NULL;
+    --engine->transmit_buffers;
+}
+static int is_present(const flow *f, unsigned index) { return f->receive_present[index / 8] >> (index % 8) & 1; }
 static void remove_flow(wlp_engine *engine, flow *f) {
-    flow **link = &engine->flows;
-    while (*link && *link != f) link = &(*link)->next;
-    if (!*link) return;
-    *link = f->next;
+    if (f->prev) f->prev->next = f->next; else engine->flows = f->next;
+    if (f->next) f->next->prev = f->prev;
+    flow **link = &engine->by_tuple[f->bucket];
+    while (*link != f) link = &(*link)->tuple_next;
+    *link = f->tuple_next;
+    link = &engine->by_id[f->id & (BUCKETS - 1)];
+    while (*link != f) link = &(*link)->id_next;
+    *link = f->id_next;
     --engine->count;
     notify_close(engine, f);
-    free(f->receive_bytes);
-    free(f->receive_present);
-    free(f->transmit_bytes);
+    release_receive(f);
+    release_transmit(engine, f);
     while (f->datagrams) { datagram *d = f->datagrams; f->datagrams = d->next; free(d); }
     free(f);
 }
@@ -354,17 +403,12 @@ static flow *make_flow(wlp_engine *engine, const parsed *p) {
     f->congestion = 2 * MSS_LIMIT;
     f->threshold = 65535;
     if (p->protocol == 6) {
-        f->receive_bytes = malloc(RX_LIMIT);
-        f->receive_present = calloc(RX_LIMIT, 1);
-        if (!f->receive_bytes || !f->receive_present) {
-            free(f->receive_bytes); free(f->receive_present); free(f); return NULL;
-        }
         uint8_t entropy[4];
         size_t got = 0;
         while (got < sizeof(entropy)) {
             ssize_t n = read(engine->random_fd, entropy + got, sizeof(entropy) - got);
             if (n < 0 && errno == EINTR) continue;
-            if (n <= 0) { free(f->receive_bytes); free(f->receive_present); free(f); return NULL; }
+            if (n <= 0) { free(f); return NULL; }
             got += (size_t)n;
         }
         f->iss = get32(entropy);
@@ -372,7 +416,14 @@ static flow *make_flow(wlp_engine *engine, const parsed *p) {
         f->tx_sequence = f->iss + 1;
     }
     f->next = engine->flows;
+    if (f->next) f->next->prev = f;
     engine->flows = f;
+    f->bucket = tuple_bucket(engine, f->version, f->protocol, f->source, f->destination,
+                             f->source_port, f->destination_port);
+    f->tuple_next = engine->by_tuple[f->bucket];
+    engine->by_tuple[f->bucket] = f;
+    f->id_next = engine->by_id[f->id & (BUCKETS - 1)];
+    engine->by_id[f->id & (BUCKETS - 1)] = f;
     ++engine->count;
     return f;
 }
@@ -402,8 +453,8 @@ static size_t write_ip(wlp_engine *engine, const flow *f, uint8_t *packet, size_
 }
 static void emit_tcp(wlp_engine *engine, flow *f, uint32_t sequence, uint32_t ack,
                      uint8_t flags, const uint8_t *bytes, size_t length) {
-    uint8_t packet[40 + 24 + MSS_LIMIT];
-    size_t header = flags & FLAG_SYN ? 24 : 20;
+    uint8_t packet[40 + 28 + MSS_LIMIT];
+    size_t header = flags & FLAG_SYN ? (f->window_scaling ? 28 : 24) : 20;
     size_t ip = write_ip(engine, f, packet, header + length);
     uint8_t *tcp = packet + ip;
     memset(tcp, 0, header);
@@ -414,7 +465,10 @@ static void emit_tcp(wlp_engine *engine, flow *f, uint32_t sequence, uint32_t ac
     tcp[12] = (uint8_t)(header / 4 << 4);
     tcp[13] = flags;
     put16(tcp + 14, (uint16_t)(RX_LIMIT - f->receive_buffered));
-    if (header == 24) { tcp[20] = 2; tcp[21] = 4; put16(tcp + 22, MSS_LIMIT); }
+    if (header >= 24) { tcp[20] = 2; tcp[21] = 4; put16(tcp + 22, MSS_LIMIT); }
+    /* Our receive buffer fits in 16 bits, so we announce shift 0: the client may
+     * scale its own window while ours stays unscaled. */
+    if (header == 28) { tcp[24] = 1; tcp[25] = 3; tcp[26] = 3; tcp[27] = 0; }
     if (length) memcpy(tcp + header, bytes, length);
     put16(tcp + 16, transport_sum(f->version, 6, f->destination, f->source, tcp, header + length));
     engine->callbacks.packet(engine->context, packet, ip + header + length);
@@ -509,7 +563,7 @@ static int input_udp(wlp_engine *engine, const parsed *p) {
     f->active = engine->now;
     return 0;
 }
-static int tcp_options(const uint8_t *tcp, size_t header, uint16_t *mss) {
+static int tcp_options(const uint8_t *tcp, size_t header, uint16_t *mss, int *wscale) {
     for (size_t i = 20; i < header;) {
         uint8_t option = tcp[i];
         if (option == 0) break;
@@ -518,6 +572,10 @@ static int tcp_options(const uint8_t *tcp, size_t header, uint16_t *mss) {
         if (option == 2) {
             if (tcp[i + 1] != 4 || !(tcp[13] & FLAG_SYN) || get16(tcp + i + 2) < 64) return -1;
             *mss = (uint16_t)minimum(*mss, get16(tcp + i + 2));
+        } else if (option == 3) {
+            /* Window scale: only meaningful on SYN, ignored elsewhere (RFC 7323 2.2). */
+            if (tcp[i + 1] != 3) return -1;
+            if (tcp[13] & FLAG_SYN) *wscale = (int)minimum(tcp[i + 2], WSCALE_MAX);
         }
         i += tcp[i + 1];
     }
@@ -533,6 +591,11 @@ static void receive_payload(wlp_engine *engine, flow *f, uint32_t sequence,
             f->receive_fin_sequence = fin_sequence;
         }
     }
+    if (!f->receive_fin && length) {
+        /* Without memory, accept nothing new; the ACK below asks for a retransmit. */
+        if (ensure_receive(f) < 0) { emit_ack(engine, f); return; }
+        f->payload_at = engine->now;
+    }
     if (!f->receive_fin) {
         for (size_t i = 0; i < length; ++i) {
             uint32_t at = sequence + (uint32_t)i;
@@ -540,19 +603,20 @@ static void receive_payload(wlp_engine *engine, flow *f, uint32_t sequence,
             uint32_t distance = at - f->receive_next;
             if (distance >= RX_LIMIT || (f->pending_fin && !before(at, f->receive_fin_sequence))) break;
             unsigned index = (f->receive_position + distance) % RX_LIMIT;
-            if (!f->receive_present[index]) {
+            if (!is_present(f, index)) {
                 f->receive_bytes[index] = bytes[i];
-                f->receive_present[index] = 1;
+                f->receive_present[index / 8] |= (uint8_t)(1u << (index % 8));
                 ++f->receive_buffered;
             }
         }
-        while (f->receive_present[f->receive_position] &&
+        while (f->receive_present && is_present(f, f->receive_position) &&
                (!f->pending_fin || f->receive_next != f->receive_fin_sequence)) {
             unsigned count = 0;
             unsigned room = RX_LIMIT - f->receive_position;
-            while (count < room && f->receive_present[f->receive_position + count] &&
+            while (count < room && is_present(f, f->receive_position + count) &&
                    (!f->pending_fin || f->receive_next + count != f->receive_fin_sequence)) {
-                f->receive_present[f->receive_position + count] = 0;
+                unsigned index = f->receive_position + count;
+                f->receive_present[index / 8] &= (uint8_t)~(1u << (index % 8));
                 ++count;
             }
             unsigned start = f->receive_position;
@@ -565,7 +629,7 @@ static void receive_payload(wlp_engine *engine, flow *f, uint32_t sequence,
             ++f->receive_next;
             f->receive_fin = 1;
             f->pending_fin = 0;
-            memset(f->receive_present, 0, RX_LIMIT);
+            release_receive(f);   /* nothing more is accepted after FIN */
             f->receive_buffered = 0;
             if (engine->callbacks.eof) engine->callbacks.eof(engine->context, f->id);
         }
@@ -583,7 +647,8 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
         ((flags & FLAG_SYN) && (flags & (FLAG_FIN | FLAG_RST))) || get16(tcp + 2) == 0 ||
         transport_sum(p->version, 6, p->source, p->destination, tcp, length) != 0) return -1;
     uint16_t mss = MSS_LIMIT;
-    if (tcp_options(tcp, header, &mss) < 0) return -1;
+    int wscale = -1;
+    if (tcp_options(tcp, header, &mss, &wscale) < 0) return -1;
     uint32_t sequence = get32(tcp + 4), ack = get32(tcp + 8);
     size_t payload_length = length - header;
     flow *f = find_tuple(engine, p);
@@ -602,7 +667,8 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
         if (!f) return -1;
         f->receive_next = sequence + 1;
         f->mss = mss;
-        f->peer_window = get16(tcp + 14);
+        f->peer_window = get16(tcp + 14);   /* the SYN's own window is never scaled */
+        if (wscale >= 0) { f->window_scaling = 1; f->peer_shift = (uint8_t)wscale; f->threshold = TX_LIMIT; }
         f->window_sequence = sequence;
         f->window_ack = 0;
         connect_callback(engine, f);
@@ -638,7 +704,7 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
     if (!before(ack, f->send_una)) {
         if (before(f->window_sequence, sequence) ||
             (sequence == f->window_sequence && !before(ack, f->window_ack))) {
-            f->peer_window = get16(tcp + 14);
+            f->peer_window = (uint32_t)get16(tcp + 14) << f->peer_shift;
             f->window_sequence = sequence;
             f->window_ack = ack;
         }
@@ -656,7 +722,7 @@ static int input_tcp(wlp_engine *engine, const parsed *p) {
             }
             if (f->sent_fin && before(f->fin_sequence, ack)) f->acked_fin = 1;
             uint32_t growth = f->congestion < f->threshold ? minimum(advanced, f->mss) : minimum(f->mss, (uint32_t)((uint64_t)f->mss * advanced / f->congestion) + 1);
-            f->congestion = minimum(65535, f->congestion + growth);
+            f->congestion = minimum(f->window_scaling ? TX_LIMIT : 65535u, f->congestion + growth);
         } else if (!payload_length && !(flags & FLAG_FIN) && f->send_una != f->send_next) {
             if (++f->duplicate_acks == 3) {
                 f->threshold = minimum(f->congestion, f->send_next - f->send_una) / 2;
@@ -684,6 +750,13 @@ wlp_engine *wlp_new(wlp_callbacks callbacks, void *context) {
     engine->random_fd = open("/dev/urandom", O_RDONLY);
     if (engine->random_fd < 0) { free(engine); return NULL; }
     if (fcntl(engine->random_fd, F_SETFD, FD_CLOEXEC) < 0) { close(engine->random_fd); free(engine); return NULL; }
+    size_t got = 0;
+    while (got < sizeof(engine->hash_seed)) {
+        ssize_t n = read(engine->random_fd, (uint8_t *)&engine->hash_seed + got, sizeof(engine->hash_seed) - got);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) { close(engine->random_fd); free(engine); return NULL; }
+        got += (size_t)n;
+    }
     engine->callbacks = callbacks;
     engine->context = context;
     return engine;
@@ -747,11 +820,14 @@ int wlp_remote_data(wlp_engine *engine, uint64_t id, const uint8_t *bytes, size_
         return 0;
     }
     if (length > TX_LIMIT - f->transmit_length) { reset_flow(engine, f); return -1; }
+    /* The send-queue budget is enforced through wlp_remote_capacity, not here, so a
+     * write already in flight when the budget fills is still accepted. */
     if (length && !f->transmit_bytes) {
         f->transmit_bytes = malloc(TX_LIMIT);
         if (!f->transmit_bytes) { reset_flow(engine, f); return -1; }
+        ++engine->transmit_buffers;
     }
-    if (length) memcpy(f->transmit_bytes + f->transmit_length, bytes, length);
+    if (length) { memcpy(f->transmit_bytes + f->transmit_length, bytes, length); f->queued_at = engine->now; }
     f->transmit_length += length;
     send_available(engine, f);
     return 0;
@@ -761,6 +837,7 @@ size_t wlp_remote_capacity(wlp_engine *engine, uint64_t id) {
     flow *f = find_id(engine, id);
     if (!f || !f->remote_ready || f->remote_eof || f->state == STATE_WAIT) return 0;
     if (f->protocol == 17) return f->version == 4 ? 65507 : 65527;
+    if (!f->transmit_bytes && engine->transmit_buffers >= TX_BUFFERS) return 0;
     return TX_LIMIT - f->transmit_length;
 }
 void wlp_remote_abort(wlp_engine *engine, uint64_t id) {
@@ -796,6 +873,8 @@ void wlp_tick(wlp_engine *engine, uint64_t now_ms) {
     }
     for (flow *f = engine->flows, *next; f; f = next) {
         next = f->next;
+        if (f->receive_bytes && !f->receive_buffered && now_ms - f->payload_at >= RELEASE_MS) release_receive(f);
+        if (f->transmit_bytes && !f->transmit_length && now_ms - f->queued_at >= RELEASE_MS) release_transmit(engine, f);
         uint64_t idle_limit = f->protocol == 17 ? 60000 : (f->receive_fin || f->remote_eof ? 120000 : 600000);
         if (f->state == STATE_WAIT) {
             if (now_ms - f->wait_at >= 60000) remove_flow(engine, f);

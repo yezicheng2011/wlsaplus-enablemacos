@@ -371,7 +371,7 @@ private final class VPNRuntime {
                 for address in addresses.prefix(4) {
                     var attempt = configuration.node
                     attempt.server = address
-                    if attempt.tls == true, attempt.serverName?.isEmpty != false { attempt.serverName = configuration.node.server }
+                    if attempt.usesTLS, attempt.serverName?.isEmpty != false { attempt.serverName = configuration.node.server }
                     if (attempt.network ?? "tcp").lowercased() == "ws", attempt.wsHost?.isEmpty != false {
                         let host = configuration.node.server.contains(":") ? "[\(configuration.node.server)]" : configuration.node.server
                         attempt.wsHost = "\(host):\(configuration.node.port)"

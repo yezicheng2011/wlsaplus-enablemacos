@@ -7,7 +7,8 @@
   window.webkit={messageHandlers:{wlsaplus:{postMessage({id,method}){
     let result,error;
     if(method==='app.state')result=state();
-    else if(method==='vpn.nodes')result={nodes:[],selectedNode:''};
+    else if(method==='vpn.subscription'||method==='vpn.setSubscription'||method==='vpn.clearSubscription')result={url:'',configured:false,suggestedURL:''};
+    else if(method==='vpn.nodes')result={nodes:[],selectedNode:'',url:'',configured:false,suggestedURL:''};
     else if(method==='vpn.disconnect'){disconnectCalls++;currentVPN={state:'disconnected',connected:false,cleanupRequired:false,canDisconnect:false};result=currentVPN;}
     else error='Unexpected native method in recovery test.';
     queueMicrotask(()=>window.nativeReply({id,result,error}));
@@ -20,7 +21,8 @@
       document.querySelector('a[href="#tools"]').click();
       await wait(()=>document.querySelector('[data-action="open-tool"][data-value="vpn"]'));
       document.querySelector('[data-action="open-tool"][data-value="vpn"]').click();
-      await wait(()=>!document.querySelector('[data-action="vpn-nodes"]')?.disabled);
+      // Refresh nodes stays disabled until a subscription URL is configured.
+      await wait(()=>document.querySelector('[data-action="vpn-add-subscription"]') || document.querySelector('[data-action="vpn-disconnect"]') || document.querySelector('[data-action="vpn-connect"]'));
       for(const [name,vpn] of [
         ['cleanup-required',{state:'error',connected:false,cleanupRequired:true,canDisconnect:false}],
         ['retained-helper',{state:'error',connected:false,cleanupRequired:false,canDisconnect:true}]

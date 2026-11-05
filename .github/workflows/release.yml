@@ -72,6 +72,9 @@ jobs:
       - name: Test, build and prepare compatible signed packages
         env:
           WLSAPLUS_UPDATE_ED25519_KEY: ${{ secrets.WLSAPLUS_UPDATE_ED25519_KEY }}
+          # Optional Clash HTTPS subscription suggestion baked into Info.plist at build time.
+          # Source/repo stays empty; only release CI may inject this. Prefer a repository secret.
+          WLSAPLUS_DEFAULT_SUBSCRIPTION_URL: ${{ secrets.WLSAPLUS_DEFAULT_SUBSCRIPTION_URL }}
         run: bash "$NATIVE_SOURCE/scripts/release.sh"
       - name: Stage flat release assets
         run: |
