@@ -613,8 +613,9 @@ enum ProtocolTests {
         vmess.serverName = nil; vmess.wsPath = "ray"
         try fails("WebSocket path without leading slash") { _ = try TransportPlan.make(for: vmess, datagramSocket: false) }
         vmess.wsPath = "/ray"; vmess.skipCertVerify = true
+        // serverName was cleared above; SNI falls back to the current server literal.
         try check(try TransportPlan.make(for: vmess, datagramSocket: false).security ==
-                  .systemTLS(serverName: "cdn.example", insecure: true), "Plan allows Clash skip-cert-verify")
+                  .systemTLS(serverName: "2001:db8::7", insecure: true), "Plan allows Clash skip-cert-verify")
     }
 
     #if canImport(Network)
