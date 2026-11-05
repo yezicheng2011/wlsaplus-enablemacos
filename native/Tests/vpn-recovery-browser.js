@@ -7,7 +7,8 @@
   window.webkit={messageHandlers:{wlsaplus:{postMessage({id,method}){
     let result,error;
     if(method==='app.state')result=state();
-    else if(method==='vpn.nodes')result={nodes:[],selectedNode:''};
+    else if(method==='vpn.subscription'||method==='vpn.setSubscription'||method==='vpn.clearSubscription')result={url:'',configured:false,suggestedURL:''};
+    else if(method==='vpn.nodes')result={nodes:[],selectedNode:'',url:'',configured:false,suggestedURL:''};
     else if(method==='vpn.disconnect'){disconnectCalls++;currentVPN={state:'disconnected',connected:false,cleanupRequired:false,canDisconnect:false};result=currentVPN;}
     else error='Unexpected native method in recovery test.';
     queueMicrotask(()=>window.nativeReply({id,result,error}));

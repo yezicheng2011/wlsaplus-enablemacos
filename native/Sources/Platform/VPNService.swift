@@ -41,8 +41,38 @@ import Darwin
         }
     }
 
+    func subscriptionInfo() -> [String: Any] {
+        let saved = (store.value["vpnSubscriptionURL"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let suggested = AppIdentity.defaultSubscriptionURL
+        return [
+            "url": saved,
+            "configured": !saved.isEmpty,
+            "suggestedURL": suggested,
+        ]
+    }
+
+    func setSubscription(url raw: String) throws -> [String: Any] {
+        let normalized = try Self.validateSubscriptionURL(raw)
+        try store.set("vpnSubscriptionURL", normalized)
+        catalog = []
+        measurements = [:]
+        return subscriptionInfo()
+    }
+
+    func clearSubscription() throws -> [String: Any] {
+        try store.set("vpnSubscriptionURL", nil)
+        catalog = []
+        measurements = [:]
+        try store.set("vpnNode", nil)
+        return subscriptionInfo()
+    }
+
     func nodes() async throws -> [String: Any] {
-        let url = URL(string: "https://vpnrelay.02studio.xyz/api/subscribe?format=clash")!
+        let saved = (store.value["vpnSubscriptionURL"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !saved.isEmpty else {
+            throw AppError("Add a Clash subscription URL before loading nodes.")
+        }
+        let url = try Self.subscriptionURL(from: saved)
         let (data, _) = try await VPNHTTPS.fetch(url, maximum: 2 * 1024 * 1024, timeout: 25)
         guard let text = String(data: data, encoding: .utf8) else { throw AppError("The VPN subscription is not UTF-8.") }
         let normalized = try SubscriptionImporter.nodes(text)
@@ -50,7 +80,32 @@ import Darwin
         for node in decoded { try node.validate() }
         catalog = decoded
         let selected = store.value["vpnNode"] as? String
-        return ["nodes": publicNodes(), "selectedNode": catalog.contains(where: { $0.id == selected }) ? selected! : (catalog.first?.id ?? "")]
+        var result: [String: Any] = [
+            "nodes": publicNodes(),
+            "selectedNode": catalog.contains(where: { $0.id == selected }) ? selected! : (catalog.first?.id ?? ""),
+        ]
+        result.merge(subscriptionInfo()) { current, _ in current }
+        return result
+    }
+
+    nonisolated static func validateSubscriptionURL(_ raw: String) throws -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw AppError("Enter a Clash subscription URL.") }
+        guard trimmed.count <= 2048 else { throw AppError("The subscription URL is too long.") }
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), scheme == "https" else {
+            throw AppError("Subscription URLs must use https://.")
+        }
+        guard url.user == nil, url.password == nil else {
+            throw AppError("Subscription URLs must not embed usernames or passwords.")
+        }
+        guard let host = url.host, !host.isEmpty else { throw AppError("Enter a complete https:// subscription URL.") }
+        return url.absoluteString
+    }
+
+    nonisolated private static func subscriptionURL(from raw: String) throws -> URL {
+        let normalized = try validateSubscriptionURL(raw)
+        guard let url = URL(string: normalized) else { throw AppError("Enter a complete https:// subscription URL.") }
+        return url
     }
 
     func connect(nodeId: String) async throws -> [String: Any] {

@@ -66,6 +66,12 @@ import Foundation
         #if os(macOS)
         try ProtocolTests.run()
         #endif
+        let accepted = try VPNService.validateSubscriptionURL("https://example.test/clash.yaml")
+        try expect(accepted == "https://example.test/clash.yaml", "https subscription accepted")
+        for bad in ["", "http://example.test/x", "ftp://example.test/x", "https://user:pass@example.test/x", "not-a-url"] {
+            try rejects("subscription \(bad.prefix(40))") { _ = try VPNService.validateSubscriptionURL(bad) }
+        }
+        try rejects("subscription too long") { _ = try VPNService.validateSubscriptionURL("https://example.test/" + String(repeating: "a", count: 2100)) }
         print("Native core: \(assertions) assertions passed")
     }
     static func trySubscription() throws -> [[String: Any]] {

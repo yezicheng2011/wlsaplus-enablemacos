@@ -13,6 +13,13 @@ enum AppIdentity {
     static let certificate = "764D4389AAFA0C50311E39C17DDFA1981ABEF86C"
     static let requirement = "identifier \"\(bundle)\" and certificate leaf = H\"\(certificate)\""
     static let publicKeyDER = "MCowBQYDK2VwAyEAFdlAH6S/8HdZHKQ8MR0OnzWFUtAerd/mfJwy0jVsoNM="
+    /// Optional Clash subscription URL baked into release builds only via Info.plist.
+    /// Empty for source builds. Never commit a real URL into the repository.
+    static var defaultSubscriptionURL: String {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: "WLSAPlusDefaultSubscriptionURL") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw
+    }
     static var support: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("WLSAPlus", isDirectory: true)
     }

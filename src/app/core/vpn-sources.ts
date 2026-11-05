@@ -5,17 +5,17 @@ export interface VpnSource {
   endpoint: string;
 }
 
-// Only proxy endpoints belong in the client. The upstream subscription is a
-// Worker secret and must never be copied into this source file.
-export const VPN_SOURCES: readonly VpnSource[] = [
-  {
-    id: 'relay',
-    name: 'WLSAPlus relay',
-    description: 'The new shared relay endpoint.',
-    endpoint: 'https://vpnrelay.02studio.xyz/api/subscribe',
-  },
-];
+// No built-in relay URL in source. Users (or release injection on the native app)
+// supply a Clash HTTPS subscription. Never commit a live subscription URL here.
+export const VPN_SOURCES: readonly VpnSource[] = [];
 
 export function vpnSource(id: string): VpnSource {
-  return VPN_SOURCES.find((source) => source.id === id) ?? VPN_SOURCES[0];
+  const found = VPN_SOURCES.find((source) => source.id === id);
+  if (found) return found;
+  return {
+    id: id || 'custom',
+    name: 'Custom subscription',
+    description: 'Provide a Clash HTTPS subscription URL.',
+    endpoint: '',
+  };
 }
