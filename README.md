@@ -1,5 +1,7 @@
 # WLSAPlus · macOS
 
+[![GitHub release](https://img.shields.io/github/v/release/yezicheng2011/wlsaplus-enablemacos?label=release)](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest)
+
 <p align="center">
   <img src="public/icons/app-icon.svg" width="96" alt="WLSAPlus">
 </p>
