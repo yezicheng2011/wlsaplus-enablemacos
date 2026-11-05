@@ -54,6 +54,7 @@ cat > "$app/Contents/Info.plist" <<EOF
 <key>NSHighResolutionCapable</key><true/>
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 <key>NSPrincipalClass</key><string>NSApplication</string>
+<key>NSHumanReadableCopyright</key><string>Copyright © 2026 daniel.ye叶子诚</string>
 <key>WLSAPlusDefaultSubscriptionURL</key><string>$escaped_subscription</string>
 </dict></plist>
 EOF

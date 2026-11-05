@@ -5,7 +5,7 @@
 # If the repository has not been cloned yet, the script tries mainland-China mirrors in order:
 #   gh-proxy.com → ghproxy.net → ghfast.top
 # (avoid ghproxy.com, which is often blocked; falls back to a zip download on failure)
-# © daniel.ye
+# © daniel.ye叶子诚
 # ============================================
 
 echo -ne "\033]0;编译 WLSAPlus\007"
@@ -126,7 +126,7 @@ echo "   可选安装到应用程序："
 echo "   ditto \"$APP\" /Applications/WLSAPlus.app && xattr -cr /Applications/WLSAPlus.app"
 echo ""
 echo "   首次若提示「无法验证开发者」：右键应用 → 打开 → 打开。"
-echo "   © daniel.ye"
+echo "   © daniel.ye叶子诚"
 echo ""
 read -n 1 -s -r -p "按任意键关闭..."
 echo ""

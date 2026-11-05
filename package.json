@@ -4,7 +4,7 @@
   "version": "1.1.2",
   "private": true,
   "description": "A local-first schedule and task app for WLSA students",
-  "author": "WLSAPlus contributors",
+  "author": "daniel.ye叶子诚",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {

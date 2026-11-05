@@ -64,6 +64,7 @@ module.exports = {
     icon: path.join(__dirname, 'build', 'icon'),
     appBundleId: 'cn.org.wlsash.wlsaplus',
     appCategoryType: 'public.app-category.education',
+    appCopyright: 'Copyright © 2026 daniel.ye叶子诚',
     osxSign,
     osxNotarize,
     // `--arch universal` (working.command / CI) packages x64 + arm64 and merges them with

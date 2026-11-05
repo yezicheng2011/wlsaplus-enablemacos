@@ -2,7 +2,7 @@
 
 How classmates should install it: **build from source by following this guide**. You don't need an Apple Developer account, and you shouldn't treat the one-click DMG on the website / GitHub as the main install path (that is for developer self-testing and in-app updates).
 
-© daniel.ye
+© daniel.ye叶子诚
 
 ---
 
@@ -134,7 +134,7 @@ A: Run `xcode-select --install` first, then reopen Terminal and build again.
 A: **No**, not for installing 2.0.0. That command is for the old Electron tree.
 
 **Q: Copyright and license?**  
-A: The app source code is Apache-2.0; see `LICENSE` / `NOTICE` in the repository. © daniel.ye
+A: The app source code is Apache-2.0; see `LICENSE` / `NOTICE` in the repository. © daniel.ye叶子诚
 
 ## Links
 

@@ -172,4 +172,4 @@ The source code is released under the **Apache License 2.0**; see [`LICENSE`](LI
 
 For the origin and rights boundaries of the native project, see [`native/PROVENANCE.md`](native/PROVENANCE.md). The legacy Electron tree may still reference licenses of components shipped with older versions (e.g. [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)); **the native app no longer distributes that core**.
 
-© daniel.ye
+© daniel.ye叶子诚
