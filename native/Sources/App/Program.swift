@@ -109,6 +109,13 @@ import WebKit
             }
             updater.begin()
             assistant.begin()
+            if assistant.wantsLoginItem {
+                Task {
+                    guard (try? await services.saveSettings(["autostart": true])) != nil else { return }
+                    assistant.loginItemApplied()
+                    browser.event("state", state())
+                }
+            }
             Task { await services.fetchNotice() }
             Task { try? await services.scheduleReminders() }
         } catch { present(error); quitApproved = true; NSApp.terminate(nil) }

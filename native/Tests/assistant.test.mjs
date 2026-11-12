@@ -25,6 +25,15 @@ const snapshot = {
     slot('2026-11-13', '09:00', '09:45', 'Computer Science A', 'D101', 'Mr. Chen'),
     slot('2026-11-16', '08:00', '08:45', 'Chinese History', 'A210', 'Mr. Li Ming'),
   ],
+  assignments: [
+    {id: 'a1', title: 'Problem set 4', course: 'AP Physics C', due: '2026-11-14', score: null},
+    {id: 'a2', title: 'Essay draft', course: 'English Literature', due: '2026-11-13', score: null},
+    {id: 'a3', title: 'Quiz 2', course: 'AP Physics C', due: '2026-11-03', score: 18, total: 20},
+  ],
+  attendance: [
+    {course: 'AP Physics C', status: 'Tardy', date: '2026-11-05'},
+    {course: 'Chinese History', status: 'Absent', date: '2026-11-10'},
+  ],
 };
 const ask = (question, options = {}) => A.answer(question, snapshot, {now, ...options});
 const expectText = (question, ...parts) => {
@@ -122,4 +131,16 @@ test('prompts stay bounded and match the question language', () => {
   assert.ok(A.chatPrompt('你好', 'zh').system.includes('不要编造'));
   assert.equal(A.EXAMPLES.zh.length, A.EXAMPLES.en.length);
   for (const lang of ['en', 'zh']) for (const example of A.EXAMPLES[lang]) assert.notEqual(A.answer(example, snapshot, {now}).status, 'unknown', example);
+});
+
+test('assignments and attendance stay reachable by asking', () => {
+  const due = expectText('What assignments are due?', '2 assignments', 'Essay draft', 'Problem set 4', '11/13');
+  assert.ok(due.text.indexOf('Essay draft') < due.text.indexOf('Problem set 4'), 'soonest first');
+  assert.ok(!due.text.includes('Quiz 2'), 'past work is left out when something is upcoming');
+  expectText('物理有哪些作业要交？', '1 项作业', 'Problem set 4', '11月14日');
+  assert.ok(!ask('物理有哪些作业要交？').text.includes('Essay draft'));
+  expectText('看看我的考勤', '最近 2 条考勤记录', 'Chinese History: Absent', 'AP Physics C: Tardy');
+  expectText('Was I late to physics?', 'AP Physics C: Tardy');
+  assert.ok(ask('What assignments are due?').facts.length === 2);
+  assert.ok(A.answer('show my attendance', {courses: snapshot.courses, schedule: [], attendance: []}, {now}).text.includes('No attendance records'));
 });

@@ -244,11 +244,13 @@
   }
   function setEnvironment(message) { const node = $('#environment-banner'); node.textContent = message; node.hidden = !message; }
   function uiLanguage() { return app.language === 'system' ? (/^zh/i.test(root.navigator?.language || '') ? 'zh' : 'en') : app.language; }
-  function assistantReady() { return app.assistant.phase === 'ready' && Boolean(root.WLSAAssistant); }
+  // On eligible Macs the Assistant page replaces the Progress page outright.
+  function assistantPage() { return app.assistant.eligible === true && Boolean(root.WLSAAssistant); }
+  function modelReady() { return app.assistant.phase === 'ready'; }
   function renderChrome() {
     applyAppearance();
     if (root.WLSAI18n && root.WLSAI18n.language !== uiLanguage()) root.WLSAI18n.setLanguage(uiLanguage());
-    const nav = [['home','home','Home'],['schedule','calendar','Schedule'],assistantReady()?['progress','spark','Assistant']:['progress','progress','Progress'],['forum','forum','Forum'],['tools','tools','Tools'],['settings','settings','Settings']];
+    const nav = [['home','home','Home'],['schedule','calendar','Schedule'],assistantPage()?['progress','spark','Assistant']:['progress','progress','Progress'],['forum','forum','Forum'],['tools','tools','Tools'],['settings','settings','Settings']];
     $('#navigation').innerHTML = nav.map(([page,symbol,label]) => `<a href="#${page}" class="nav-link"${ui.page === page?' aria-current="page"':''} title="${label}">${icon(symbol)}<span class="nav-label">${label}</span></a>`).join('');
     $('#breadcrumb').textContent = nav.find(item => item[0] === ui.page)?.[2] || 'Home';
     $('.local-indicator').innerHTML = isNativeAvailable() ? '<span></span> Saved on your Mac' : '<span></span> Browser preview';
@@ -317,8 +319,13 @@
       `<p class="inline-note">${app.snapshot.syncedAt?`Last synchronized ${h(formatDate(app.snapshot.syncedAt,{year:'numeric'}))} at ${h(formatTime(app.snapshot.syncedAt))}.`:'No synchronized timetable yet.'} ${app.reminders?'Class reminders are enabled; macOS will notify you about five minutes before class.':'Class reminders are off.'}</p>`;
   }
   function progressTabs() {
-    const tabs = assistantReady() ? [['assistant','Assistant']] : [];
-    return `<div class="segmented" role="tablist" aria-label="Progress section">${tabs.concat([['grades','Grades'],['assignments','Assignments'],['attendance','Attendance']]).map(([key,label])=>`<button role="tab" aria-selected="${ui.progressTab===key}" data-action="progress-tab" data-value="${key}">${label}</button>`).join('')}</div>`;
+    return `<div class="segmented" role="tablist" aria-label="Progress section">${[['grades','Grades'],['assignments','Assignments'],['attendance','Attendance']].map(([key,label])=>`<button role="tab" aria-selected="${ui.progressTab===key}" data-action="progress-tab" data-value="${key}">${label}</button>`).join('')}</div>`;
+  }
+  function assistantModelNote() {
+    const phase = String(app.assistant.phase || ''), percent = Math.round(Number(app.assistant.percent) || 0);
+    if (phase === 'ready') return '';
+    const copy = phase === 'restart' ? 'The language model is downloaded. Reopen WLSAPlus to turn it on.' : phase === 'paused' ? 'The language model download is paused. Resume it in Settings.' : 'The language model is still downloading.';
+    return `<div class="info-box">${icon('info','inline-icon')}<span>${copy}</span> <span>Until then, answers come straight from your school data.</span>${phase === 'downloading' && percent > 0 ? ` <span data-raw>${percent}%</span>` : ''}</div>`;
   }
   function assistantView() {
     const examples = root.WLSAAssistant.EXAMPLES[uiLanguage()] || root.WLSAAssistant.EXAMPLES.en;
@@ -326,19 +333,20 @@
       ? `<div class="chat-row user"><div class="chat-bubble" data-raw>${h(item.text)}</div></div>`
       : `<div class="chat-row"><div class="chat-bubble">${item.text?`<p class="chat-text" data-raw>${h(item.text)}</p>`:''}${item.pending?`<p class="chat-pending"><span class="spinner"></span>Thinking…</p>`:''}${item.facts?.length?`<dl class="chat-facts" data-raw>${item.facts.map(fact=>`<div><dt>${h(fact.label)}</dt><dd>${h(fact.value)}</dd></div>`).join('')}</dl>`:''}${item.note?`<p class="chat-note" data-raw>${h(item.note)}</p>`:''}</div></div>`).join('');
     return heading('Assistant','Ask about your classes, grades, rooms and teachers.',btn('Sync PowerSchool','sync',{icon:'sync',disabled:busy('sync') || !accountExists()})) +
-      `<div class="section-toolbar">${progressTabs()}</div>` +
-      `<section class="card assistant-guide"><div class="card-header"><h2>How to use the assistant</h2></div><ol><li>Type a question in English or Chinese, or pick an example below.</li><li>Answers about your timetable, grades, rooms and teachers are read directly from your synced PowerSchool data, and the data used is shown under each answer.</li><li>The model runs on this Mac. Your questions and school data never leave it.</li><li>For the full tables, use the Grades, Assignments and Attendance tabs above.</li></ol><p class="eyebrow">Try asking</p><div class="chip-row" data-raw>${examples.map(example=>`<button type="button" class="chip" data-action="assistant-example" data-value="${h(example)}"${busy('assistant')?' disabled':''}>${h(example)}</button>`).join('')}</div></section>` +
+      assistantModelNote() +
+      `<section class="card assistant-guide"><div class="card-header"><h2>How to use the assistant</h2></div><ol><li>Type a question in English or Chinese, or pick an example below.</li><li>Answers about your timetable, grades, rooms and teachers are read directly from your synced PowerSchool data, and the data used is shown under each answer.</li><li>The model runs on this Mac. Your questions and school data never leave it.</li><li>You can also ask for all your grades, your assignments or your attendance.</li></ol><p class="eyebrow">Try asking</p><div class="chip-row" data-raw>${examples.map(example=>`<button type="button" class="chip" data-action="assistant-example" data-value="${h(example)}"${busy('assistant')?' disabled':''}>${h(example)}</button>`).join('')}</div></section>` +
       `<section class="card chat-card"><div class="card-header"><h2>Conversation</h2>${ui.chat.length?btn('Clear conversation','assistant-clear',{subtle:true,disabled:busy('assistant')}):''}</div><div class="chat-log" id="chat-log" role="log" aria-live="polite">${log || empty('spark','Your conversation appears here','Ask something, or pick one of the examples above.')}</div><form id="assistant-form" class="chat-form"><input id="assistant-input" type="text" maxlength="300" autocomplete="off" aria-label="Ask the assistant" placeholder="Ask a question…" value="${h(ui.chatInput)}"><button type="submit" class="button primary"${busy('assistant')?' disabled':''}>${icon('spark')}Ask</button></form></section>`;
   }
   async function askAssistant(text) {
     const question = String(text || '').trim().slice(0,300), helper = root.WLSAAssistant;
-    if (!question || busy('assistant') || !assistantReady()) return;
+    if (!question || busy('assistant') || !assistantPage()) return;
     const result = helper.answer(question, app.snapshot, {now:referenceNow(), fallbackLanguage:uiLanguage()});
     const general = result.status === 'unknown';
     const reply = {role:'assistant', text:general ? '' : result.text, facts:result.facts, note:'', pending:true};
     ui.chatInput = '';
     ui.chat.push({role:'user', text:question}, reply);
     if (ui.chat.length > 60) ui.chat.splice(0, ui.chat.length - 60);
+    if (!modelReady()) { reply.pending = false; reply.text = result.text; render(); scrollChat(); return; }
     ui.pending.add('assistant'); render(); scrollChat();
     try {
       if (general) {
@@ -359,9 +367,7 @@
   }
   function scrollChat() { const log = $('#chat-log'); if (log) log.scrollTop = log.scrollHeight; }
   function progressView() {
-    if (assistantReady() && !ui.assistantOpened) { ui.assistantOpened = true; ui.progressTab = 'assistant'; }
-    if (!assistantReady() && ui.progressTab === 'assistant') ui.progressTab = 'grades';
-    if (ui.progressTab === 'assistant') return assistantView();
+    if (assistantPage()) return assistantView();
     const query = ui.query.toLowerCase();
     const courses = app.snapshot.courses.filter(item => `${item.name} ${item.teacher}`.toLowerCase().includes(query));
     const assignments = app.snapshot.assignments.filter(item => `${item.title} ${item.course}`.toLowerCase().includes(query) && (ui.courseFilter==='all' || item.course===ui.courseFilter));
@@ -422,7 +428,7 @@
       ? (state.reason === 'memory' ? 'The assistant needs a Mac with 16 GB of memory or more.' : 'The assistant needs a Mac with Apple silicon.')
       : ({waiting:'The assistant model (1.1 GB) downloads automatically in the background.', downloading:'Downloading the assistant model (1.1 GB)…', verifying:'Checking the downloaded model…',
           paused:'Download paused. Resume whenever you like.', error:'The assistant model could not be downloaded. WLSAPlus will try again later.',
-          restart:'The assistant is ready. Reopen WLSAPlus to turn it on.', ready:'The assistant is on. Open the Assistant page to ask a question.'})[phase] || '';
+          restart:'The assistant is ready. Reopen WLSAPlus to turn it on.', ready:'The assistant is on and stays loaded while WLSAPlus is open. WLSAPlus opens at login so it is ready when you need it.'})[phase] || '';
     const action = ({waiting:btn('Pause download','assistant-pause',{disabled:busy('assistant-download')}), downloading:btn('Pause download','assistant-pause',{disabled:busy('assistant-download')}),
       paused:btn('Resume download','assistant-resume',{primary:true,disabled:busy('assistant-download')}), error:btn('Try again','assistant-resume',{disabled:busy('assistant-download')}),
       restart:btn('Reopen now','assistant-relaunch',{primary:true}), ready:btn('Open assistant','assistant-open',{icon:'spark'})})[phase] || '';
@@ -603,7 +609,7 @@
       case 'today': ui.date=referenceNow(); render(); break;
       case 'schedule-mode': ui.scheduleMode=value; render(); break;
       case 'progress-tab': ui.progressTab=value; ui.query=''; render(); break;
-      case 'progress-assignments': ui.progressTab='assignments'; ui.query=''; navigate('progress'); break;
+      case 'progress-assignments': ui.progressTab='assignments'; ui.query=''; navigate('progress'); if (assistantPage()) await askAssistant(uiLanguage() === 'zh' ? '有哪些作业要交？' : 'What assignments are due?'); break;
       case 'course': await showCourse(value); break;
       case 'open-tool': navigate('tools',value); break;
       case 'tools-back': ui.tool=''; render(); break;
@@ -632,7 +638,7 @@
       case 'assistant-resume': await run('assistant-download', async () => { app = normalizeState({...app, assistant:await native('assistant.resume')}); }); break;
       case 'assistant-relaunch': await run('assistant-relaunch', async () => { await native('assistant.relaunch'); }); break;
       case 'assistant-later': ui.restartDismissed = true; render(); break;
-      case 'assistant-open': ui.progressTab = 'assistant'; navigate('progress'); break;
+      case 'assistant-open': navigate('progress'); break;
       case 'assistant-example': await askAssistant(value); break;
       case 'assistant-clear': ui.chat = []; render(); break;
       case 'accent': await saveSettings({accent:value}); break;

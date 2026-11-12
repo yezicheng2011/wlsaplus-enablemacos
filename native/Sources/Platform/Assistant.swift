@@ -36,8 +36,8 @@ import Foundation
     private var message = ""
     private var download: PackageDownload?
     private var retry: Timer?
-    private var idle: Timer?
     private var worker: AssistantWorkerClient?
+    private var starting: Task<AssistantWorkerClient, Error>?
     private var answering = false
 
     private var model: URL { directory.appendingPathComponent(Self.modelName) }
@@ -64,9 +64,38 @@ import Foundation
         onChange?(status)
     }
 
+    /// True once the model is installed: WLSAPlus then opens at login so the
+    /// model is already in memory when the first question is asked.
+    var wantsLoginItem: Bool { phase == "ready" && store.value["assistantLoginApplied"] as? Bool != true }
+    func loginItemApplied() { try? store.set("assistantLoginApplied", true) }
+
     func begin() {
+        if phase == "ready" { Task { _ = try? await loadedWorker() } }
         guard phase == "waiting" else { return }
         Task { try? await Task.sleep(nanoseconds: 10_000_000_000); await fetch() }
+    }
+
+    /// Starts the model process if needed and waits until the model is in memory.
+    private func loadedWorker() async throws -> AssistantWorkerClient {
+        if let worker, worker.isRunning { return worker }
+        if let starting { return try await starting.value }
+        let model = self.model, marker = self.marker
+        let task = Task { () throws -> AssistantWorkerClient in
+            let client = try AssistantWorkerClient(model: model)
+            let hello = try await client.expect()
+            guard hello["ready"] as? Bool == true else {
+                client.stop()
+                // Forget a model that will not load so it is fetched again next launch.
+                try? FileManager.default.removeItem(at: marker)
+                throw AppError(hello["error"] as? String ?? "The assistant model could not be loaded.")
+            }
+            return client
+        }
+        starting = task
+        defer { starting = nil }
+        let client = try await task.value
+        worker = client
+        return client
     }
 
     func pause() throws {
@@ -145,27 +174,10 @@ import Foundation
               !user.isEmpty, system.utf8.count <= 4000, user.utf8.count <= 2000 else { throw AppError("Invalid assistant request.") }
         guard !answering else { throw AppError("The assistant is still answering the previous question.") }
         answering = true
-        idle?.invalidate()
-        defer {
-            answering = false
-            // The loaded model holds about 3 GB; release it after a quiet spell.
-            idle = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.stopWorker() }
-            }
-        }
+        defer { answering = false }
         let limit = min(max(args["maxTokens"] as? Int ?? 120, 1), 200)
-        if worker?.isRunning != true {
-            let client = try AssistantWorkerClient(model: model)
-            worker = client
-            let hello = try await client.expect()
-            guard hello["ready"] as? Bool == true else {
-                stopWorker()
-                // Forget a model that will not load so it is fetched again next launch.
-                try? FileManager.default.removeItem(at: marker)
-                throw AppError(hello["error"] as? String ?? "The assistant model could not be loaded.")
-            }
-        }
-        guard let client = worker else { throw AppError("The assistant is not running.") }
+        // The model (about 3 GB) stays loaded for as long as WLSAPlus runs.
+        let client = try await loadedWorker()
         let watchdog = DispatchWorkItem { client.stop() }
         DispatchQueue.global().asyncAfter(deadline: .now() + 180, execute: watchdog)
         defer { watchdog.cancel() }
@@ -182,7 +194,7 @@ import Foundation
 
 /// Talks to the model process over its standard input and output, one JSON
 /// object per line, answered in order.
-final class AssistantWorkerClient {
+final class AssistantWorkerClient: @unchecked Sendable {
     private let process = Process()
     private let input = Pipe(), output = Pipe()
     private let queue = DispatchQueue(label: "wlsaplus.assistant.worker")

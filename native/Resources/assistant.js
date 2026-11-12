@@ -32,6 +32,8 @@
     teacher: /\b(teachers?|who|teach(es)?|taught|instructor|professor)\b|老师|教师|谁教|哪位|谁上|谁带/i,
     time: /\b(when|what time|starts?|begins?|ends?|finish(es)?|period)\b|几点|什么时候|何时|开始|结束|时间|下课|上课时间/i,
     schedule: /\b(schedule|timetable|classes|lessons|what do i have|what('s| is) (on|next))\b|课表|课程表|有什么课|哪些课|几节课|上什么课|有课吗|什么课/i,
+    assignments: /\b(assignments?|homework|due|deadlines?)\b|作业|功课|截止|要交/i,
+    attendance: /\b(attendance|absent|absences?|tardy|tardies|late)\b|考勤|出勤|缺勤|迟到|缺课|旷课/i,
   };
   const NEXT = /\b(next|upcoming|now|current(ly)?)\b|下一节|下节|下一堂|接下来|现在|当前|马上/i;
   const FIRST = /\b(first)\b|第一节|第一堂|最早/i;
@@ -135,6 +137,8 @@
       noNext: 'No upcoming class was found in your synced schedule.',
       lowest: (name, value) => `Your lowest grade is in ${name}: ${value}.`, highest: (name, value) => `Your highest grade is in ${name}: ${value}.`,
       allGrades: 'Your grades:', noGrades: 'No grades have been posted yet.',
+      assignments: count => `Here ${count === 1 ? 'is 1 assignment' : `are ${count} assignments`}:`, noAssignments: 'No assignments were found in your synced data.', due: date => `due ${date}`, noDue: 'no due date',
+      attendance: count => `Your ${count === 1 ? 'latest attendance record' : `latest ${count} attendance records`}:`, noAttendance: 'No attendance records were found in your synced data.',
       labels: {course: 'Course', grade: 'Grade', room: 'Room', teacher: 'Teacher', time: 'Time', day: 'Day'},
     },
     zh: {
@@ -155,6 +159,8 @@
       noNext: '在已同步的课表里没有找到接下来的课。',
       lowest: (name, value) => `成绩最低的是 ${name}：${value}。`, highest: (name, value) => `成绩最高的是 ${name}：${value}。`,
       allGrades: '你的成绩：', noGrades: '还没有公布任何成绩。',
+      assignments: count => `找到 ${count} 项作业：`, noAssignments: '在已同步的数据里没有找到作业。', due: date => `${date} 截止`, noDue: '无截止日期',
+      attendance: count => `最近 ${count} 条考勤记录：`, noAttendance: '在已同步的数据里没有找到考勤记录。',
       labels: {course: '课程', grade: '成绩', room: '教室', teacher: '老师', time: '时间', day: '日期'},
     },
   };
@@ -179,6 +185,26 @@
     const lines = [];
     result.intents = intents; result.courses = matched.map(course => String(course.name || course.title || ''));
 
+    const belongs = (item, course) => { const a = clean(item.course), b = clean(course.name || course.title); return Boolean(a && b && (a === b || a.includes(b) || b.includes(a))); };
+    const shortDate = value => { const date = tools.parseDate ? tools.parseDate(value) : null; return date ? (lang === 'zh' ? `${date.getMonth() + 1}月${date.getDate()}日` : `${date.getMonth() + 1}/${date.getDate()}`) : ''; };
+    if (intents.includes('assignments') && !intents.includes('grade')) {
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const all = (Array.isArray(snapshot?.assignments) ? snapshot.assignments : []).filter(item => !matched.length || matched.some(course => belongs(item, course)));
+      const dated = item => { const date = tools.parseDate ? tools.parseDate(item.due) : null; return date ? date.getTime() : null; };
+      const upcoming = all.filter(item => dated(item) != null && dated(item) >= today).sort((a, b) => dated(a) - dated(b));
+      const chosen = (upcoming.length ? upcoming : all.slice().sort((a, b) => (dated(b) || 0) - (dated(a) || 0))).slice(0, 8);
+      if (!chosen.length) return {...result, text: t.noAssignments};
+      const describe = item => [item.course, shortDate(item.due) ? t.due(shortDate(item.due)) : t.noDue, tools.scoreText && item.score != null && item.score !== '' ? tools.scoreText(item) : ''].filter(Boolean).join(' · ');
+      chosen.forEach(item => { result.facts.push({label: String(item.title || ''), value: describe(item)}); });
+      return {...result, courses: [], text: `${t.assignments(chosen.length)}\n${chosen.map(item => `${item.title || ''} — ${describe(item)}`).join('\n')}`};
+    }
+    if (intents.includes('attendance')) {
+      const records = (Array.isArray(snapshot?.attendance) ? snapshot.attendance : []).filter(item => !matched.length || matched.some(course => belongs(item, course)))
+        .slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 8);
+      if (!records.length) return {...result, text: t.noAttendance};
+      records.forEach(item => { result.facts.push({label: [shortDate(item.date) || String(item.date || ''), item.course].filter(Boolean).join(' · '), value: String(item.status || '')}); });
+      return {...result, courses: [], text: `${t.attendance(records.length)}\n${records.map(item => `${shortDate(item.date) || item.date || ''} ${item.course || ''}: ${item.status || ''}`).join('\n')}`};
+    }
     if (intents.includes('grade') && (LOWEST.test(question) || HIGHEST.test(question)) && !matched.length) {
       const graded = courses.map(course => ({course, percent: tools.percentage ? tools.percentage(course.percent) : null})).filter(item => item.percent != null);
       if (!graded.length) return {...result, text: t.noGrades};
@@ -229,7 +255,7 @@
       return {...result, status: 'unknown', text: t.unsure};
     }
 
-    const wanted = intents.filter(key => key !== 'schedule');
+    const wanted = intents.filter(key => ['grade', 'room', 'teacher', 'time'].includes(key));
     const fields = wanted.length ? wanted : ['grade', 'room', 'teacher', 'time'];
     matched.forEach(course => {
       const name = String(course.name || course.title || '');
@@ -307,8 +333,8 @@
   }
 
   const EXAMPLES = {
-    en: ['What is my next class?', 'What classes do I have tomorrow?', 'What is my grade in math?', 'Which room is physics in?', 'Who teaches English?', 'Which class has my lowest grade?'],
-    zh: ['下一节课是什么？', '明天有什么课？', '我的数学成绩是多少？', '物理课在哪间教室？', '英语是哪位老师教的？', '哪门课成绩最低？'],
+    en: ['What is my next class?', 'What classes do I have tomorrow?', 'What is my grade in math?', 'Which room is physics in?', 'Who teaches English?', 'Show all my grades', 'What assignments are due?', 'Show my attendance'],
+    zh: ['下一节课是什么？', '明天有什么课？', '我的数学成绩是多少？', '物理课在哪间教室？', '英语是哪位老师教的？', '所有成绩', '有哪些作业要交？', '看看我的考勤'],
   };
 
   const GENERAL_NOTE = {

@@ -49,7 +49,8 @@
     'Type a question in English or Chinese, or pick an example below.': '用中文或英文输入问题，也可以直接点下面的示例。',
     'Answers about your timetable, grades, rooms and teachers are read directly from your synced PowerSchool data, and the data used is shown under each answer.': '关于课表、成绩、教室和老师的回答直接取自已同步的 PowerSchool 数据，每条回答下方会列出所用的数据。',
     'The model runs on this Mac. Your questions and school data never leave it.': '模型在这台 Mac 上运行，你的问题和学校数据不会离开本机。',
-    'For the full tables, use the Grades, Assignments and Attendance tabs above.': '想看完整表格，请用上方的“成绩”“作业”“考勤”标签页。',
+    'You can also ask for all your grades, your assignments or your attendance.': '也可以直接问全部成绩、作业或考勤。',
+    'The language model is still downloading.': '语言模型还在下载中。', 'The language model download is paused. Resume it in Settings.': '语言模型下载已暂停，可在设置中继续。', 'The language model is downloaded. Reopen WLSAPlus to turn it on.': '语言模型已下载完成，重新打开 WLSAPlus 即可启用。', 'Until then, answers come straight from your school data.': '在此之前，回答直接取自你的学校数据。',
     'Try asking': '试试这样问', 'Ask a question…': '输入问题…', 'Ask the assistant': '向助手提问', 'Ask': '提问', 'Thinking…': '思考中…', 'Conversation': '对话', 'Your conversation appears here': '对话会显示在这里',
     'Ask something, or pick one of the examples above.': '输入问题，或点选上面的示例。', 'Clear conversation': '清空对话', 'The assistant is ready': 'AI 助手已就绪', 'Reopen WLSAPlus to turn on the on-device assistant.': '重新打开 WLSAPlus 即可启用本机 AI 助手。', 'Reopen now': '立即重新打开',
     // Assistant settings
@@ -57,7 +58,7 @@
     'The assistant needs a Mac with Apple silicon.': 'AI 助手需要搭载 Apple 芯片的 Mac。', 'The assistant needs a Mac with 16 GB of memory or more.': 'AI 助手需要 16 GB 或以上内存的 Mac。',
     'The assistant model (1.1 GB) downloads automatically in the background.': '助手模型（1.1 GB）会在后台自动下载。', 'Downloading the assistant model (1.1 GB)…': '正在下载助手模型（1.1 GB）…', 'Checking the downloaded model…': '正在校验下载的模型…',
     'Download paused. Resume whenever you like.': '下载已暂停，可随时继续。', 'The assistant model could not be downloaded. WLSAPlus will try again later.': '助手模型下载失败，WLSAPlus 稍后会重试。',
-    'The assistant is ready. Reopen WLSAPlus to turn it on.': 'AI 助手已就绪，重新打开 WLSAPlus 即可启用。', 'The assistant is on. Open the Assistant page to ask a question.': 'AI 助手已启用，打开“AI 助手”页面即可提问。',
+    'The assistant is ready. Reopen WLSAPlus to turn it on.': 'AI 助手已就绪，重新打开 WLSAPlus 即可启用。', 'The assistant is on and stays loaded while WLSAPlus is open. WLSAPlus opens at login so it is ready when you need it.': 'AI 助手已启用，WLSAPlus 打开期间模型会一直保持载入。WLSAPlus 会在登录时自动打开，随时可用。',
     'Pause download': '暂停下载', 'Resume download': '继续下载', 'Try again': '重试', 'Model download progress': '模型下载进度', 'Open assistant': '打开 AI 助手',
     // Forum
     'A space for your school community.': '属于你们学校的交流空间。', 'Good conversations start here.': '好的讨论从这里开始。', 'Open forum': '打开论坛', 'Opening forum…': '正在打开论坛…',
