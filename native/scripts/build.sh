@@ -102,7 +102,10 @@ if command -v spctl >/dev/null 2>&1; then
   printf '%s\n' "$spctl_out"
   echo "spctl exit status: $spctl_status (self-signed may be rejected by assessment while still avoiding the damaged-app quarantine failure)"
 fi
-xcrun lipo "$app/Contents/MacOS/WLSAPlus" -verify_arch arm64 x86_64
+# lipo -verify_arch is broken on some Command Line Tools 27.x builds
+# ("requires exactly one input file" even with one file). Check -archs instead.
+archs="$(xcrun lipo -archs "$app/Contents/MacOS/WLSAPlus")"
+echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64 || { echo "expected a universal binary (arm64 x86_64), got: $archs" >&2; exit 1; }
 # ditto zip preserves the sealed signature; do not mutate the .app after signing.
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$app" out/WLSAPlus-native-review.zip
 "$app/Contents/MacOS/WLSAPlus" --validate-archive out/WLSAPlus-native-review.zip

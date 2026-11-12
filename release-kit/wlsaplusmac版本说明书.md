@@ -36,7 +36,7 @@ xcode-select --install
 ```bash
 git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
 cd wlsaplus-enablemacos/native
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -46,7 +46,7 @@ If `git clone` fails, download the zip through the same mirror and build:
 curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
 unzip wlsaplus-enablemacos.zip
 cd wlsaplus-enablemacos-main/native
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 

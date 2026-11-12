@@ -73,7 +73,7 @@ cd wlsaplus-enablemacos
 
 # 2) Enter the native project and build (universal: arm64 + x86_64)
 cd native
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
 
 # 3) Open the freshly built app
 open out/WLSAPlus.app
@@ -84,7 +84,7 @@ The four core lines classmates can copy (mirror clone + build + open):
 ```bash
 git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
 cd wlsaplus-enablemacos/native
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -94,7 +94,7 @@ If `git clone` still fails, download the zip through the same mirror:
 curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
 unzip wlsaplus-enablemacos.zip
 cd wlsaplus-enablemacos-main/native
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
