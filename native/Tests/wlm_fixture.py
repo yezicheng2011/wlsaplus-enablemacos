@@ -146,7 +146,7 @@ def gguf_string(text):
     return struct.pack("<Q", len(data)) + data
 
 
-def write_gguf(path, plan, tensors):
+def write_gguf(path, plan, tensors, architecture_last=False):
     def kv_string(key, value): return gguf_string(key) + struct.pack("<I", 8) + gguf_string(value)
     def kv_u32(key, value): return gguf_string(key) + struct.pack("<II", 4, value)
     def kv_f32(key, value): return gguf_string(key) + struct.pack("<If", 6, value)
@@ -159,6 +159,8 @@ def write_gguf(path, plan, tensors):
            kv_strings("tokenizer.ggml.tokens", TOKENS), kv_i32s("tokenizer.ggml.token_type", TYPES),
            kv_strings("tokenizer.ggml.merges", [f"{a} {b}" for a, b in MERGES]),
            kv_u32("tokenizer.ggml.eos_token_id", ID["<|im_end|>"]), kv_u32("tokenizer.ggml.bos_token_id", ID["<|endoftext|>"])]
+    if architecture_last:
+        kvs = kvs[1:] + kvs[:1]
     header = b"GGUF" + struct.pack("<IQQ", 3, len(plan), len(kvs)) + b"".join(kvs)
     infos, data = b"", b""
     for name, rows, cols, kind in plan:
@@ -227,6 +229,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     plan, tensors = build_tensors()
     write_gguf(out / "tiny.gguf", plan, tensors)
+    write_gguf(out / "tiny-reordered.gguf", plan, tensors, architecture_last=True)
     text = "hello he"
     expected_tokens = [ID["hel"], ID["l"], ID["o"], ID[ALPHABET[32] + "he"]]
     tokens = [ID["<|im_start|>"]] + expected_tokens + [ID["<|im_end|>"]]

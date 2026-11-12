@@ -52,6 +52,7 @@ int main(int argc, char **argv) {
     for (char *cursor = feed_line; *cursor;) feed[fed++] = (int32_t)strtol(cursor, &cursor, 10);
     CHECK(produced == wanted && memcmp(tokens, want, sizeof(int32_t) * (size_t)wanted) == 0, "byte-pair merges follow rank order");
     CHECK(wlm_tokenize(model, text, strlen(text), tokens, 2) == -1, "tokenizer reports a full buffer");
+    CHECK(wlm_tokenize(model, "hel", 3, tokens, 1) == 1 && tokens[0] == want[0], "capacity is judged after merging");
 
     char bytes[64];
     int length = 0;
@@ -80,6 +81,18 @@ int main(int argc, char **argv) {
     }
     CHECK(compared == vocab, "one reference logit per token");
     CHECK(worst < 2e-3, "logits match the independent reference forward pass");
+
+    // Metadata keys may come in any order: the same model with the
+    // architecture name written last must load and compute the same logits.
+    snprintf(scratch, sizeof scratch, "%s/tiny-reordered.gguf", argv[1]);
+    wlm_model *reordered = wlm_load(scratch, error, sizeof error);
+    CHECK(reordered, "model with reordered metadata loads");
+    wlm_session *reordered_session = wlm_session_new(reordered, 64);
+    CHECK(reordered_session && wlm_session_feed(reordered_session, feed, fed) == 0, "reordered model runs");
+    CHECK(memcmp(wlm_session_logits(reordered_session), logits, sizeof(float) * (size_t)vocab) == 0, "metadata order does not change the result");
+    wlm_session_free(reordered_session);
+    wlm_free(reordered);
+    snprintf(scratch, sizeof scratch, "%s/scratch.gguf", argv[1]);
 
     // Feeding in two parts must give the same result as feeding at once.
     float first = logits[0], last = logits[vocab - 1];

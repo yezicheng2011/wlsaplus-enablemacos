@@ -359,11 +359,12 @@ static size_t next_piece(text t, size_t at) {
 int wlm_tokenize(const wlm_model *m, const char *bytes, size_t length, int32_t *out, int capacity) {
     text t = { (const uint8_t *)bytes, length };
     int count = 0;
+    if (length > (size_t)INT_MAX) return -1;
+    int32_t *piece = malloc(sizeof(int32_t) * (length ? length : 1));
+    if (!piece) return -1;
     for (size_t at = 0; at < length;) {
         size_t n = next_piece(t, at);
         if (n == 0 || n > length - at) n = 1;
-        if (n > (size_t)(capacity - count)) return -1;
-        int32_t *piece = out + count;
         int size = (int)n;
         for (int i = 0; i < size; i++) piece[i] = m->byte_token[t.p[at + (size_t)i]];
         while (size > 1) {
@@ -379,9 +380,12 @@ int wlm_tokenize(const wlm_model *m, const char *bytes, size_t length, int32_t *
             }
             size = write;
         }
+        if (size > capacity - count) { free(piece); return -1; }
+        memcpy(out + count, piece, sizeof(int32_t) * (size_t)size);
         count += size;
         at += n;
     }
+    free(piece);
     return count;
 }
 
@@ -483,6 +487,16 @@ wlm_model *wlm_load(const char *path, char *error, size_t error_size) {
     const uint8_t *tokens_at = NULL, *merges_at = NULL, *types_at = NULL;
     int64_t eos = -1, bos = -1;
     str architecture = { NULL, 0 };
+    // Keys may appear in any order, so find the architecture name first.
+    reader scan = r;
+    for (uint64_t i = 0; i < kv_count && !scan.bad; i++) {
+        str key = rd_str(&scan);
+        uint32_t type = (uint32_t)rd(&scan, 4);
+        if (scan.bad) break;
+        if (str_is(key, "general.architecture") && type == 8) { architecture = rd_str(&scan); break; }
+        skip_value(&scan, type, 0);
+    }
+    if (scan.bad) goto bad;
     double rope_base = 10000.0, eps = 1e-6;
     uint64_t n_layer = 0, n_embd = 0, n_ff = 0, n_head = 0, n_head_kv = 0, n_ctx = 0;
     for (uint64_t i = 0; i < kv_count && !r.bad; i++) {
@@ -495,8 +509,7 @@ wlm_model *wlm_load(const char *path, char *error, size_t error_size) {
         }
         size_t suffix_length = suffix ? (size_t)(key.n - architecture.n - 1) : 0;
 #define SUFFIX(text) (suffix && suffix_length == sizeof(text) - 1 && memcmp(suffix, text, suffix_length) == 0)
-        if (str_is(key, "general.architecture") && type == 8) architecture = rd_str(&r);
-        else if (str_is(key, "general.alignment") && type == 4) alignment = rd(&r, 4);
+        if (str_is(key, "general.alignment") && type == 4) alignment = rd(&r, 4);
         else if (str_is(key, "tokenizer.ggml.eos_token_id") && type == 4) eos = (int64_t)rd(&r, 4);
         else if (str_is(key, "tokenizer.ggml.bos_token_id") && type == 4) bos = (int64_t)rd(&r, 4);
         else if (SUFFIX("block_count") && type == 4) n_layer = rd(&r, 4);
