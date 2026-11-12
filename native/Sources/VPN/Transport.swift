@@ -167,6 +167,7 @@ final class NetworkByteTransport: ByteTransport {
 
     func setReadEnabled(_ enabled: Bool) {
         readEnabled = enabled
+        // A paused read is not re-armed. Enabling it continues only when no read is in flight.
         if enabled && ready { receive() }
     }
 
@@ -246,8 +247,10 @@ final class NetworkByteTransport: ByteTransport {
             connection.receiveMessage { [weak self] data, _, _, error in
                 guard let self, !self.closed else { return }
                 self.receiving = false
-                if let error { self.fail(error); return }
                 if let data { self.onData?(data) }
+                // onData may pause reads. Do not re-arm after that, or the TCP window never closes.
+                if let error { self.fail(error); return }
+                guard self.readEnabled else { return }
                 self.receive()
             }
         } else {
@@ -257,6 +260,7 @@ final class NetworkByteTransport: ByteTransport {
                 if let data, !data.isEmpty { self.onData?(data) }
                 if let error { self.fail(error); return }
                 if done { self.finish(); return }
+                guard self.readEnabled else { return }
                 self.receive()
             }
         }

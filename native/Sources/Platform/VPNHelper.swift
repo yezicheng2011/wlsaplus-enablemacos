@@ -333,6 +333,7 @@ private final class VPNRuntime {
 
     init(configuration: VPNHelperConfiguration) throws {
         self.configuration = configuration; node = configuration.node
+        queue.setSpecific(key: ProxyConnection.queueKey, value: 1)
         if let home = Self.homeDirectory(configuration.parent.uid) {
             let url = try FairUsePath.validate(configuration.fairUsePath, home: home)
             fairUseURL = url
@@ -556,14 +557,27 @@ private final class VPNRuntime {
         }
         connection.onData = { [weak self, weak flow] data in
             guard let runtime = self, let target = flow else { return }
-            runtime.queue.async {
+            let handle = {
                 guard runtime.flows[id] === target else { return }
                 runtime.record("from-proxy-bytes", amount: data.count)
                 if !target.udp { runtime.record("from-proxy-tcp-bytes", amount: data.count) }
                 runtime.noteTunneled(data.count)
-                guard target.bytes + data.count <= 512 * 1024, target.pending.count < 2048 else { runtime.abort(id); return }
-                target.pending.append(data); target.bytes += data.count; runtime.pump(id)
+                // Fair-use pacing drains slower than the proxy can send. Pausing the
+                // read closes the TCP window. Abort only if the buffer runs away.
+                switch DownloadAccept.decide(buffered: target.bytes, incoming: data.count) {
+                case .runaway:
+                    runtime.abort(id)
+                case .pause, .queued:
+                    target.pending.append(data); target.bytes += data.count
+                    runtime.pump(id)
+                    if !target.udp, target.bytes >= DownloadAccept.highWater, !target.paused {
+                        target.paused = true
+                        target.connection.setReadEnabled(false)
+                    }
+                }
             }
+            if DispatchQueue.getSpecific(key: ProxyConnection.queueKey) == 1 { handle() }
+            else { runtime.queue.async(execute: handle) }
         }
         connection.onError = { [weak self, weak flow] error in
             guard let runtime = self, let target = flow else { return }
@@ -605,8 +619,8 @@ private final class VPNRuntime {
             if flow.offset == first.count { flow.pending.removeFirst(); flow.offset = 0 }
         }
         if !flow.udp {
-            if flow.bytes >= 128 * 1024, !flow.paused { flow.paused = true; flow.connection.setReadEnabled(false) }
-            else if flow.bytes < 64 * 1024, flow.paused { flow.paused = false; flow.connection.setReadEnabled(true) }
+            if flow.bytes >= DownloadAccept.highWater, !flow.paused { flow.paused = true; flow.connection.setReadEnabled(false) }
+            else if DownloadAccept.shouldResume(buffered: flow.bytes), flow.paused { flow.paused = false; flow.connection.setReadEnabled(true) }
         }
         if flow.remoteEOF, flow.pending.isEmpty {
             wlp_remote_close(engine, id); closeFlow(id)

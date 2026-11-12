@@ -96,6 +96,31 @@ struct FairUseLedger: Equatable {
     }
 }
 
+/// What to do with bytes already read from a proxy while the tunnel is draining.
+/// A slow fair-use drain pauses the read. It does not abort the flow.
+enum DownloadAccept: Equatable {
+    case queued
+    case pause
+    case runaway
+
+    /// Stop reading once this much is waiting. Matches the existing TCP pause.
+    static let highWater = 128 * 1024
+    /// Read again only after the paced drain has fallen below this.
+    static let lowWater = 64 * 1024
+    /// A stuck reader, not a throttled one. 16 MB is many seconds even at full speed.
+    static let runawayBytes = 16 * 1024 * 1024
+
+    static func decide(buffered: Int, incoming: Int) -> DownloadAccept {
+        let next = buffered.addingReportingOverflow(max(0, incoming))
+        let total = next.overflow ? Int.max : next.partialValue
+        if total > runawayBytes { return .runaway }
+        if total >= highWater { return .pause }
+        return .queued
+    }
+
+    static func shouldResume(buffered: Int) -> Bool { buffered < lowWater }
+}
+
 enum FairUsePath {
     static func expected(home: String) -> String {
         URL(fileURLWithPath: home).appendingPathComponent("Library/Application Support/WLSAPlus/fair-use.json").standardizedFileURL.path

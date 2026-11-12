@@ -148,6 +148,37 @@ import Foundation
         try rejects("fair-use path outside this Mac account") { _ = try FairUsePath.validate("/tmp/fair-use.json", home: home) }
         try expect(FairUseLedger.statusLimited.contains("speed temporarily reduced"), "throttle status is not a disconnect")
         try expect(!FairUseLedger.statusLimited.lowercased().contains("disconnect"), "fair use does not disconnect")
+        let burst = Int(FairUseLedger.bytesPerSecond) * 2
+        try expect(burst > 512 * 1024, "fixture is larger than the old abort threshold")
+        try expect(DownloadAccept.decide(buffered: 0, incoming: burst) == .pause, "a throttled burst pauses reads")
+        try expect(DownloadAccept.decide(buffered: 0, incoming: 16 * 1024 * 1024 + 1) == .runaway, "only a stuck buffer is fatal")
+        var download = FairUseLedger()
+        download.record(bytes: FairUseLedger.dayBytes + 1, now: now)
+        var chunks = [Data(count: burst)]
+        var offset = 0
+        var buffered = burst
+        var paused = true
+        func drainDownload(at time: TimeInterval) -> Int {
+            var sent = 0
+            while let first = chunks.first {
+                let remain = first.count - offset
+                let paced = download.pace(requested: min(remain, 32_768), now: time)
+                if paced == 0 { break }
+                offset += paced
+                buffered -= paced
+                sent += paced
+                if offset == first.count { chunks.removeFirst(); offset = 0 }
+            }
+            if DownloadAccept.shouldResume(buffered: buffered) { paused = false }
+            return sent
+        }
+        let firstSecond = drainDownload(at: now)
+        try expect(DownloadAccept.decide(buffered: 0, incoming: burst) != .runaway, "fair-use backpressure does not abort the flow")
+        try expect(firstSecond == Int(FairUseLedger.bytesPerSecond), "first second stays at about 5 Mbps")
+        try expect(paused, "reads stay paused while the burst is still queued")
+        let second = drainDownload(at: now + 1)
+        try expect(firstSecond + second == burst, "the rest is delivered as the bucket refills")
+        try expect(buffered == 0 && !paused, "reads resume after the queue falls under the low watermark")
         try LegacyStoreTests.run()
         #if NETWORK_PLAN_TESTS
         try NetworkPlan.runReadOnlyVerificationTests()
