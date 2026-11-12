@@ -2,7 +2,7 @@ name: Native macOS checks
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['native/Sources/**', 'native/Resources/**', 'native/Tests/**', 'native/scripts/**', 'package.json', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'README.md', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
+    paths: ['native/Sources/**', 'native/Resources/**', 'native/Icon/**', 'native/Tests/**', 'native/scripts/**', 'package.json', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'README.md', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
 concurrency:
   group: native-check-v2-${{ github.ref }}
   cancel-in-progress: true
@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   native:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,23 @@ jobs:
       - name: Build both Mac architectures
         id: build
         working-directory: ${{ steps.location.outputs.dir }}
+        env:
+          WLSAPLUS_REQUIRE_ICON_VARIANTS: '1'
         run: bash scripts/build.sh
+      - name: App icon in the built bundle
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: |
+          set -euo pipefail
+          resources=out/WLSAPlus.app/Contents/Resources
+          plist=out/WLSAPlus.app/Contents/Info.plist
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$plist")" == AppIcon ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$plist")" == AppIcon ]]
+          /usr/bin/iconutil --convert iconset --output "$RUNNER_TEMP/AppIcon.iconset" "$resources/AppIcon.icns"
+          ls "$RUNNER_TEMP/AppIcon.iconset"
+          test -s "$resources/Assets.car"
+          xcrun assetutil --info "$resources/Assets.car" > "$RUNNER_TEMP/icon-assets.json"
+          grep -q '"AppIcon"' "$RUNNER_TEMP/icon-assets.json"
+          grep -Eo '"(Appearance|Name|AssetType)" *: *"[^"]*"' "$RUNNER_TEMP/icon-assets.json" | sort | uniq -c || true
       - name: Startup health check
         working-directory: ${{ steps.location.outputs.dir }}
         run: |

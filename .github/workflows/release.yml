@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 40
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -75,6 +75,8 @@ jobs:
           # Optional Clash HTTPS subscription suggestion baked into Info.plist at build time.
           # Source/repo stays empty; only release CI may inject this. Prefer a repository secret.
           WLSAPLUS_DEFAULT_SUBSCRIPTION_URL: ${{ secrets.WLSAPLUS_DEFAULT_SUBSCRIPTION_URL }}
+          # Published builds must carry the layered icon (Dark, Clear and Tinted on macOS 26).
+          WLSAPLUS_REQUIRE_ICON_VARIANTS: '1'
         run: bash "$NATIVE_SOURCE/scripts/release.sh"
       - name: Stage flat release assets
         run: |
