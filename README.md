@@ -49,6 +49,7 @@ WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, 
 | 🛡️ **VPN** | Subscription nodes, latency test, full-device tunnel; the core is **MockMini, our own open-source engine** (Apache-2.0) |
 | 🧰 **Tools** | Campus map, translator, to-dos |
 | 🎨 **Appearance** | System / light / dark, multiple accent colours |
+| 🖼️ **App icon** | Dock / Finder icon for Intel and Apple silicon; on macOS 26 it follows the Default, Dark, Clear and Tinted icon styles (official builds; source builds need Xcode 26 for those styles) |
 
 ## Build from source
 

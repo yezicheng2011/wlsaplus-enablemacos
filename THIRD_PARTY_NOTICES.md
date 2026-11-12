@@ -19,7 +19,7 @@ All runtime frameworks and system utilities used by the shipped macOS app are pr
 
 Build and test scripts invoke standard host toolchains during development and CI only; none of these tools are bundled into `WLSAPlus.app`:
 
-- Apple Xcode Command Line Tools (`clang`, `swiftc`, `lipo`, `codesign`, `ditto`, `hdiutil`)
+- Apple Xcode Command Line Tools (`clang`, `swiftc`, `lipo`, `codesign`, `ditto`, `hdiutil`), plus Xcode's `actool` when compiling the layered app icon
 - Node.js 22+ built-in standard library (`node:test`, `node:crypto`, `node:http`, `node:fs`)
 - Python 3 standard library (test archive and migration fixture generation)
 - Chromium / Google Chrome (optional local/CI headless DOM verification)

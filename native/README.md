@@ -24,6 +24,12 @@ open out/WLSAPlus.app
 
 You can also double-click `release-kit/编译wlsaplus.command` in the repository. The resulting app contains both arm64 and x86_64. It is ad-hoc signed by default (others will usually see "developer cannot be verified"; right-click → Open works); official builds for the update channel must use the existing fixed certificate and update key.
 
+### App icon
+
+`Icon/` holds the app icon shown in the Dock, Finder and Launchpad. `scripts/build.sh` always installs `Icon/AppIcon.icns` (macOS 13–15, Intel and Apple silicon). When Xcode 26 or later is installed it also compiles the layered `Icon/AppIcon.icon` into `Assets.car`, which lets macOS 26 render the Default, Dark, Clear and Tinted appearances; with only the Command Line Tools the build keeps the bitmap icon and says so. CI and release builds set `WLSAPLUS_REQUIRE_ICON_VARIANTS=1` so a published build cannot silently lose the layered icon.
+
+All icon files are generated from the single design in `Icon/make-icon.py` (`python3 Icon/make-icon.py`, needs a Chrome/Chromium binary; add `--previews` to write PNG previews). `Icon/AppIcon.icon/icon.json` is edited by hand or in Icon Composer.
+
 Public VPN description: the core is **MockMini, our own open-source engine** (Apache-2.0). See the "VPN" section below and the root README for implementation details.
 
 Linux can run the C packet engine, JavaScript and Swift Core tests. Swift syntax checks on Linux do not verify Apple SDK types or system behaviour and cannot replace a macOS build.

@@ -1,6 +1,6 @@
 # Provenance
 
-The Swift, C, HTML, CSS, JavaScript, tests and build scripts in this directory were newly written for this project. No third-party VPN core, TCP/IP stack, proxy protocol library, web framework, font, icon library or implementation file from the original repository was copied, and the original core binary is not distributed. Icon paths, UI styles and the campus building diagram were drawn within this project.
+The Swift, C, HTML, CSS, JavaScript, tests and build scripts in this directory were newly written for this project. No third-party VPN core, TCP/IP stack, proxy protocol library, web framework, font, icon library or implementation file from the original repository was copied, and the original core binary is not distributed. Icon paths, UI styles and the campus building diagram were drawn within this project. The app icon (`Icon/`) is original artwork defined as shapes in `Icon/make-icon.py`; it does not reuse the earlier Electron app's icon.
 
 The main implementer read the original repository's interfaces, data formats and update constraints to stay compatible; some subtasks were written solely from functional descriptions and public protocols. This is not a legally audited clean-room process and cannot be taken as a guarantee that no third-party rights exist.
 
