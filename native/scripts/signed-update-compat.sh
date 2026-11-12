@@ -1,6 +1,7 @@
 #!/bin/bash
-# Opt-in test oracle only. Never publishes, installs dependencies, or modifies
-# the original Electron updater. Signing material stays in an ephemeral keychain.
+# SPDX-License-Identifier: Apache-2.0
+# Opt-in signed update wire-contract smoke check. Never publishes or installs npm packages.
+# Signing material stays inside an ephemeral keychain and is wiped on exit.
 set +x
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,13 +19,11 @@ for setting in WLSAPLUS_CODESIGN_P12_BASE64 WLSAPLUS_CODESIGN_P12_PASSWORD WLSAP
     exit 0
   fi
 done
-legacy="${WLSAPLUS_LEGACY_ELECTRON_DIR:-../electron}"
 app="${WLSAPLUS_NATIVE_APP:-out/WLSAPlus.app}"
-[[ -f "$legacy/mac-updater.cjs" && -f "$legacy/update-helper.sh" ]] || { echo 'Original Electron updater test oracle was not found.' >&2; exit 1; }
 [[ -x "$app/Contents/MacOS/WLSAPlus" ]] || { echo 'Build the native universal app before the signed compatibility smoke.' >&2; exit 1; }
 if [[ "${WLSAPLUS_NATIVE_UPDATE_LAUNCH_SMOKE:-0}" == 1 ]]; then
   [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted && -d "${RUNNER_TEMP:-}" ]] || {
-    echo 'Helper launch smoke is permitted only on an ephemeral GitHub-hosted runner.' >&2; exit 1;
+    echo 'Launch smoke is permitted only on an ephemeral GitHub-hosted runner.' >&2; exit 1;
   }
 fi
 base="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
@@ -40,8 +39,7 @@ identity='764D4389AAFA0C50311E39C17DDFA1981ABEF86C'
 smoke_diagnostics="$smoke_tmp/signing-diagnostics.log"
 mark() { smoke_phase="$1"; printf 'Signed compatibility smoke: %s.\n' "$smoke_phase"; }
 bounded() {
-  # macOS ships no timeout(1). Node is already required by this oracle. Never
-  # print an exception or argv: import/keychain commands contain passwords.
+  # macOS ships no timeout(1). Never print argv: keychain commands carry temporary passwords.
   node - "$@" <<'NODE'
 const { spawnSync } = require('node:child_process');
 const result = spawnSync(process.argv[2], process.argv.slice(3), {
@@ -59,7 +57,6 @@ NODE
 failed() {
   printf 'FAIL signed compatibility smoke during %s.\n' "$smoke_phase" >&2
   if [[ -f "$smoke_diagnostics" ]]; then
-    # Emit only OS status/error lines, never imported objects or key material.
     /usr/bin/grep -Ei 'security:|codesign:|errSec|CSSMERR|user interaction|item could not be found|identity not found|no identity|failed|Signing test system command' "$smoke_diagnostics" | /usr/bin/tail -n 8 >&2 || true
   fi
 }
@@ -119,8 +116,6 @@ bounded /usr/bin/security find-certificate -c 'WLSAPlus Self-Signed Code Signing
 smoke_fingerprint="$(/usr/bin/openssl x509 -in "$smoke_tmp/pinned-certificate.pem" -noout -fingerprint -sha1 | /usr/bin/cut -d= -f2 | /usr/bin/tr -d ':[:space:]' | /usr/bin/tr '[:lower:]' '[:upper:]')"
 [[ "$smoke_fingerprint" == "$identity" ]] || { echo 'The imported certificate does not match the installed-app trust pin.' >&2; exit 1; }
 if ! bounded /usr/bin/security find-identity -v -p codesigning "$smoke_keychain" | /usr/bin/grep -qi "$identity"; then
-  # A fresh self-signed identity needs OS code-signing trust. Never alter a local
-  # developer's trust settings. Hosted CI is ephemeral and supports sudo -n.
   [[ "${GITHUB_ACTIONS:-}" == true && "${RUNNER_ENVIRONMENT:-}" == github-hosted ]] || {
     echo 'The pinned self-signed certificate is not trusted locally; this test changes OS trust only on an ephemeral hosted CI runner.' >&2; exit 1;
   }
@@ -134,8 +129,6 @@ if ! bounded /usr/bin/security find-identity -v -p codesigning "$smoke_keychain"
   else
     smoke_system_certificate_added=1
   fi
-  # Arm cleanup before the command: interruption after the trust write must not
-  # leave test-added trust behind. No matching preexisting trust was found above.
   smoke_trust_added=1
   bounded sudo -n /usr/bin/security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$smoke_tmp/pinned-certificate.pem" >"$smoke_diagnostics" 2>&1
 fi
@@ -153,8 +146,6 @@ bounded /usr/bin/codesign --force --sign "$identity" --keychain "$smoke_keychain
 bounded /usr/bin/codesign --verify --deep --strict "$new_app"
 bounded /usr/bin/codesign --verify "-R=$requirement" "$new_app"
 /usr/bin/lipo "$new_app/Contents/MacOS/WLSAPlus" -verify_arch arm64 x86_64
-# A throwaway trusted target represents the old installed bundle. This is a
-# native binary stamped 1.1.2, not an original Electron binary.
 /usr/bin/ditto "$new_app" "$old_app"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.1.2' "$old_app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleVersion 1.1.2' "$old_app/Contents/Info.plist"
@@ -166,9 +157,7 @@ archive="$smoke_tmp/WLSAPlus-$version-macOS-universal.zip"
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$new_app" "$archive"
 "$new_app/Contents/MacOS/WLSAPlus" --validate-archive "$archive"
 "$new_app/Contents/MacOS/WLSAPlus" --make-manifest --version "$version" --tag "v$version" --out "$smoke_tmp/update-manifest.json" --file "universal=$archive"
-# The child test only consumes the public signature; don't propagate secrets.
 unset WLSAPLUS_CODESIGN_P12_BASE64 WLSAPLUS_CODESIGN_P12_PASSWORD WLSAPLUS_UPDATE_ED25519_KEY
-mark 'running the unchanged legacy updater oracle'
-node Tests/signed-update-compat.mjs "$smoke_tmp" "$legacy" "$old_app" "$smoke_tmp/update-manifest.json" "$archive" "$version"
-echo 'PASS signed compatibility smoke: unchanged 1.1.2 updater accepted the native package using the pinned release trust.'
-echo 'Scope: real updater staging/tools and optional helper startup; no original Electron runtime or public release was executed.'
+mark 'running independent update wire-contract and installer checks'
+node Tests/signed-update-compat.mjs "$smoke_tmp" "$old_app" "$smoke_tmp/update-manifest.json" "$archive" "$version"
+echo 'PASS signed compatibility smoke: wire-contract verifier and native installer accepted the signed package.'

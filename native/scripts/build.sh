@@ -20,6 +20,31 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 xcrun lipo -create .build/WLSAPlus-arm64 .build/WLSAPlus-x86_64 -output "$app/Contents/MacOS/WLSAPlus"
 cp Resources/* "$app/Contents/Resources/"
+# AppIcon.icns covers macOS 13-15 and Command Line Tools builds. With Xcode 26+
+# the layered AppIcon.icon is compiled too, so macOS 26 renders the Default,
+# Dark, Clear and Tinted appearances. Neither file depends on the processor.
+cp Icon/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
+icon_variants=0
+rm -rf .build/icon
+mkdir -p .build/icon
+if actool="$(xcrun --find actool 2>/dev/null)"; then
+  if "$actool" Icon/AppIcon.icon --compile .build/icon --app-icon AppIcon --platform macosx --target-device mac \
+       --minimum-deployment-target 13.0 --output-partial-info-plist .build/icon/partial.plist \
+       --output-format human-readable-text --errors --warnings >.build/icon/actool.log 2>&1 \
+     && [[ -s .build/icon/Assets.car ]]; then
+    cp .build/icon/Assets.car "$app/Contents/Resources/Assets.car"
+    icon_variants=1
+  fi
+fi
+if [[ "$icon_variants" == 1 ]]; then
+  echo 'App icon: layered icon compiled (Default, Dark, Clear and Tinted on macOS 26).'
+elif [[ "${WLSAPLUS_REQUIRE_ICON_VARIANTS:-0}" == 1 ]]; then
+  echo 'The layered app icon could not be compiled, and WLSAPLUS_REQUIRE_ICON_VARIANTS=1 requires it.' >&2
+  [[ -f .build/icon/actool.log ]] && cat .build/icon/actool.log >&2
+  exit 1
+else
+  echo 'App icon: bitmap icon only. Build with Xcode 26 or later to add the Dark, Clear and Tinted appearances.'
+fi
 # Optional release-only Clash subscription suggestion. Empty for source builds.
 # Never commit a real URL; CI injects WLSAPLUS_DEFAULT_SUBSCRIPTION_URL from a secret/variable.
 default_subscription="${WLSAPLUS_DEFAULT_SUBSCRIPTION_URL:-}"
@@ -47,6 +72,8 @@ cat > "$app/Contents/Info.plist" <<EOF
 <key>CFBundleDisplayName</key><string>WLSAPlus</string>
 <key>CFBundleExecutable</key><string>WLSAPlus</string>
 <key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleIconName</key><string>AppIcon</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
 <key>CFBundleVersion</key><string>${version%%-*}</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>

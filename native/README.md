@@ -24,6 +24,12 @@ open out/WLSAPlus.app
 
 You can also double-click `release-kit/编译wlsaplus.command` in the repository. The resulting app contains both arm64 and x86_64. It is ad-hoc signed by default (others will usually see "developer cannot be verified"; right-click → Open works); official builds for the update channel must use the existing fixed certificate and update key.
 
+### App icon
+
+`Icon/` holds the app icon shown in the Dock, Finder and Launchpad. `scripts/build.sh` always installs `Icon/AppIcon.icns` (macOS 13–15, Intel and Apple silicon). When Xcode 26 or later is installed it also compiles the layered `Icon/AppIcon.icon` into `Assets.car`, which lets macOS 26 render the Default, Dark, Clear and Tinted appearances; with only the Command Line Tools the build keeps the bitmap icon and says so. CI and release builds set `WLSAPLUS_REQUIRE_ICON_VARIANTS=1` so a published build cannot silently lose the layered icon.
+
+All icon files are generated from the single design in `Icon/make-icon.py` (`python3 Icon/make-icon.py`, needs a Chrome/Chromium binary; add `--previews` to write PNG previews). `Icon/AppIcon.icon/icon.json` is edited by hand or in Icon Composer.
+
 Public VPN description: the core is **MockMini, our own open-source engine** (Apache-2.0). See the "VPN" section below and the root README for implementation details.
 
 Linux can run the C packet engine, JavaScript and Swift Core tests. Swift syntax checks on Linux do not verify Apple SDK types or system behaviour and cannot replace a macOS build.
@@ -54,7 +60,7 @@ WLSAPLUS_VERSION=2.0.0-beta.1 bash scripts/release.sh
 
 You must first import the original fixed code-signing certificate and set `WLSAPLUS_UPDATE_ED25519_KEY`. Output file names and the manifest format remain compatible with older versions. `release.sh` only prepares artifacts locally; the release workflow at the repository root replaces the old Electron artifact pipeline — stable releases are created as drafts, and test builds update the existing beta channel. When publishing an accepted stable draft you must tick "Set as the latest release" (CLI: `gh release edit v<version> --draft=false --latest`) so that the stable update button in both old and new versions can find it. The following must be verified on a real Mac: upgrading from 1.1.2 → the new version, the next native-to-native upgrade, cancelling authorization, a non-writable Applications folder, resumed downloads and forced rollback.
 
-`scripts/signed-update-compat.sh` is an optional signing-compatibility test. Mac CI has used the original secrets to sign a test copy, generated a manifest verifiable with the original public key, and completed arm64/x64 download, unpacking, signature, architecture and readiness checks through the unmodified 1.1.2 updater from the original repository; the original install helper script has also passed replacement into a temporary target and launch confirmation of the new native app. The native install helper itself has passed replacement, launch confirmation and backup cleanup from a renamed temporary `.app` 1.1.2 test copy to a 2.0.0 test copy. The test publishes no artifacts and uses the updater module and temporary targets, so it cannot replace an upgrade acceptance test of the full old Electron app. To run it from this directory alone, point `WLSAPLUS_LEGACY_ELECTRON_DIR` at the original repository's `electron` directory and explicitly set `WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`.
+`scripts/signed-update-compat.sh` is an optional signing-compatibility smoke test. Using the pinned release certificate and Ed25519 signing key in an ephemeral keychain, it generates a signed `update-manifest.json` and universal archive, validates `arm64` and `x64` discovery, Ed25519 signature verification, HTTP Range resumption, `ditto` unpacking, `codesign` designated requirements, and `lipo` slices through the standalone Apache-2.0 wire-contract verifier (`Tests/update-wire-contract.mjs`), and exercises verify-only startup markers plus the production `--native-installer` replacement path on hosted macOS CI (`WLSAPLUS_RUN_SIGNED_COMPAT_SMOKE=1`). The test publishes no artifacts and runs only against temporary bundles.
 
 ## Features and data
 

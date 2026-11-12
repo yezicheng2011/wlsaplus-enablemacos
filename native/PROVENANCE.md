@@ -1,6 +1,6 @@
 # Provenance
 
-The Swift, C, HTML, CSS, JavaScript, tests and build scripts in this directory were newly written for this project. No third-party VPN core, TCP/IP stack, proxy protocol library, web framework, font, icon library or implementation file from the original repository was copied, and the original core binary is not distributed. Icon paths, UI styles and the campus building diagram were drawn within this project.
+The Swift, C, HTML, CSS, JavaScript, tests and build scripts in this directory were newly written for this project. No third-party VPN core, TCP/IP stack, proxy protocol library, web framework, font, icon library or implementation file from the original repository was copied, and the original core binary is not distributed. Icon paths, UI styles and the campus building diagram were drawn within this project. The app icon (`Icon/`) is original artwork defined as shapes in `Icon/make-icon.py`; it does not reuse the earlier Electron app's icon.
 
 The main implementer read the original repository's interfaces, data formats and update constraints to stay compatible; some subtasks were written solely from functional descriptions and public protocols. This is not a legally audited clean-room process and cannot be taken as a guarantee that no third-party rights exist.
 
@@ -23,6 +23,6 @@ Protocol and platform references:
 
 Test tools are used only during development and are not distributed with the app: C/Swift compilers, Node's built-in test/crypto modules, the Python standard library, Chromium, and the system cryptography APIs used by the standalone protocol tests. Real subscription and node test inputs are kept in private temporary files in the workspace and are not included in this directory or in release artifacts.
 
-The optional signing-compatibility test uses the original repository's `electron/mac-updater.cjs`, its dependencies and install scripts as a read-only reference, and verifies that those files are unchanged; they are not copied into the new app or this directory. The test only proves the listed interoperability steps and does not mean the original Electron app has been fully accepted.
+The optional signing-compatibility smoke test (`scripts/signed-update-compat.sh` and `Tests/signed-update-compat.mjs`) uses an independently implemented Apache-2.0 wire-contract verifier (`Tests/update-wire-contract.mjs`) derived from the public manifest, HTTP Range, and macOS code-signing contract; legacy Electron updater modules are neither retained in nor required by this repository.
 
 The original repository's license history, upstream contributors' code and third-party component rights still apply. This record does not replace an assignment of rights, a license opinion or a patent search. Publishers should determine the applicable notices based on the code/assets actually retained and the deployment requirements; removing old notices does not acquire upstream rights.
