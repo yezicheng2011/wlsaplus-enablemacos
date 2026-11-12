@@ -82,6 +82,10 @@
     'Choose a node to get started.': '选择一个节点开始。', 'VPN node': 'VPN 节点', 'Test latency': '测试延迟', 'Latency test completed.': '延迟测试完成。', 'Not tested': '未测试', 'Recover network': '恢复网络',
     'Connection checks': '连接检查', 'Check WeChat': '检查微信', 'Check whether WeChat is reachable with your current network connection.': '检查当前网络能否访问微信。', 'WeChat is reachable.': '可以访问微信。', 'WeChat is not reachable on this connection.': '当前网络无法访问微信。',
     'The native check returned no reachability information.': '原生检查没有返回可达性信息。',
+    'Fair use limit reached — speed temporarily reduced, will restore automatically': '已达到合理使用上限，速度暂时降低，之后会自动恢复。',
+    'Unlimited for normal personal use. More than 50 GB in a rolling 24 hours or 500 GB in a rolling 30 days on this Mac slows upload and download combined to about 5 Mbps until usage drops back. The VPN stays connected.': '日常个人使用不限流量。这台 Mac 在滚动的 24 小时内超过 50 GB，或在滚动的 30 天内超过 500 GB 时，上传和下载合计会暂时降到大约 5 Mbps，用量降下来后自动恢复。合理使用不会因此断开 VPN。',
+    'Unlimited, with fair use': '不限流量，并有合理使用规则',
+    'Usage is unlimited for normal personal use. Over 50 GB in 24 hours or 500 GB in 30 days on this Mac, the tunnel slows to about 5 Mbps and then restores itself. Fair use never disconnects the VPN.': '日常个人使用不限流量。这台 Mac 在 24 小时内超过 50 GB，或在 30 天内超过 500 GB 时，隧道会降到大约 5 Mbps，之后自行恢复。合理使用不会因此断开 VPN。',
     // Translator
     'Translate': '翻译', 'Translate from': '源语言', 'Translate to': '目标语言', 'Translating…': '正在翻译…', 'Translation': '译文', 'Original text': '原文', 'Detect language': '自动检测', 'Detected:': '检测到：', 'Swap languages': '交换语言',
     'Enter text to translate…': '输入要翻译的文字…', 'Enter some text to translate.': '请输入要翻译的文字。', 'Your translation appears here.': '译文会显示在这里。', 'Copy translation': '复制译文', 'Translation copied.': '译文已复制。', 'Translation ready.': '翻译完成。',
@@ -135,8 +139,7 @@
     [/^(.+) · Due date · time not provided$/, '$1 · 截止日期 · 未提供时间'], [/^(.+) · Assignment deadline$/, '$1 · 作业截止'],
     [/^(?:Last synchronized (.+) at (.+)\.|No synchronized timetable yet\.) (Class reminders are enabled; macOS will notify you about five minutes before class\.|Class reminders are off\.)$/,
       (_, date, time, reminders) => `${date ? `上次同步：${date} ${time}。` : '还没有同步课表。'}${reminders.includes('enabled') ? '上课提醒已开启，macOS 会在上课前约五分钟通知你。' : '上课提醒已关闭。'}`],
-    [/^(\d+) ms$/, '$1 毫秒'], [/^Downloading WLSAPlus (.+)…$/, '正在下载 WLSAPlus $1…'], [/^WLSAPlus is up to date\.$/, 'WLSAPlus 已是最新版本。'], [/^Checking for updates…$/, '正在检查更新…'], [/^Ready to check for updates\.$/, '可以检查更新。'],
-    [/^Update ready — restart to install WLSAPlus (.+)\.$/, '更新已就绪，重新启动即可安装 WLSAPlus $1。'],
+    [/^(\d+) ms$/, '$1 毫秒'], [/^Downloading WLSAPlus (.+)…$/, '正在下载 WLSAPlus $1…'], [/^Installing WLSAPlus (.+)…$/, '正在安装 WLSAPlus $1…'], [/^Installing the verified update…$/, '正在安装已验证的更新…'], [/^WLSAPlus is up to date\.$/, 'WLSAPlus 已是最新版本。'], [/^Checking for updates…$/, '正在检查更新…'], [/^Ready to check for updates\.$/, '可以检查更新。'],
   ];
   const ATTRIBUTES = ['title', 'aria-label', 'placeholder'];
   const textOriginal = new WeakMap(), attributeOriginal = new WeakMap();

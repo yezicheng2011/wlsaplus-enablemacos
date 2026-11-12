@@ -76,6 +76,27 @@ struct UpdateManifest {
     }
 }
 
+/// What to do with a package after signature, size, hash, archive, and app verification.
+enum UpdateInstallDecision: Equatable {
+    /// The package passed verification. Install it and relaunch. No confirmation click.
+    case installAndRestart
+    /// Verification did not pass. Never install this package.
+    case refuse
+}
+
+enum VerifiedUpdateHandoff {
+    /// True only when verification passed. The installer then relaunches (`restart: true`).
+    static func installsAndRestarts(_ decision: UpdateInstallDecision) -> Bool {
+        decision == .installAndRestart
+    }
+    /// Calls `install(restart: true)` only for a package that passed verification.
+    static func apply(_ decision: UpdateInstallDecision, install: (Bool) async throws -> Void) async throws {
+        if installsAndRestarts(decision) {
+            try await install(true)
+        }
+    }
+}
+
 func matches(_ value: String, _ pattern: String) -> Bool {
     value.range(of: pattern, options: .regularExpression).map { $0 == value.startIndex..<value.endIndex } ?? false
 }

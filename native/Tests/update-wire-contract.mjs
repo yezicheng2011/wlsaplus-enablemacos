@@ -22,7 +22,7 @@ const TAG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/u;
 const ZIP_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}\.zip$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const SYSTEM_VER_PATTERN = /^[0-9]+(?:\.[0-9]+){0,2}$/u;
-const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/u;
+const SEMVER_PATTERN = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.((?:0|[1-9][0-9]*)))?(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/u;
 const SUPPORTED_ARCH_KEYS = ['arm64', 'x64', 'universal'];
 const MAX_MANIFEST_BYTES = 65_536;
 const MAX_ARCHIVE_BYTES = 2_147_483_648;
@@ -33,17 +33,19 @@ export function parseSemver(input) {
   if (!match) {
     throw new Error(`Invalid semantic version: ${input}`);
   }
-  const prerelease = match[4] ? match[4].split('.') : [];
+  const prerelease = match[5] ? match[5].split('.') : [];
   for (const identifier of prerelease) {
     if (/^[0-9]+$/u.test(identifier) && identifier.length > 1 && identifier.startsWith('0')) {
       throw new Error(`Numeric prerelease identifier has leading zero: ${input}`);
     }
   }
+  const numbers = [match[1], match[2], match[3], match[4]].filter(part => part !== undefined).map(Number);
   return {
-    version: `${match[1]}.${match[2]}.${match[3]}${match[4] ? `-${match[4]}` : ''}`,
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
+    version: `${numbers.join('.')}${prerelease.length ? `-${prerelease.join('.')}` : ''}`,
+    numbers,
+    major: numbers[0],
+    minor: numbers[1],
+    patch: numbers[2],
     prerelease,
   };
 }
@@ -51,10 +53,11 @@ export function parseSemver(input) {
 export function compareSemver(leftInput, rightInput) {
   const left = typeof leftInput === 'object' ? leftInput : parseSemver(leftInput);
   const right = typeof rightInput === 'object' ? rightInput : parseSemver(rightInput);
-  for (const field of ['major', 'minor', 'patch']) {
-    if (left[field] !== right[field]) {
-      return left[field] > right[field] ? 1 : -1;
-    }
+  const count = Math.max(left.numbers.length, right.numbers.length);
+  for (let index = 0; index < count; index += 1) {
+    const a = left.numbers[index] ?? 0;
+    const b = right.numbers[index] ?? 0;
+    if (a !== b) return a > b ? 1 : -1;
   }
   if (left.prerelease.length === 0 && right.prerelease.length === 0) return 0;
   if (left.prerelease.length === 0) return 1;

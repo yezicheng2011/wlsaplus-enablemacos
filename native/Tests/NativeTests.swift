@@ -18,7 +18,24 @@ import Foundation
         }
         let hugeA = try SemanticVersion("999999999999999999999999.0.0"), hugeB = try SemanticVersion("1000000000000000000000000.0.0")
         try expect(hugeA < hugeB, "no integer overflow")
-        for s in ["1", "1.0", "1.0.0-01", "01.0.0", "1.0.0/../x", "1.0.0\n"] { try rejects("version \(s)") { _ = try SemanticVersion(s) } }
+        for s in ["1", "1.0", "1.0.0-01", "01.0.0", "1.0.0/../x", "1.0.0\n", "99.99.99.0.1", "99.99.99.01", "99.99.99.0-01"] { try rejects("version \(s)") { _ = try SemanticVersion(s) } }
+        let releaseOrder = ["2.1.1", "2.2.0", "99.99.99.0", "99.99.99.1"]
+        for pair in zip(releaseOrder, releaseOrder.dropFirst()) {
+            let older = try SemanticVersion(pair.0), newer = try SemanticVersion(pair.1)
+            try expect(older < newer, "release order \(pair)")
+        }
+        let three = try SemanticVersion("2.2.0"), four = try SemanticVersion("2.2.0.0"), fourthOne = try SemanticVersion("2.2.0.1")
+        try expect(three == four, "missing fourth segment pads as zero")
+        try expect(three < fourthOne, "fourth segment above zero pad")
+        let prefixed = try SemanticVersion("v99.99.99.0"), stable = try SemanticVersion("99.99.99.0")
+        let withBuild = try SemanticVersion("99.99.99.0+build")
+        try expect(prefixed == stable, "v prefix on four-part version")
+        try expect(withBuild == stable, "build metadata ignored")
+        try expect(stable.prerelease.isEmpty, "99.99.99.0 is a stable release")
+        let maintenanceBeta = try SemanticVersion("99.99.99.0-beta.1")
+        try expect(maintenanceBeta < stable, "four-part prerelease stays below its stable release")
+        let buildMetadata = try SemanticVersion("2.0.0+build99"), plain = try SemanticVersion("2.0.0")
+        try expect(buildMetadata == plain, "three-part build metadata still ignored")
         let subscription = try trySubscription()
         try expect(subscription.count == 3, "node import preserves SS, VMess, and Trojan")
         let trojan = subscription.first { ($0["type"] as? String)?.lowercased() == "trojan" }
@@ -59,6 +76,157 @@ import Foundation
                 else { try rejects("unsafe ZIP \(file.lastPathComponent)") { try ArchivePolicy.validate(file) } }
             }
         }
+        let maintenance: [String: Any] = ["product": AppIdentity.product, "version": "99.99.99.0", "tag": "v99.99.99.0", "channel": "stable", "files": ["arm64": ["name": "WLSAPlus-99.99.99.0-mac-arm64.zip", "size": 2048, "sha256": String(repeating: "b", count: 64)]]]
+        func maintenanceEnvelope(_ body: [String: Any]) throws -> Data {
+            try jsonData(["format": 1, "payload": String(decoding: jsonData(body), as: UTF8.self), "signature": Data(repeating: 1, count: 64).base64EncodedString()])
+        }
+        let packaged = try UpdateManifest.parse(try maintenanceEnvelope(maintenance)) { _, _ in true }
+        try expect(packaged.version == "99.99.99.0", "manifest keeps four-part version")
+        try expect(packaged.channel == "stable", "99.99.99.0 manifest stays format-1 stable")
+        let from220 = try packaged.eligible(current: "2.2.0", beta: false, failed: [], os: "14.6.1")
+        let from211 = try packaged.eligible(current: "2.1.1", beta: false, failed: [], os: "13.0")
+        let same = try packaged.eligible(current: "99.99.99.0", beta: false, failed: [], os: "14.0")
+        try expect(from220, "99.99.99.0 updates 2.2.0")
+        try expect(from211, "99.99.99.0 updates 2.1.1")
+        try expect(!same, "same four-part version is not an update")
+        var nextMaintenance = maintenance
+        nextMaintenance["version"] = "99.99.99.1"
+        nextMaintenance["tag"] = "v99.99.99.1"
+        let later = try UpdateManifest.parse(try maintenanceEnvelope(nextMaintenance)) { _, _ in true }
+        let maintenanceUpgrade = try later.eligible(current: "99.99.99.0", beta: false, failed: [], os: "14.0")
+        let blockedMaintenance = try later.eligible(current: "99.99.99.0", beta: false, failed: ["99.99.99.1"], os: "14.0")
+        try expect(maintenanceUpgrade, "99.99.99.1 updates 99.99.99.0")
+        try expect(!blockedMaintenance, "failed maintenance version is skipped")
+        try expect(VerifiedUpdateHandoff.installsAndRestarts(.installAndRestart), "verified update installs and restarts")
+        try expect(!VerifiedUpdateHandoff.installsAndRestarts(.refuse), "failed verification is not installed")
+        let handoffSource = "Sources/Core/UpdateManifest.swift"
+        if FileManager.default.fileExists(atPath: handoffSource) {
+            let handoff = try String(contentsOfFile: handoffSource, encoding: .utf8)
+            try expect(handoff.contains("if installsAndRestarts(decision)"), "install runs only after verification")
+            try expect(handoff.contains("try await install(true)"), "verified package restarts")
+        }
+        let updaterSource = "Sources/Platform/Updater.swift"
+        if FileManager.default.fileExists(atPath: updaterSource) {
+            let text = try String(contentsOfFile: updaterSource, encoding: .utf8)
+            try expect(!text.contains("restart to install"), "updater does not wait for a restart click")
+            try expect(text.contains("VerifiedUpdateHandoff.apply(.installAndRestart)"), "verified package auto-installs")
+            guard let verifyAt = text.range(of: "verifyApp(candidate"), let handoffAt = text.range(of: "VerifiedUpdateHandoff.apply(.installAndRestart)") else {
+                throw AppError("FAIL: updater verification handoff")
+            }
+            try expect(verifyAt.lowerBound < handoffAt.lowerBound, "install follows app verification")
+        }
+        let interfaceSource = "Resources/app.js"
+        if FileManager.default.fileExists(atPath: interfaceSource) {
+            let interface = try String(contentsOfFile: interfaceSource, encoding: .utf8)
+            try expect(!interface.contains("restart to install"), "settings does not ask for a restart click")
+            try expect(!interface.contains("Install update"), "settings does not require an install click")
+        }
+        var ledger = FairUseLedger()
+        let now: TimeInterval = 1_700_000_000
+        ledger.record(bytes: 1_000, now: now)
+        try expect(!ledger.isThrottled(now: now), "small transfer stays unlimited")
+        try expect(ledger.pace(requested: 2_000_000, now: now) == 2_000_000, "under the limit there is no speed cap")
+        ledger.record(bytes: FairUseLedger.dayBytes, now: now)
+        try expect(ledger.isThrottled(now: now), "more than 50 GB in 24 hours throttles")
+        try expect(ledger.pace(requested: 2_000_000, now: now) == Int(FairUseLedger.bytesPerSecond), "throttle is about 5 Mbps combined")
+        try expect(ledger.pace(requested: 2_000_000, now: now) == 0, "the shared bucket waits for the next second")
+        try expect(ledger.pace(requested: 2_000_000, now: now + 1) == Int(FairUseLedger.bytesPerSecond), "one second restores 5 Mbps")
+        var released = FairUseLedger()
+        released.record(bytes: FairUseLedger.dayBytes + 1, now: now - FairUseLedger.dayWindow - 120)
+        try expect(!released.isThrottled(now: now), "falling back under 50 GB restores full speed")
+        try expect(released.pace(requested: 3_000_000, now: now) == 3_000_000, "restored traffic is not capped")
+        var month = FairUseLedger()
+        month.record(bytes: FairUseLedger.monthBytes + 1, now: now - FairUseLedger.dayWindow - 120)
+        try expect(month.isThrottled(now: now), "more than 500 GB in 30 days throttles")
+        try expect(month.pace(requested: 10, now: now) <= Int(FairUseLedger.bytesPerSecond), "month throttle uses the same 5 Mbps cap")
+        try expect(!month.isThrottled(now: now + FairUseLedger.monthWindow), "falling back under 500 GB clears the throttle")
+        var loaded = try FairUseLedger.load(try ledger.encoded())
+        let loadedDay = loaded.total(window: FairUseLedger.dayWindow, now: now)
+        let liveDay = ledger.total(window: FairUseLedger.dayWindow, now: now)
+        try expect(loadedDay == liveDay, "fair-use ledger reloads")
+        try expect(FairUseLedger.statusLimited.contains("speed temporarily reduced"), "throttle status is not a disconnect")
+        try expect(!FairUseLedger.statusLimited.lowercased().contains("disconnect"), "fair use does not disconnect")
+        let burst = Int(FairUseLedger.bytesPerSecond) * 2
+        try expect(burst > 512 * 1024, "fixture is larger than the old abort threshold")
+        try expect(DownloadAccept.decide(buffered: 0, incoming: burst) == .pause, "a throttled burst pauses reads")
+        try expect(DownloadAccept.decide(buffered: 0, incoming: 16 * 1024 * 1024 + 1) == .runaway, "only a stuck buffer is fatal")
+        var download = FairUseLedger()
+        download.record(bytes: FairUseLedger.dayBytes + 1, now: now)
+        var chunks = [Data(count: burst)]
+        var offset = 0
+        var buffered = burst
+        var paused = true
+        func drainDownload(at time: TimeInterval) -> Int {
+            var sent = 0
+            while let first = chunks.first {
+                let remain = first.count - offset
+                let paced = download.pace(requested: min(remain, 32_768), now: time)
+                if paced == 0 { break }
+                offset += paced
+                buffered -= paced
+                sent += paced
+                if offset == first.count { chunks.removeFirst(); offset = 0 }
+            }
+            if DownloadAccept.shouldResume(buffered: buffered) { paused = false }
+            return sent
+        }
+        let firstSecond = drainDownload(at: now)
+        try expect(DownloadAccept.decide(buffered: 0, incoming: burst) != .runaway, "fair-use backpressure does not abort the flow")
+        try expect(firstSecond == Int(FairUseLedger.bytesPerSecond), "first second stays at about 5 Mbps")
+        try expect(paused, "reads stay paused while the burst is still queued")
+        let second = drainDownload(at: now + 1)
+        try expect(firstSecond + second == burst, "the rest is delivered as the bucket refills")
+        try expect(buffered == 0 && !paused, "reads resume after the queue falls under the low watermark")
+        var udpLedger = FairUseLedger()
+        udpLedger.record(bytes: FairUseLedger.dayBytes + 1, now: now)
+        _ = udpLedger.pace(requested: Int(FairUseLedger.bytesPerSecond) - 40, now: now)
+        var udpQueue = UploadScheduler()
+        udpQueue.enqueue(id: 1, data: Data(repeating: 7, count: 100), udp: true)
+        try expect(udpQueue.flush(ledger: &udpLedger, now: now).isEmpty, "a UDP datagram waits instead of being split")
+        let udpSent = udpQueue.flush(ledger: &udpLedger, now: now + 1)
+        try expect(udpSent.count == 1 && udpSent[0].bytes.count == 100, "the whole UDP datagram is sent once the budget covers it")
+        var tcpLedger = FairUseLedger()
+        tcpLedger.record(bytes: FairUseLedger.dayBytes + 1, now: now)
+        var tcpQueue = UploadScheduler()
+        let tcpLength = Int(FairUseLedger.bytesPerSecond) + 80
+        tcpQueue.enqueue(id: 7, data: Data(count: tcpLength), udp: false)
+        try expect(!tcpQueue.requestFin(id: 7), "TCP FIN waits until queued payload is sent")
+        let tcpFirst = tcpQueue.flush(ledger: &tcpLedger, now: now)
+        try expect(tcpFirst.allSatisfy { !$0.fin }, "FIN is not attached to a partial TCP write")
+        try expect(tcpFirst.reduce(0) { $0 + $1.bytes.count } == Int(FairUseLedger.bytesPerSecond), "TCP still paces partial writes")
+        let tcpRest = tcpQueue.flush(ledger: &tcpLedger, now: now + 1)
+        try expect(tcpRest.last?.fin == true && tcpRest.last?.bytes.count == 80, "FIN follows the last TCP byte")
+        var reference = FairUseLedger()
+        let origin = now
+        for step in 0..<3000 { reference.record(bytes: 1000, now: origin + Double(step) * 60) }
+        let end = origin + 2999 * 60
+        let dayCut = Int(((end - FairUseLedger.dayWindow) / 60).rounded(.down))
+        var expectedDay: Int64 = 0
+        for step in 0..<3000 {
+            let minute = Int(((origin + Double(step) * 60) / 60).rounded(.down))
+            if minute >= dayCut { expectedDay += 1000 }
+        }
+        let countedDay = reference.total(window: FairUseLedger.dayWindow, now: end)
+        try expect(countedDay == expectedDay, "rolling totals match a full scan without walking every old bucket")
+        let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("wlsaplus-fair-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try FairUseDirectory(parent: directory, subdirectory: "secure", name: "fair-use.json", requireRoot: false)
+        try store.write(Data("one".utf8))
+        let firstRead = try store.read()
+        try expect(firstRead == Data("one".utf8), "ledger round trip uses the directory descriptor")
+        let outside = directory.appendingPathComponent("outside")
+        try Data("secret".utf8).write(to: outside)
+        let swapped = directory.appendingPathComponent("secure").appendingPathComponent("fair-use.json")
+        try FileManager.default.removeItem(at: swapped)
+        _ = symlink(outside.path, swapped.path)
+        try store.write(Data("new".utf8))
+        let outsideBytes = try Data(contentsOf: outside)
+        let replaced = try store.read()
+        try expect(outsideBytes == Data("secret".utf8), "replacing the ledger does not follow a symlink")
+        try expect(replaced == Data("new".utf8), "the new ledger is the replaced directory entry")
+        _ = symlink("/tmp", directory.appendingPathComponent("linked").path)
+        try rejects("symlink fair-use directory") { _ = try FairUseDirectory(parent: directory, subdirectory: "linked", name: "fair-use.json", requireRoot: false) }
         try LegacyStoreTests.run()
         #if NETWORK_PLAN_TESTS
         try NetworkPlan.runReadOnlyVerificationTests()

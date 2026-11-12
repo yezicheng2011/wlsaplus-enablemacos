@@ -101,7 +101,18 @@ import WebKit
             window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1180, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.title = "WLSAPlus"; window.minSize = NSSize(width: 520, height: 580); window.center()
-            window.contentView = browser.webView; window.setFrameAutosaveName("WLSAPlus.main")
+            // Frosted glass behind the web view. The splash is translucent so this material shows through on launch.
+            let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 1180, height: 820))
+            effect.material = .hudWindow
+            effect.blendingMode = .behindWindow
+            effect.state = .active
+            browser.webView.underPageBackgroundColor = .clear
+            browser.webView.setValue(false, forKey: "drawsBackground")
+            browser.webView.frame = effect.bounds
+            browser.webView.autoresizingMask = [.width, .height]
+            effect.addSubview(browser.webView)
+            window.contentView = effect
+            window.setFrameAutosaveName("WLSAPlus.main")
             services.restoreAppearance()
             createMenu()
             if !CommandLine.arguments.contains("--autostart") && !CommandLine.arguments.contains("--wlsaplus-update-verify-only") {

@@ -322,9 +322,21 @@ private final class VPNRuntime {
     private var tickNumber: UInt64 = 0
     private var healthRunning = false
     private var originalDefault = ""
+    private var fairUse = FairUseLedger()
+    private var fairUseStore: FairUseDirectory?
+    private var fairUseDirty = false
+    private var uploads = UploadScheduler()
+    private var tunReadSuspended = false
 
     init(configuration: VPNHelperConfiguration) throws {
         self.configuration = configuration; node = configuration.node
+        queue.setSpecific(key: ProxyConnection.queueKey, value: 1)
+        // Ledger lives in root-owned storage. Never follow a user-supplied path or chown it.
+        if let store = try? FairUseDirectory(parent: URL(fileURLWithPath: "/private/var/db/wlsaplus-native"),
+                                             subdirectory: ".root-network", name: "fair-use.json", requireRoot: geteuid() == 0) {
+            fairUseStore = store
+            if let saved = try? store.read(), let saved, let loaded = try? FairUseLedger.load(saved) { fairUse = loaded }
+        }
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: 19098)
         parameters.allowLocalEndpointReuse = false
@@ -414,10 +426,11 @@ private final class VPNRuntime {
                 guard let target = runtime.flows[flow] else { return }
                 runtime.record("to-proxy-bytes", amount: data.count)
                 if !target.udp { runtime.record("to-proxy-tcp-bytes", amount: data.count) }
+                if data.isEmpty { target.connection.send(data) }
+                else { runtime.acceptUpload(flow, data: data, udp: target.udp) }
                 #if NATIVE_INTEGRATION_TESTS
                 if target.udp { runtime.smokeDNS?.observeQuery(flow: flow, port: target.destinationPort, data: data) }
                 #endif
-                target.connection.send(data)
             }
         }, close: { context, flow in
             guard let context else { return }
@@ -431,7 +444,7 @@ private final class VPNRuntime {
         }, eof: { context, flow in
             guard let context else { return }
             let runtime = Unmanaged<VPNRuntime>.fromOpaque(context).takeUnretainedValue()
-            runtime.queue.async { runtime.flows[flow]?.connection.finishWriting() }
+            runtime.queue.async { runtime.noteUploadEOF(flow) }
         })
         engine = wlp_new(callbacks, Unmanaged.passUnretained(self).toOpaque())
         guard let engine else { throw AppError("The native packet engine could not be created.") }
@@ -484,7 +497,8 @@ private final class VPNRuntime {
 
     private func tick() {
         tickNumber += 1
-        if let engine { wlp_tick(engine, Self.monotonicMilliseconds()); pumpAll() }
+        if let engine { wlp_tick(engine, Self.monotonicMilliseconds()); flushUploads(); pumpAll() }
+        if tickNumber % 50 == 0 { persistFairUse(force: false) }
         if tickNumber % 10 == 0, !configuration.parent.matchesRunningProcess() { stopForExit(); return }
         if tickNumber % 100 == 0, networkActive, !stopping {
             do {
@@ -537,13 +551,27 @@ private final class VPNRuntime {
         }
         connection.onData = { [weak self, weak flow] data in
             guard let runtime = self, let target = flow else { return }
-            runtime.queue.async {
+            let handle = {
                 guard runtime.flows[id] === target else { return }
                 runtime.record("from-proxy-bytes", amount: data.count)
                 if !target.udp { runtime.record("from-proxy-tcp-bytes", amount: data.count) }
-                guard target.bytes + data.count <= 512 * 1024, target.pending.count < 2048 else { runtime.abort(id); return }
-                target.pending.append(data); target.bytes += data.count; runtime.pump(id)
+                runtime.noteTunneled(data.count)
+                // Fair-use pacing drains slower than the proxy can send. Pausing the
+                // read closes the TCP window. Abort only if the buffer runs away.
+                switch DownloadAccept.decide(buffered: target.bytes, incoming: data.count) {
+                case .runaway:
+                    runtime.abort(id)
+                case .pause, .queued:
+                    target.pending.append(data); target.bytes += data.count
+                    runtime.pump(id)
+                    if !target.udp, target.bytes >= DownloadAccept.highWater, !target.paused {
+                        target.paused = true
+                        target.connection.setReadEnabled(false)
+                    }
+                }
             }
+            if DispatchQueue.getSpecific(key: ProxyConnection.queueKey) == 1 { handle() }
+            else { runtime.queue.async(execute: handle) }
         }
         connection.onError = { [weak self, weak flow] error in
             guard let runtime = self, let target = flow else { return }
@@ -569,10 +597,17 @@ private final class VPNRuntime {
         while let first = flow.pending.first {
             let capacity = Int(wlp_remote_capacity(engine, id))
             let remainder = first.count - flow.offset
+            let paced: Int
             if flow.udp {
                 guard remainder <= capacity else { abort(id); return }
-            } else if capacity == 0 { break }
-            let count = flow.udp ? remainder : min(remainder, capacity, 32_768)
+                paced = pace(remainder, atomic: true)
+                if paced != remainder { break }
+            } else {
+                if capacity == 0 { break }
+                paced = pace(min(remainder, capacity, 32_768))
+                if paced == 0 { break }
+            }
+            let count = paced
             let data = Data(first.dropFirst(flow.offset).prefix(count))
             let accepted = data.withUnsafeBytes { wlp_remote_data(engine, id, $0.bindMemory(to: UInt8.self).baseAddress, count) }
             guard accepted == 0 else { closeFlow(id); return }
@@ -583,8 +618,8 @@ private final class VPNRuntime {
             if flow.offset == first.count { flow.pending.removeFirst(); flow.offset = 0 }
         }
         if !flow.udp {
-            if flow.bytes >= 128 * 1024, !flow.paused { flow.paused = true; flow.connection.setReadEnabled(false) }
-            else if flow.bytes < 64 * 1024, flow.paused { flow.paused = false; flow.connection.setReadEnabled(true) }
+            if flow.bytes >= DownloadAccept.highWater, !flow.paused { flow.paused = true; flow.connection.setReadEnabled(false) }
+            else if DownloadAccept.shouldResume(buffered: flow.bytes), flow.paused { flow.paused = false; flow.connection.setReadEnabled(true) }
         }
         if flow.remoteEOF, flow.pending.isEmpty {
             wlp_remote_close(engine, id); closeFlow(id)
@@ -598,6 +633,8 @@ private final class VPNRuntime {
         guard let flow = flows.removeValue(forKey: id) else { return }
         flow.connection.onReady = nil; flow.connection.onData = nil; flow.connection.onError = nil; flow.connection.onClose = nil
         flow.connection.close()
+        uploads.drop(id: id)
+        setTunReadPaused(uploads.heldBytes > 1_000_000)
     }
 
     private func readPackets() {
@@ -690,6 +727,12 @@ private final class VPNRuntime {
             "networkActive": networkActive, "probeAuthenticated": probeAuthenticated,
             "message": message, "interface": interface, "connectedAt": connectedAt]
         if let latency { value["latency"] = latency }
+        let now = Date().timeIntervalSince1970
+        let throttled = fairUse.isThrottled(now: now)
+        value["fairUse"] = ["throttled": throttled,
+                            "dayBytes": fairUse.total(window: FairUseLedger.dayWindow, now: now),
+                            "monthBytes": fairUse.total(window: FairUseLedger.monthWindow, now: now),
+                            "message": throttled ? FairUseLedger.statusLimited : FairUseLedger.statusUnlimited]
         if let failureStage { value["failureStage"] = failureStage }
         if let failureReason { value["failureReason"] = failureReason }
         #if NATIVE_INTEGRATION_TESTS
@@ -701,6 +744,49 @@ private final class VPNRuntime {
         #endif
         return value
     }
+    private func noteTunneled(_ count: Int) {
+        guard count > 0 else { return }
+        let now = Date().timeIntervalSince1970
+        let before = fairUse.isThrottled(now: now)
+        fairUse.record(bytes: Int64(count), now: now)
+        fairUseDirty = true
+        if fairUse.isThrottled(now: now) != before { persistFairUse(force: true) }
+    }
+    private func pace(_ requested: Int, atomic: Bool = false) -> Int {
+        fairUse.pace(requested: requested, now: Date().timeIntervalSince1970, atomic: atomic)
+    }
+    private func acceptUpload(_ id: UInt64, data: Data, udp: Bool) {
+        guard !data.isEmpty, flows[id] != nil else { return }
+        noteTunneled(data.count)
+        uploads.enqueue(id: id, data: data, udp: udp)
+        setTunReadPaused(uploads.heldBytes > 1_000_000)
+        flushUploads()
+    }
+    private func noteUploadEOF(_ id: UInt64) {
+        guard flows[id] != nil else { return }
+        if uploads.requestFin(id: id) { flows[id]?.connection.finishWriting() }
+    }
+    private func flushUploads() {
+        let slices = uploads.flush(ledger: &fairUse, now: Date().timeIntervalSince1970)
+        for slice in slices {
+            guard flows[slice.id] != nil else { continue }
+            flows[slice.id]?.connection.send(slice.bytes)
+            if slice.fin { flows[slice.id]?.connection.finishWriting() }
+        }
+        setTunReadPaused(uploads.heldBytes > 1_000_000)
+    }
+    private func setTunReadPaused(_ paused: Bool) {
+        guard paused != tunReadSuspended, let readSource else { return }
+        if paused { readSource.suspend() } else { readSource.resume() }
+        tunReadSuspended = paused
+    }
+    private func persistFairUse(force: Bool) {
+        guard fairUseDirty || force, let store = fairUseStore else { return }
+        do {
+            try store.write(try fairUse.encoded())
+            fairUseDirty = false
+        } catch { /* A ledger write never disconnects the tunnel. */ }
+    }
     private func record(_ name: String, amount: Int = 1) {
         #if NATIVE_INTEGRATION_TESTS
         counters[name] = min(1_000_000_000, (counters[name] ?? 0) + max(0, amount))
@@ -709,6 +795,8 @@ private final class VPNRuntime {
     private func cleanup() throws {
         stage = "cleanup"
         stopping = true
+        if tunReadSuspended { readSource?.resume(); tunReadSuspended = false }
+        persistFairUse(force: true)
         readSource?.cancel(); readSource = nil
         writeSource?.cancel(); writeSource = nil
         for id in Array(flows.keys) { closeFlow(id) }

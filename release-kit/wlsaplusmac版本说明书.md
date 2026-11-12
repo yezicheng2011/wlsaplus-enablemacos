@@ -1,4 +1,4 @@
-# WLSAPlus for macOS — User Manual (2.0.0)
+# WLSAPlus for macOS — User Manual (99.99.99.0)
 
 How classmates should install it: **build from source by following this guide**. You don't need an Apple Developer account, and you shouldn't treat the one-click DMG on the website / GitHub as the main install path (that is for developer self-testing and in-app updates).
 
@@ -11,7 +11,7 @@ How classmates should install it: **build from source by following this guide**.
 - **Product**: the WLSAPlus macOS client (schedule, grades, attendance, class reminders, campus tools, forum, VPN)
 - **Form**: a **native** macOS app (Swift / C), **fully independent** of the Windows / Android editions
 - **VPN core**: **MockMini, our own open-source engine** (Apache-2.0; see [mockmini.danielye2011.uk](https://mockmini.danielye2011.uk/)); the old mihomo / Clash Meta core is no longer used
-- **Current version**: 2.0.0
+- **Current version**: 99.99.99.0 (final feature release; later VPN-only maintenance versions are 99.99.99.1, 99.99.99.2, and so on)
 
 ## System requirements
 
@@ -36,7 +36,7 @@ xcode-select --install
 ```bash
 git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
 cd wlsaplus-enablemacos/native
-WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -46,7 +46,7 @@ If `git clone` fails, download the zip through the same mirror and build:
 curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
 unzip wlsaplus-enablemacos.zip
 cd wlsaplus-enablemacos-main/native
-WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -69,7 +69,7 @@ If you have already cloned this repository to your Mac:
 1. In Finder, open the `release-kit` folder in the repository
 2. Double-click **`编译wlsaplus.command`**
 3. If it says it can't be opened: right-click → Open → Open, or run `chmod +x` on it in Terminal first and then double-click
-4. The script checks the command line tools → builds 2.0.0 → opens the app
+4. The script checks the command line tools → builds 99.99.99.0 → opens the app
 
 > **Mirrors for mainland China (in order of preference)**: `gh-proxy.com` → `ghproxy.net` → `ghfast.top` (just replace the host name in the clone / zip URL). Don't use `ghproxy.com` (no hyphen), which is often blocked. The build itself does **not** depend on npm and does not download Electron or a VPN core from overseas.
 
@@ -107,7 +107,7 @@ The **Forum** tab in the sidebar (bottom bar when the window is narrow):
 1. Open Tools → VPN
 2. Optionally refresh nodes and test latency, then select a node
 3. Click Connect; if an administrator authorization prompt appears, enter your Mac password and allow it
-4. To disconnect, click Disconnect on the VPN page (2.0.0 has **no** old `clash` / mihomo process, so there's no need to kill clash in Activity Monitor)
+4. To disconnect, click Disconnect on the VPN page (the native app has **no** old `clash` / mihomo process, so there's no need to kill clash in Activity Monitor)
 
 ### Class reminders
 
@@ -115,7 +115,7 @@ Turn Class reminders on or off in Settings. When on, a macOS notification is sen
 
 ## Differences from 1.1.2 / the old manual (at a glance)
 
-| | 1.1.2 and earlier | Now (2.0.0) |
+| | 1.1.2 and earlier | Now (99.99.99.0) |
 | --- | --- | --- |
 | Technology | Electron + Node + `npm run electron:make` | Native Swift/C: `native/scripts/build.sh` |
 | How classmates install | Prebuilt package / `working.command` / or build with your own Node | **git clone + build.sh** (or `编译wlsaplus.command`) |
@@ -131,7 +131,7 @@ A: The official path for classmates is **building from source** (this guide). Pa
 A: Run `xcode-select --install` first, then reopen Terminal and build again.
 
 **Q: Do I need `npm install`?**  
-A: **No**, not for installing 2.0.0. That command is for the old Electron tree.
+A: **No**, not for installing 99.99.99.0. That command is for the old Electron tree.
 
 **Q: Copyright and license?**  
 A: The app source code is Apache-2.0; see `LICENSE` / `NOTICE` in the repository. © daniel.ye叶子诚

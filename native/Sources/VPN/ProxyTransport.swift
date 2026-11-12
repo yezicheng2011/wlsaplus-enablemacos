@@ -43,7 +43,16 @@ final class ProxyConnection {
     func close() { queue.async { self.closeOnQueue() } }
     /// Preserve incoming responses after the local TCP peer sends FIN.
     func finishWriting() { queue.async { self.finishWritingOnQueue() } }
-    func setReadEnabled(_ enabled: Bool) { queue.async { self.transport?.setReadEnabled(enabled) } }
+    static let queueKey = DispatchSpecificKey<UInt8>()
+    func setReadEnabled(_ enabled: Bool) {
+        let apply = { [weak self] () -> Void in
+            self?.transport?.setReadEnabled(enabled)
+            return
+        }
+        // Already on the proxy queue: apply before the in-flight read re-arms itself.
+        if DispatchQueue.getSpecific(key: Self.queueKey) == 1 { apply() }
+        else { queue.async(execute: apply) }
+    }
 
     private func startOnQueue() {
         guard !started, !closed else { return }

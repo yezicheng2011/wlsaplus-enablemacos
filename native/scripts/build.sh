@@ -2,8 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 [[ "$(uname -s)" == Darwin ]] || { echo 'A Mac with Xcode command-line tools is required.' >&2; exit 1; }
-version="${WLSAPLUS_VERSION:-2.0.0}"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || { echo 'Invalid WLSAPLUS_VERSION' >&2; exit 1; }
+version="${WLSAPLUS_VERSION:-99.99.99.0}"
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?(-[A-Za-z0-9.-]+)?$ ]] || { echo 'Invalid WLSAPLUS_VERSION' >&2; exit 1; }
 sdk="$(xcrun --sdk macosx --show-sdk-path)"
 mkdir -p .build out
 sources=(Sources/Core/*.swift Sources/VPN/*.swift Sources/Platform/*.swift Sources/App/*.swift)
@@ -109,4 +109,23 @@ echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64 || { echo "exp
 # ditto zip preserves the sealed signature; do not mutate the .app after signing.
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$app" out/WLSAPlus-native-review.zip
 "$app/Contents/MacOS/WLSAPlus" --validate-archive out/WLSAPlus-native-review.zip
-echo "Built $app ($version). Release updates additionally require the pinned certificate and signing key."
+# Official installer. Built from the sealed .app; Contents are not edited after codesign.
+# Ad-hoc "-" is not a package identity. An unset identity writes an unsigned pkg for local development.
+# A release run exports WLSAPLUS_SIGN_IDENTITY and productbuild signs with that leaf.
+pkg_stage="$(mktemp -d "${TMPDIR:-/tmp}/wlsaplus-pkg.XXXXXX")"
+pkg_component="$pkg_stage/component.pkg"
+pkg_out="out/WLSAPlus-${version}-macOS-universal.pkg"
+/usr/bin/pkgbuild --component "$app" --install-location /Applications \
+  --identifier cn.org.wlsash.wlsaplus --version "$version" --ownership recommended \
+  "$pkg_component"
+pkg_identity="${WLSAPLUS_SIGN_IDENTITY:-}"
+if [[ -n "$pkg_identity" && "$pkg_identity" != "-" ]]; then
+  /usr/bin/productbuild --sign "$pkg_identity" --package "$pkg_component" "$pkg_out"
+  /usr/sbin/pkgutil --check-signature "$pkg_out"
+else
+  echo 'WLSAPLUS_SIGN_IDENTITY is unset; writing an unsigned .pkg for local development.'
+  cp "$pkg_component" "$pkg_out"
+fi
+rm -rf "$pkg_stage"
+/usr/bin/codesign --verify --deep --strict "$app"
+echo "Built $app ($version) and $pkg_out. Release updates additionally require the pinned certificate and signing key."

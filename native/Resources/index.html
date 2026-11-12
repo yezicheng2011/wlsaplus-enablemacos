@@ -13,9 +13,16 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+  <div id="splash" class="splash" role="status" aria-label="WLSAPlus">
+    <div class="splash-card">
+      <img class="splash-icon" src="AppIcon.png" alt="" width="128" height="128">
+      <p class="splash-wordmark">WLSA<span class="brand-plus">Plus</span></p>
+      <p class="attribution" data-raw>by Daniel.YE  AL29-4 <a class="attribution-link" href="https://danielye2011.uk">https://danielye2011.uk</a></p>
+    </div>
+  </div>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Application sidebar">
-      <a class="brand" href="#home" aria-label="WLSAPlus home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 7h7M5 12h14M5 17h10M18 4.5v5M15.5 7h5"/></svg></span><span>WLSA<span class="brand-plus">Plus</span></span></a>
+      <a class="brand" href="#home" aria-label="WLSAPlus home"><img class="brand-mark" src="AppIcon.png" alt="" width="40" height="40"><span>WLSA<span class="brand-plus">Plus</span></span></a>
       <div class="sidebar-label">YOUR WORKSPACE</div>
       <nav id="navigation" aria-label="Main navigation"></nav>
       <div class="sidebar-bottom"><div class="local-indicator"><span></span> Saved on your Mac</div><div class="version" id="version">WLSAPlus</div></div>
@@ -25,9 +32,10 @@
       <div id="environment-banner" class="environment-banner" hidden></div>
       <div id="notice" class="notice-container" hidden></div>
       <main id="main" tabindex="-1"><div id="view" aria-busy="true"><div class="loading-state"><span class="spinner"></span><p>Loading your workspace…</p></div></div></main>
+      <footer class="app-footer" data-raw><p class="attribution">by Daniel.YE  AL29-4 <a class="attribution-link" href="https://danielye2011.uk">https://danielye2011.uk</a></p></footer>
     </div>
   </div>
-  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div></dialog>
+  <dialog id="dialog" aria-labelledby="dialog-title"><div id="dialog-content"></div><footer class="dialog-attribution" data-raw><p class="attribution">by Daniel.YE  AL29-4 <a class="attribution-link" href="https://danielye2011.uk">https://danielye2011.uk</a></p></footer></dialog>
   <div id="toast" role="status" aria-live="polite" class="toast" hidden></div>
   <div id="announcer" class="sr-only" aria-live="polite"></div>
 </body>

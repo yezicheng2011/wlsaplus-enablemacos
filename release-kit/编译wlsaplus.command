@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================
-# WLSAPlus 2.0.0 one-click build from source (macOS)
+# WLSAPlus 99.99.99.0 one-click build from source (macOS)
 # Requires: Xcode Command Line Tools; no Node / Homebrew / developer account needed
 # If the repository has not been cloned yet, the script tries mainland-China mirrors in order:
 #   gh-proxy.com → ghproxy.net → ghfast.top
@@ -10,7 +10,7 @@
 
 echo -ne "\033]0;编译 WLSAPlus\007"
 echo "============================================"
-echo "   WLSAPlus 2.0.0 · 从源码编译"
+echo "   WLSAPlus 99.99.99.0 · 从源码编译"
 echo "   （自研开源 MockMini · Apache-2.0）"
 echo "============================================"
 echo ""
@@ -28,7 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # release-kit/ → repository root
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 NATIVE="$REPO_ROOT/native"
-VERSION="${WLSAPLUS_VERSION:-2.0.0}"
+VERSION="${WLSAPLUS_VERSION:-99.99.99.0}"
 
 [[ "$(uname -s)" == Darwin ]] || fail "请在 Mac 上运行本脚本。"
 

@@ -371,6 +371,10 @@ import Darwin
         var value: [String: Any] = ["state": "connected", "connected": true, "nodeId": node.id, "nodeName": node.name,
                                   "connectedAt": helper["connectedAt"] ?? ISO8601DateFormatter().string(from: Date())]
         for key in ["interface", "latency"] { if let item = helper[key] { value[key] = item } }
+        if let fair = helper["fairUse"] as? [String: Any] {
+            value["fairUseThrottled"] = fair["throttled"] as? Bool ?? false
+            if let message = fair["message"] as? String { value["fairUseMessage"] = message }
+        }
         return value
     }
     private func control(_ method: String, _ path: String, config: VPNHelperConfiguration) async throws -> [String: Any] {
@@ -424,6 +428,12 @@ import Darwin
                         self.publish(["state": "error", "connected": false, "cleanupRequired": value["networkActive"] as? Bool ?? true,
                                       "message": value["message"] as? String ?? "The native VPN connection stopped."])
                         return
+                    }
+                    var next = self.status
+                    if let fair = value["fairUse"] as? [String: Any] {
+                        next["fairUseThrottled"] = fair["throttled"] as? Bool ?? false
+                        if let message = fair["message"] as? String { next["fairUseMessage"] = message }
+                        self.publish(next)
                     }
                 } catch {
                     self.publish(["state": "error", "connected": false, "cleanupRequired": true,
