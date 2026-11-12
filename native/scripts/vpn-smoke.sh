@@ -7,9 +7,10 @@ sdk="$(xcrun --sdk macosx --show-sdk-path)"
 arch="$(uname -m)"
 xcrun clang -std=c11 -g -Wall -Wextra -Werror -target "$arch-apple-macos13.0" -isysroot "$sdk" -c Sources/Packet/wlp.c -o .build/smoke-wlp.o
 xcrun clang -std=c11 -g -Wall -Wextra -Werror -target "$arch-apple-macos13.0" -isysroot "$sdk" -c Sources/Packet/utun.c -o .build/smoke-utun.o
+xcrun clang -std=c11 -O2 -Wall -Wextra -Werror -target "$arch-apple-macos13.0" -isysroot "$sdk" -c Sources/LLM/wlm.c -o .build/smoke-wlm.o
 xcrun swiftc -swift-version 5 -Onone -D NATIVE_INTEGRATION_TESTS -target "$arch-apple-macos13.0" -sdk "$sdk" -import-objc-header Sources/Bridge.h \
-  Sources/Core/*.swift Sources/VPN/*.swift Sources/Platform/*.swift Sources/App/*.swift .build/smoke-wlp.o .build/smoke-utun.o \
-  -framework AppKit -framework WebKit -framework Network -framework Security -framework CryptoKit \
+  Sources/Core/*.swift Sources/VPN/*.swift Sources/Platform/*.swift Sources/App/*.swift .build/smoke-wlp.o .build/smoke-utun.o .build/smoke-wlm.o \
+  -framework Accelerate -framework AppKit -framework WebKit -framework Network -framework Security -framework CryptoKit \
   -framework SystemConfiguration -framework UserNotifications -framework ServiceManagement -o .build/native-vpn-smoke
 python3 - <<'PY'
 import subprocess,time

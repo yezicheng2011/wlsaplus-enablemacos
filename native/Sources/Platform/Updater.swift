@@ -3,7 +3,7 @@ import CryptoKit
 import AppKit
 import Darwin
 
-private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
+final class PackageDownload: NSObject, URLSessionDownloadDelegate {
     let expected: Int64
     let destination: URL
     let progress: (Double) -> Void
@@ -11,6 +11,7 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
     private var result: Result<URL, Error>?
     private var session: URLSession?
     private var resumeFile: URL?
+    private var task: URLSessionDownloadTask?
     init(expected: Int64, destination: URL, progress: @escaping (Double) -> Void) { self.expected = expected; self.destination = destination; self.progress = progress }
     func fetch(_ url: URL) async throws -> URL {
         try await withCheckedThrowingContinuation { continuation in
@@ -22,9 +23,19 @@ private final class PackageDownload: NSObject, URLSessionDownloadDelegate {
             let identifier = SHA256.hash(data: Data(url.absoluteString.utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
             let resume = destination.appendingPathExtension("resume-" + identifier)
             self.resumeFile = resume
-            if let saved = try? Data(contentsOf: resume) { session.downloadTask(withResumeData: saved).resume() }
-            else { var request = URLRequest(url: url); request.cachePolicy = .reloadIgnoringLocalCacheData; session.downloadTask(with: request).resume() }
+            let task: URLSessionDownloadTask
+            if let saved = try? Data(contentsOf: resume) { task = session.downloadTask(withResumeData: saved) }
+            else { var request = URLRequest(url: url); request.cachePolicy = .reloadIgnoringLocalCacheData; task = session.downloadTask(with: request) }
+            self.task = task
+            task.resume()
         }
+    }
+    /// Stops the transfer, keeping what was received so a later fetch of the same URL resumes.
+    func cancel() {
+        let resumeFile = self.resumeFile
+        task?.cancel(byProducingResumeData: { data in
+            if let data, let resumeFile { try? privateWrite(data, to: resumeFile) }
+        })
     }
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
         if totalBytesWritten > expected || (totalBytesExpectedToWrite > 0 && totalBytesExpectedToWrite != expected) {

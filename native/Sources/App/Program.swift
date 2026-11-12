@@ -8,6 +8,7 @@ import WebKit
             if arguments.first == "--vpn-helper", arguments.count == 2 { try VPNHelper.run(configURL: URL(fileURLWithPath: arguments[1])); return }
             if arguments.first == "--vpn-helper-launch", arguments.count == 2 { try VPNHelper.launch(configURL: URL(fileURLWithPath: arguments[1])); return }
             if arguments.first == "--vpn-helper-recover", arguments.count == 1 { try VPNHelper.recover(); return }
+            if arguments.first == "--llm-worker", arguments.count == 2 { AssistantWorker.run(modelPath: arguments[1]); return }
             if arguments.first == "--native-installer" { try UpdateInstaller.perform(arguments); return }
             if arguments.first == "--make-manifest" { try ManifestPublisher.perform(Array(arguments.dropFirst())); return }
             if arguments.first == "--validate-archive", arguments.count == 2 { try ArchivePolicy.validate(URL(fileURLWithPath: arguments[1])); print("Archive safety checks passed."); return }
@@ -38,6 +39,7 @@ import WebKit
     let updater: NativeUpdater
     let vpn: VPNService
     let services: UserServices
+    let assistant: AssistantService
     var window: NSWindow!
     var browser: BrowserHost!
     private var quitting = false
@@ -49,6 +51,7 @@ import WebKit
         updater = NativeUpdater(store: store)
         vpn = VPNService(store: store)
         services = UserServices(store: store, school: school)
+        assistant = AssistantService(store: store)
         super.init()
     }
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -85,6 +88,7 @@ import WebKit
             }
             vpn.onChange = { [weak self] value in self?.browser.event("vpn", value) }
             updater.onChange = { [weak self] value in self?.browser.event("update", value) }
+            assistant.onChange = { [weak self] value in self?.browser.event("assistant", value) }
             updater.disconnect = { [weak self] in _ = try await self?.vpn.disconnect() }
             school.onAutomaticSync = { [weak self] _ in
                 guard let self else { return }
@@ -104,6 +108,7 @@ import WebKit
                 window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
             }
             updater.begin()
+            assistant.begin()
             Task { await services.fetchNotice() }
             Task { try? await services.scheduleReminders() }
         } catch { present(error); quitApproved = true; NSApp.terminate(nil) }
@@ -125,6 +130,7 @@ import WebKit
     func state() -> [String: Any] {
         var state = store.value
         state["version"] = AppIdentity.version; state["vpn"] = vpn.status; state["update"] = updater.status
+        state["assistant"] = assistant.status
         if let notice = services.notice { state["notice"] = notice }
         return state
     }
@@ -136,6 +142,14 @@ import WebKit
             let settings = try await services.saveSettings(args)
             if previousChannel != updater.beta { updater.channelChanged() }
             browser.event("state", state()); return settings
+        case "settings.language":
+            guard let language = args["language"] as? String, ["system", "en", "zh"].contains(language) else { throw AppError("Choose an available language.") }
+            try store.set("language", language)
+            browser.event("state", state()); return ["language": language]
+        case "assistant.pause": try assistant.pause(); return assistant.status
+        case "assistant.resume": try assistant.resume(); return assistant.status
+        case "assistant.ask": return try await assistant.ask(args)
+        case "assistant.relaunch": try assistant.relaunch(); return ["ok": true]
         case "school.login", "school.sync":
             let previous = school.account["username"] as? String, previousURL = school.account["baseURL"] as? String
             let snapshot = method == "school.login" ? try await school.login(args) : try await school.sync()
@@ -194,7 +208,7 @@ import WebKit
         }
         return .terminateLater
     }
-    func applicationWillTerminate(_ notification: Notification) { school.stopAutomaticSync() }
+    func applicationWillTerminate(_ notification: Notification) { school.stopAutomaticSync(); assistant.stopWorker() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { window?.makeKeyAndOrderFront(nil); return true }
     private func present(_ error: Error) {
         let alert = NSAlert(); alert.messageText = "WLSAPlus"; alert.informativeText = error.localizedDescription; alert.runModal()

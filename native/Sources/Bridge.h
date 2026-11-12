@@ -10,3 +10,4 @@ enum { WL_PROC_PIDPATH_BUFFER_SIZE = PROC_PIDPATHINFO_MAXSIZE };
 #include <fcntl.h>
 #include <unistd.h>
 #endif
+#include "LLM/wlm.h"

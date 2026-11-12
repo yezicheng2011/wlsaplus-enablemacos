@@ -10,9 +10,10 @@ sources=(Sources/Core/*.swift Sources/VPN/*.swift Sources/Platform/*.swift Sourc
 for arch in arm64 x86_64; do
   xcrun clang -std=c11 -O2 -Wall -Wextra -Werror -target "$arch-apple-macos13.0" -isysroot "$sdk" -c Sources/Packet/wlp.c -o ".build/wlp-$arch.o"
   xcrun clang -std=c11 -O2 -Wall -Wextra -Werror -target "$arch-apple-macos13.0" -isysroot "$sdk" -c Sources/Packet/utun.c -o ".build/utun-$arch.o"
+  xcrun clang -std=c11 -O3 -Wall -Wextra -Werror -target "$arch-apple-macos13.0" -isysroot "$sdk" -c Sources/LLM/wlm.c -o ".build/wlm-$arch.o"
   xcrun swiftc -swift-version 5 -O -whole-module-optimization -target "$arch-apple-macos13.0" -sdk "$sdk" -import-objc-header Sources/Bridge.h \
-    "${sources[@]}" ".build/wlp-$arch.o" ".build/utun-$arch.o" \
-    -framework AppKit -framework WebKit -framework Network -framework Security -framework CryptoKit \
+    "${sources[@]}" ".build/wlp-$arch.o" ".build/utun-$arch.o" ".build/wlm-$arch.o" \
+    -framework Accelerate -framework AppKit -framework WebKit -framework Network -framework Security -framework CryptoKit \
     -framework SystemConfiguration -framework UserNotifications -framework ServiceManagement -o ".build/WLSAPlus-$arch"
 done
 app='out/WLSAPlus.app'
