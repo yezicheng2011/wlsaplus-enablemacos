@@ -420,7 +420,7 @@
     if (!phase) return '';
     const copy = state.eligible === false || phase === 'unsupported'
       ? (state.reason === 'memory' ? 'The assistant needs a Mac with 16 GB of memory or more.' : 'The assistant needs a Mac with Apple silicon.')
-      : ({waiting:'The assistant model (491 MB) downloads automatically in the background.', downloading:'Downloading the assistant model (491 MB)…', verifying:'Checking the downloaded model…',
+      : ({waiting:'The assistant model (1.1 GB) downloads automatically in the background.', downloading:'Downloading the assistant model (1.1 GB)…', verifying:'Checking the downloaded model…',
           paused:'Download paused. Resume whenever you like.', error:'The assistant model could not be downloaded. WLSAPlus will try again later.',
           restart:'The assistant is ready. Reopen WLSAPlus to turn it on.', ready:'The assistant is on. Open the Assistant page to ask a question.'})[phase] || '';
     const action = ({waiting:btn('Pause download','assistant-pause',{disabled:busy('assistant-download')}), downloading:btn('Pause download','assistant-pause',{disabled:busy('assistant-download')}),

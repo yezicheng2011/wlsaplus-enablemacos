@@ -17,7 +17,7 @@ All runtime frameworks and system utilities used by the shipped macOS app are pr
 
 ## On-device assistant model (downloaded, not distributed)
 
-On eligible Macs the app downloads [Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) (GGUF, `q4_k_m`) by Alibaba Cloud, licensed under Apache-2.0, from the model's own repositories. The model file is not part of this repository or of `WLSAPlus.app`. The runtime that executes it (`native/Sources/LLM`) is original WLSAPlus code.
+On eligible Macs the app downloads [Qwen2.5-1.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF) (GGUF, `q4_k_m`) by Alibaba Cloud, licensed under Apache-2.0, from the model's own repositories. The model file is not part of this repository or of `WLSAPlus.app`. The runtime that executes it (`native/Sources/LLM`) is original WLSAPlus code.
 
 ## Development and verification tools (not distributed)
 

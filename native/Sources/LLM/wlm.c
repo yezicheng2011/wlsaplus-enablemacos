@@ -20,6 +20,9 @@
 #include <Accelerate/Accelerate.h>
 #include <dispatch/dispatch.h>
 #endif
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 enum { TYPE_F32 = 0, TYPE_F16 = 1, TYPE_Q5_0 = 6, TYPE_Q8_0 = 8, TYPE_Q4_K = 12, TYPE_Q6_K = 14 };
 enum { TOKEN_CONTROL = 3 };
@@ -28,7 +31,9 @@ enum { MAX_TENSORS = 4096, MAX_VOCAB = 1 << 20, MAX_LAYERS = 256, MAX_WIDTH = 1 
 typedef struct { const uint8_t *p, *end; int bad; } reader;
 typedef struct { const char *p; uint64_t n; } str;
 typedef struct { str name; uint64_t rows, cols, offset; uint32_t type; } tensor;
-typedef struct { float *attn_norm, *q_w, *q_b, *k_w, *k_b, *v_w, *v_b, *o_w, *ffn_norm, *gate, *up, *down; } layer;
+// Weight matrices are kept in half precision: a third of the memory of the
+// expanded floats for a rounding error far below the quantization error.
+typedef struct { float *attn_norm, *q_b, *k_b, *v_b, *ffn_norm; uint16_t *q_w, *k_w, *v_w, *o_w, *gate, *up, *down; } layer;
 
 struct wlm_model {
     uint8_t *map;
@@ -47,7 +52,8 @@ struct wlm_model {
     int32_t im_start, im_end, eos, bos;
     const uint8_t *embd_raw;
     uint32_t embd_type;
-    float *out_w, *out_norm;
+    uint16_t *out_w;
+    float *out_norm;
     layer *layers;
 };
 
@@ -125,6 +131,38 @@ static float half_to_float(uint16_t h) {
     memcpy(&value, &bits, 4);
     return value;
 }
+
+static uint16_t float_to_half(float value) {
+    uint32_t bits;
+    memcpy(&bits, &value, 4);
+    uint32_t sign = (bits >> 16) & 0x8000u, mantissa = bits & 0x7fffffu;
+    int exponent = (int)((bits >> 23) & 0xff) - 112;
+    if (exponent >= 31) return (uint16_t)(sign | 0x7c00u | (((bits >> 23) & 0xff) == 0xff && mantissa ? 0x200u : 0));
+    if (exponent <= 0) {
+        if (exponent < -10) return (uint16_t)sign;
+        mantissa |= 0x800000u;
+        uint32_t shift = (uint32_t)(14 - exponent), half = mantissa >> shift, rest = mantissa & ((1u << shift) - 1), middle = 1u << (shift - 1);
+        if (rest > middle || (rest == middle && (half & 1))) half++;
+        return (uint16_t)(sign | half);
+    }
+    uint32_t half = ((uint32_t)exponent << 10) | (mantissa >> 13), rest = mantissa & 0x1fffu;
+    if (rest > 0x1000u || (rest == 0x1000u && (half & 1))) half++;
+    return (uint16_t)(sign | half);
+}
+
+static void floats_to_halves(uint16_t *out, const float *in, size_t count) {
+    size_t i = 0;
+#if defined(__aarch64__)
+    for (; i + 4 <= count; i += 4) vst1_u16(out + i, vreinterpret_u16_f16(vcvt_f16_f32(vld1q_f32(in + i))));
+#endif
+    for (; i < count; i++) out[i] = float_to_half(in[i]);
+}
+
+#if !defined(__aarch64__)
+// Portable half-to-float conversion through a table built on first load.
+static float half_table[65536];
+static int half_table_ready;
+#endif
 
 static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
 
@@ -431,6 +469,29 @@ static const uint8_t *tensor_bytes(weights *w, const char *name, uint64_t rows, 
     return w->data + t->offset;
 }
 
+static uint16_t *tensor_halves(weights *w, const char *name, uint64_t rows, uint64_t cols) {
+    uint32_t type = 0;
+    const uint8_t *bytes = tensor_bytes(w, name, rows, cols, &type);
+    if (!bytes) return NULL;
+    size_t total = (size_t)(rows * cols), per = block_values(type), step = per * 2048;
+    uint16_t *out = malloc(sizeof(uint16_t) * total);
+    float *scratch = malloc(sizeof(float) * step);
+    if (!out || !scratch) { free(out); free(scratch); w->bad = 1; return NULL; }
+    for (size_t at = 0; at < total; at += step) {
+        size_t count = total - at < step ? total - at : step;
+        dequantize(type, bytes + at / per * block_bytes(type), scratch, count);
+        floats_to_halves(out + at, scratch, count);
+    }
+    free(scratch);
+    return out;
+}
+
+static uint16_t *layer_halves(weights *w, int index, const char *suffix, uint64_t rows, uint64_t cols) {
+    char name[64];
+    snprintf(name, sizeof name, "blk.%d.%s", index, suffix);
+    return tensor_halves(w, name, rows, cols);
+}
+
 static float *tensor_floats(weights *w, const char *name, uint64_t rows, uint64_t cols) {
     uint32_t type = 0;
     const uint8_t *bytes = tensor_bytes(w, name, rows, cols, &type);
@@ -475,6 +536,12 @@ wlm_model *wlm_load(const char *path, char *error, size_t error_size) {
     if (map == MAP_FAILED) { free(m); fail(error, error_size, "The model file could not be mapped."); return NULL; }
     m->map = map;
 
+#if !defined(__aarch64__)
+    if (!half_table_ready) {
+        for (uint32_t i = 0; i < 65536; i++) half_table[i] = half_to_float((uint16_t)i);
+        half_table_ready = 1;
+    }
+#endif
     const char *problem = "The model file is malformed.";
     tensor *tensors = NULL;
     reader r = { m->map, m->map + m->map_size, 0 };
@@ -627,23 +694,23 @@ wlm_model *wlm_load(const char *path, char *error, size_t error_size) {
     m->embd_raw = tensor_bytes(&w, "token_embd.weight", V, E, &m->embd_type);
     if (m->embd_raw && E % block_values(m->embd_type)) w.bad = 1;
     m->out_norm = tensor_floats(&w, "output_norm.weight", 1, E);
-    m->out_w = tensor_floats(&w, find_tensor(tensors, (int)tensor_count, "output.weight") ? "output.weight" : "token_embd.weight", V, E);
+    m->out_w = tensor_halves(&w, find_tensor(tensors, (int)tensor_count, "output.weight") ? "output.weight" : "token_embd.weight", V, E);
     m->layers = calloc(n_layer, sizeof *m->layers);
     if (!m->layers) { problem = "Out of memory."; goto bad; }
     for (int i = 0; i < m->n_layer && !w.bad; i++) {
         layer *l = &m->layers[i];
         l->attn_norm = layer_floats(&w, i, "attn_norm.weight", 1, E);
-        l->q_w = layer_floats(&w, i, "attn_q.weight", E, E);
+        l->q_w = layer_halves(&w, i, "attn_q.weight", E, E);
         l->q_b = layer_floats(&w, i, "attn_q.bias", 1, E);
-        l->k_w = layer_floats(&w, i, "attn_k.weight", K, E);
+        l->k_w = layer_halves(&w, i, "attn_k.weight", K, E);
         l->k_b = layer_floats(&w, i, "attn_k.bias", 1, K);
-        l->v_w = layer_floats(&w, i, "attn_v.weight", K, E);
+        l->v_w = layer_halves(&w, i, "attn_v.weight", K, E);
         l->v_b = layer_floats(&w, i, "attn_v.bias", 1, K);
-        l->o_w = layer_floats(&w, i, "attn_output.weight", E, E);
+        l->o_w = layer_halves(&w, i, "attn_output.weight", E, E);
         l->ffn_norm = layer_floats(&w, i, "ffn_norm.weight", 1, E);
-        l->gate = layer_floats(&w, i, "ffn_gate.weight", F, E);
-        l->up = layer_floats(&w, i, "ffn_up.weight", F, E);
-        l->down = layer_floats(&w, i, "ffn_down.weight", E, F);
+        l->gate = layer_halves(&w, i, "ffn_gate.weight", F, E);
+        l->up = layer_halves(&w, i, "ffn_up.weight", F, E);
+        l->down = layer_halves(&w, i, "ffn_down.weight", E, F);
     }
     if (w.bad) { problem = "The model tensors do not match the declared architecture."; goto bad; }
     free(tensors);
@@ -676,18 +743,40 @@ static float dot(const float *a, const float *b, int n) {
 #endif
 }
 
-static void matvec(float *y, const float *w, const float *x, int rows, int cols) {
+static float dot_half(const uint16_t *w, const float *x, int n) {
+    int i = 0;
+    float value = 0;
+#if defined(__aarch64__)
+    float32x4_t a = vdupq_n_f32(0), b = a, c = a, d = a;
+    for (; i + 16 <= n; i += 16) {
+        a = vfmaq_f32(a, vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(w + i))), vld1q_f32(x + i));
+        b = vfmaq_f32(b, vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(w + i + 4))), vld1q_f32(x + i + 4));
+        c = vfmaq_f32(c, vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(w + i + 8))), vld1q_f32(x + i + 8));
+        d = vfmaq_f32(d, vcvt_f32_f16(vreinterpret_f16_u16(vld1_u16(w + i + 12))), vld1q_f32(x + i + 12));
+    }
+    value = vaddvq_f32(vaddq_f32(vaddq_f32(a, b), vaddq_f32(c, d)));
+    for (; i < n; i++) value += vgetq_lane_f32(vcvt_f32_f16(vreinterpret_f16_u16(vdup_n_u16(w[i]))), 0) * x[i];
+#else
+    float lanes[8] = { 0 };
+    for (; i + 8 <= n; i += 8) for (int j = 0; j < 8; j++) lanes[j] += half_table[w[i + j]] * x[i + j];
+    for (; i < n; i++) value += half_table[w[i]] * x[i];
+    for (int j = 0; j < 8; j++) value += lanes[j];
+#endif
+    return value;
+}
+
+static void matvec(float *y, const uint16_t *w, const float *x, int rows, int cols) {
 #ifdef __APPLE__
     if ((long)rows * cols >= (1L << 18)) {
         size_t chunks = 8, per = ((size_t)rows + chunks - 1) / chunks;
         dispatch_apply(chunks, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t chunk) {
             size_t start = chunk * per, stop = start + per < (size_t)rows ? start + per : (size_t)rows;
-            for (size_t row = start; row < stop; row++) y[row] = dot(w + row * (size_t)cols, x, cols);
+            for (size_t row = start; row < stop; row++) y[row] = dot_half(w + row * (size_t)cols, x, cols);
         });
         return;
     }
 #endif
-    for (int row = 0; row < rows; row++) y[row] = dot(w + (size_t)row * (size_t)cols, x, cols);
+    for (int row = 0; row < rows; row++) y[row] = dot_half(w + (size_t)row * (size_t)cols, x, cols);
 }
 
 static void rms_norm(float *out, const float *x, const float *weight, int n, float eps) {

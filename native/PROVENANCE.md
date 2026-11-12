@@ -19,7 +19,7 @@ Protocol and platform references:
 - [Apple Network framework](https://developer.apple.com/documentation/network)
 - [Apple CryptoKit](https://developer.apple.com/documentation/cryptokit)
 - [GGUF model file format](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md)
-- [Qwen2.5 model card and technical report](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct)
+- [Qwen2.5 model card and technical report](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct)
 - [LevelDB file-format descriptions](https://github.com/google/leveldb/blob/main/doc/table_format.md)
 - [Chromium local-storage format description](https://www.cclsolutionsgroup.com/post/chromium-session-storage-and-local-storage)
 

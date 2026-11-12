@@ -4,15 +4,15 @@ import Foundation
 /// On-device study assistant: which Macs get it, the one-time model download,
 /// and the separate process that runs the language model.
 @MainActor final class AssistantService {
-    // Qwen2.5-0.5B-Instruct (Apache-2.0), fetched from the model's own
+    // Qwen2.5-1.5B-Instruct (Apache-2.0), fetched from the model's own
     // repositories. The pinned digest is checked before the file is ever loaded.
-    static let modelName = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
-    static let modelSize: Int64 = 491_400_032
-    static let modelSHA256 = "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+    static let modelName = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+    static let modelSize: Int64 = 1_117_320_736
+    static let modelSHA256 = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
     static let sources = [
-        "https://modelscope.cn/models/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/master/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "https://hf-mirror.com/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
-        "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+        "https://modelscope.cn/models/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/master/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        "https://hf-mirror.com/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf",
     ]
     static let minimumMemory: UInt64 = 16 * 1024 * 1024 * 1024
 
@@ -148,7 +148,7 @@ import Foundation
         idle?.invalidate()
         defer {
             answering = false
-            // The loaded model holds about 2.5 GB; release it after a quiet spell.
+            // The loaded model holds about 3 GB; release it after a quiet spell.
             idle = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { [weak self] _ in
                 Task { @MainActor in self?.stopWorker() }
             }

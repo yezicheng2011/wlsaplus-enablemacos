@@ -55,7 +55,7 @@
     // Assistant settings
     'On-device assistant': '本机 AI 助手', 'Language': '语言', 'Choose the language of the interface.': '选择界面语言。', '中文': '中文',
     'The assistant needs a Mac with Apple silicon.': 'AI 助手需要搭载 Apple 芯片的 Mac。', 'The assistant needs a Mac with 16 GB of memory or more.': 'AI 助手需要 16 GB 或以上内存的 Mac。',
-    'The assistant model (491 MB) downloads automatically in the background.': '助手模型（491 MB）会在后台自动下载。', 'Downloading the assistant model (491 MB)…': '正在下载助手模型（491 MB）…', 'Checking the downloaded model…': '正在校验下载的模型…',
+    'The assistant model (1.1 GB) downloads automatically in the background.': '助手模型（1.1 GB）会在后台自动下载。', 'Downloading the assistant model (1.1 GB)…': '正在下载助手模型（1.1 GB）…', 'Checking the downloaded model…': '正在校验下载的模型…',
     'Download paused. Resume whenever you like.': '下载已暂停，可随时继续。', 'The assistant model could not be downloaded. WLSAPlus will try again later.': '助手模型下载失败，WLSAPlus 稍后会重试。',
     'The assistant is ready. Reopen WLSAPlus to turn it on.': 'AI 助手已就绪，重新打开 WLSAPlus 即可启用。', 'The assistant is on. Open the Assistant page to ask a question.': 'AI 助手已启用，打开“AI 助手”页面即可提问。',
     'Pause download': '暂停下载', 'Resume download': '继续下载', 'Try again': '重试', 'Model download progress': '模型下载进度', 'Open assistant': '打开 AI 助手',

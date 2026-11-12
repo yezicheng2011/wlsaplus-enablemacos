@@ -194,7 +194,16 @@ def rotate(x, heads, position):
 
 
 def forward(tensors, tokens):
-    get = lambda name: tensors[name][4]
+    cache_half = {}
+    def get(name):
+        # The runtime keeps weight matrices in half precision; token embeddings
+        # are looked up at full precision and the vectors are never rounded.
+        rows, _, _, _, values = tensors[name]
+        if rows == 1 or name == "token_embd.weight":
+            return values
+        if name not in cache_half:
+            cache_half[name] = [half(v) for v in values]
+        return cache_half[name]
     cache = [([], []) for _ in range(LAYERS)]
     x = None
     for position, token in enumerate(tokens):
