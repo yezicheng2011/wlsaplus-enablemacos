@@ -1,71 +1,20 @@
 {
-  "name": "wlsaplus",
+  "name": "wlsaplus-macos",
   "productName": "WLSAPlus",
-  "version": "1.1.2",
+  "version": "2.1.1",
   "private": true,
-  "description": "A local-first schedule and task app for WLSA students",
+  "license": "Apache-2.0",
+  "description": "Native macOS schedule, academic progress, forum, and study workspace for WLSA students",
   "author": "daniel.ye叶子诚",
   "type": "module",
-  "main": "electron/main.cjs",
   "scripts": {
-    "ng": "ng",
-    "start": "ng serve",
-    "build": "ng build",
-    "build:web": "ng build --configuration production",
-    "test": "ng test --watch=false && node --test electron/*.test.cjs",
-    "version:apply": "node scripts/set-build-version.mjs",
-    "record:powerschool": "node scripts/record-powerschool.mjs",
-    "icons:generate": "node scripts/generate-icons.mjs",
-    "vpn:core": "node scripts/verify-mac-vpn.mjs",
-    "electron:dev": "npm run vpn:core && concurrently -k \"ng serve\" \"wait-on http://localhost:4200 && cross-env WLSAPLUS_DEV_URL=http://localhost:4200 electron .\"",
-    "electron:start": "npm run vpn:core && npm run build:web && electron .",
-    "electron:make": "npm run vpn:core && npm run build:web && electron-forge make --platform darwin --arch universal",
-    "symbols:check": "node scripts/material-symbols.mjs",
-    "symbols:generate": "node scripts/material-symbols.mjs --generate",
-    "prebuild": "npm run symbols:check",
-    "prebuild:web": "npm run symbols:check"
-  },
-  "dependencies": {
-    "@angular/cdk": "^22.1.4",
-    "@angular/common": "^22.1.4",
-    "@angular/compiler": "^22.1.4",
-    "@angular/core": "^22.1.4",
-    "@angular/forms": "^22.1.4",
-    "@angular/material": "^22.1.4",
-    "@angular/platform-browser": "^22.1.4",
-    "@angular/router": "^22.1.4",
-    "@fontsource/roboto": "^5.3.0",
-    "js-yaml": "^4.3.2",
-    "rxjs": "~7.8.2",
-    "tslib": "^2.8.1"
-  },
-  "devDependencies": {
-    "@angular/build": "^22.1.6",
-    "@angular/cli": "^22.1.6",
-    "@angular/compiler-cli": "^22.1.4",
-    "@electron-forge/cli": "^7.11.2",
-    "@electron-forge/maker-dmg": "^7.11.2",
-    "@electron-forge/maker-zip": "^7.11.2",
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.0.0",
-    "electron": "^44.0.0",
-    "jsdom": "^28.0.0",
-    "material-symbols": "^0.47.0",
-    "playwright": "^1.55.0",
-    "png2icons": "^2.0.1",
-    "sharp": "^0.35.4",
-    "typescript": "~6.0.2",
-    "vitest": "^4.1.11",
-    "wait-on": "^9.0.1"
-  },
-  "overrides": {
-    "@electron/node-gyp": "10.2.0-electron.1"
+    "verify:license": "node --test native/Tests/license-compliance.test.mjs",
+    "test:js": "node --test native/Tests/*.test.mjs",
+    "test": "bash native/scripts/test.sh",
+    "build": "bash native/scripts/build.sh",
+    "release": "bash native/scripts/release.sh"
   },
   "engines": {
-    "node": ">=22.22.3"
-  },
-  "config": {
-    "forge": "./forge.config.cjs"
-  },
-  "license": "GPL-3.0-only"
+    "node": ">=22"
+  }
 }

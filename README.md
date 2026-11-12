@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/v/release/yezicheng2011/wlsaplus-enablemacos?label=release)](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest)
 
 <p align="center">
-  <img src="public/icons/app-icon.svg" width="96" alt="WLSAPlus">
+  <img src="native/Resources/brand-mark.svg" width="96" alt="WLSAPlus">
 </p>
 
 <p align="center">
@@ -129,24 +129,20 @@ cd native
 bash scripts/test.sh
 ```
 
-### Legacy Electron tree (migration / compatibility / rights record only)
-
-The repository root still contains the old Electron + Angular Material app and its `npm` scripts, kept for data migration, update compatibility and the historical rights record. **The new app does not bundle the old Electron runtime or the old VPN core.** For everyday installs and releases, use the `native/` commands above — **do not** install it for classmates with the old `npm install` / `npm run electron:make`.
-
-Legacy Electron commands (not the supported product path):
+From the repository root, zero-dependency Node scripts in `package.json` (`Apache-2.0`) also run the JavaScript/wire-contract suite and license compliance check without installing third-party npm packages:
 
 ```bash
-# Node.js 22 (see .nvmrc) — legacy tree only
-npm install
-npm run electron:make
+npm run verify:license
+npm run test:js
 ```
 
 ## Development
 
 | Path | Description |
 |---|---|
-| [`native/`](native/) | **The currently supported native app** (Swift / C, local WebKit UI) |
-| Repository root (`src/`, `electron/`, …) | Legacy Electron implementation only |
+| [`native/`](native/) | **Native macOS client & MockMini VPN engine** (Swift / C, local WebKit UI, tests, and build scripts) |
+| [`release-kit/`](release-kit/) | One-click source-build helper script and user manual |
+| `package.json` | Zero-dependency root task runner (`Apache-2.0`) |
 
 CI:
 
@@ -170,8 +166,8 @@ See [native/README.md](native/README.md) and [native/PROVENANCE.md](native/PROVE
 
 ## License
 
-The source code is released under the **Apache License 2.0**; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Third-party licenses are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+The entire repository is licensed under the **Apache License 2.0**; see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Platform and attribution notes are listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-For the origin and rights boundaries of the native project, see [`native/PROVENANCE.md`](native/PROVENANCE.md). The legacy Electron tree may still reference licenses of components shipped with older versions (e.g. [`electron/bin/LICENSE-mihomo.txt`](electron/bin/LICENSE-mihomo.txt)); **the native app no longer distributes that core**.
+For the origin and rights boundaries of the native codebase, see [`native/PROVENANCE.md`](native/PROVENANCE.md). Historical 1.x Electron/Angular files and the former third-party VPN core binary have been retired and removed from this repository.
 
 © daniel.ye叶子诚

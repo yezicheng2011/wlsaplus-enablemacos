@@ -2,7 +2,7 @@ name: Native macOS checks
 on:
   workflow_dispatch:
   pull_request:
-    paths: ['native/Sources/**', 'native/Resources/**', 'native/Tests/**', 'native/scripts/**', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
+    paths: ['native/Sources/**', 'native/Resources/**', 'native/Tests/**', 'native/scripts/**', 'package.json', 'LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'README.md', '.github/workflows/native-check.yml', '.github/workflows/release.yml']
 concurrency:
   group: native-check-v2-${{ github.ref }}
   cancel-in-progress: true

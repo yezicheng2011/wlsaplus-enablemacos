@@ -1,38 +1,29 @@
 # Third-party notices
 
-WLSAPlus (this repository) is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). The native Swift/C VPN and packet stack is original and is also Apache-2.0; it does not vendor mihomo, clash, sing-box, or gVisor source or binaries.
+WLSAPlus (this repository) is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
-The distributed macOS app may also include the following components. Their licenses apply to those components; keep the corresponding license files when you redistribute binaries.
+The native macOS client (`native/`), including the MockMini Swift/C VPN and packet engine, local WebKit workspace assets, update wire-contract verifier, and build/release scripts, is original software licensed under **Apache-2.0**. It does **not** vendor, link, or distribute `mihomo`, `clash`, `sing-box`, `gVisor`, Electron, Angular, or third-party npm runtime packages. The historical 1.x Electron/Angular tree and bundled `mihomo` binary have been retired and removed from this repository.
 
-## Legacy Electron VPN core (1.x packages only)
+## Runtime platform dependencies
 
-Native 2.x builds do **not** ship these binaries. They remain listed because historical `electron/bin` artifacts and 1.1.2 updaters may still reference them.
+All runtime frameworks and system utilities used by the shipped macOS app are provided by macOS 13 or later under Apple's system software terms:
 
-## Bundled VPN / network cores
-
-| Component | Role | License | License file |
-| --- | --- | --- | --- |
-| [mihomo](https://github.com/MetaCubeX/mihomo) (Clash Meta) | Binary inside `electron/bin/mac-vpn.tar.gz` (`clash_pkg/clash`), the only VPN core of the macOS app; shipped as `Contents/Resources/bin/` | GPL-3.0 | `electron/bin/LICENSE-mihomo.txt` |
-
-## Major npm / runtime dependencies
-
-These are installed via npm. The Material Symbols font is also checked in as a subset under `build/fonts/`; its font axes and the icons used by the app are preserved. The original Apache-2.0 license is retained in `build/fonts/LICENSE-material-symbols.txt` and included in the renderer's `licenses/` directory. Typical licenses (verify with your installed `node_modules` when redistributing):
-
-| Package | Typical license |
+| Component | Role |
 | --- | --- |
-| Angular (`@angular/*`) | MIT |
-| Angular Material / CDK | MIT |
-| Electron / Electron Forge | MIT (Electron also includes Chromium and Node under their own terms) |
-| RxJS | Apache-2.0 |
-| material-symbols (including the bundled subset) | Apache-2.0 |
-| Roboto font package | OFL-1.1 |
+| AppKit / Foundation / WebKit | Native windowing, local interface rendering, and isolated forum web container |
+| Network.framework / Darwin `utun` | Outbound TLS/TCP/UDP transport and full-device packet tunnel interface |
+| CryptoKit / CommonCrypto / Security | AEAD/stream cryptography, Ed25519 manifest verification, and Keychain credential storage |
+| UserNotifications / ServiceManagement | Class reminders and system integration |
 
-For a machine-readable inventory after `npm install`, you can run a license checker such as `npx license-checker --summary` (optional; not required to build).
+## Development and verification tools (not distributed)
 
-## vpn-subscription-worker (optional deploy)
+Build and test scripts invoke standard host toolchains during development and CI only; none of these tools are bundled into `WLSAPlus.app`:
 
-`vpn-subscription-worker/` is a separately deployable worker. Treat it as part of this repository under the same Apache-2.0 terms unless a file in that directory says otherwise. Do not commit upstream VPN subscription secrets into the client; keep them in Worker secrets.
+- Apple Xcode Command Line Tools (`clang`, `swiftc`, `lipo`, `codesign`, `ditto`, `hdiutil`)
+- Node.js 22+ built-in standard library (`node:test`, `node:crypto`, `node:http`, `node:fs`)
+- Python 3 standard library (test archive and migration fixture generation)
+- Chromium / Google Chrome (optional local/CI headless DOM verification)
 
 ## Attribution note
 
-Product names (PowerSchool, WeChat, etc.) belong to their respective owners. Reachability probes (for example `https://weixin.qq.com/`) are network checks only and are not affiliated with or endorsed by those services.
+Product names (PowerSchool, WeChat, macOS, etc.) belong to their respective owners. Network reachability probes (for example `https://weixin.qq.com/`) are connectivity checks only and are not affiliated with or endorsed by those services.
