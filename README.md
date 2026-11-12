@@ -2,8 +2,16 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/yezicheng2011/wlsaplus-enablemacos?label=release)](https://github.com/yezicheng2011/wlsaplus-enablemacos/releases/latest)
 
+> **Final feature release: 99.99.99.0**
+>
+> This is the final feature release of the project. There will be no further software or feature updates. Only the VPN will continue to be maintained. Those VPN maintenance versions will be numbered **99.99.99.1**, **99.99.99.2**, and so on.
+>
+> 这是本项目的最终功能版本 **99.99.99.0**：之后不再更新软件功能，只继续维护 VPN，维护版本为 99.99.99.1、99.99.99.2，依此类推。
+
+> **VPN is unlimited for normal personal use.** Fair use is counted only on this Mac, not as a server quota. If one installation transfers more than **50 GB in a rolling 24 hours** or **500 GB in a rolling 30 days**, the tunnel slows to about **5 Mbps** for upload and download combined until the window drops back under the limit. The VPN stays connected; fair use never disconnects it. Normal classwork, browsing, and video are expected. The limit is there so a node is not used as a download box.
+
 <p align="center">
-  <img src="native/Resources/brand-mark.svg" width="96" alt="WLSAPlus">
+  <img src="native/Resources/AppIcon.png" width="96" alt="WLSAPlus">
 </p>
 
 <p align="center">
@@ -12,6 +20,7 @@
 </p>
 
 <p align="center">
+  <a href="#official-download">Official download</a> ·
   <a href="#build-from-source">Build from source</a> ·
   <a href="release-kit/wlsaplusmac版本说明书.md">Manual</a> ·
   <a href="https://wlsaplus.spacehubxyz.hk/#download">Official site</a> ·
@@ -53,9 +62,13 @@ WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, 
 | 🌐 **Language** | English or Chinese interface, or follow the system |
 | 🖼️ **App icon** | Dock / Finder icon for Intel and Apple silicon; on macOS 26 it follows the Default, Dark, Clear and Tinted icon styles (official builds; source builds need Xcode 26 for those styles) |
 
+## Official download
+
+The official installer for **99.99.99.0** is `WLSAPlus-99.99.99.0-macOS-universal.pkg`. It installs `WLSAPlus.app` into `/Applications` on Intel and Apple silicon. Open the package from the Finder (right-click → Open). It is signed with this project's certificate, so Gatekeeper may say the developer cannot be verified; that is expected and is not a "damaged" package. In-app updates still download a zip, not the pkg. A disk image is also published. Classmates can keep building from source with the commands below.
+
 ## Build from source
 
-**This is the recommended install path for classmates.** No Apple Developer account is needed, and no Node / npm / Homebrew for a normal build.
+**Building from source is still the path that needs no download.** No Apple Developer account is needed, and no Node / npm / Homebrew for a normal build. `scripts/build.sh` also writes `out/WLSAPlus-99.99.99.0-macOS-universal.pkg`. That local package is unsigned unless `WLSAPLUS_SIGN_IDENTITY` is set. A release run signs it with the pinned identity `764D4389AAFA0C50311E39C17DDFA1981ABEF86C`.
 
 ### Requirements
 
@@ -73,7 +86,7 @@ cd wlsaplus-enablemacos
 
 # 2) Enter the native project and build (universal: arm64 + x86_64)
 cd native
-WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 
 # 3) Open the freshly built app
 open out/WLSAPlus.app
@@ -84,7 +97,7 @@ The four core lines classmates can copy (mirror clone + build + open):
 ```bash
 git clone https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos.git
 cd wlsaplus-enablemacos/native
-WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -94,7 +107,7 @@ If `git clone` still fails, download the zip through the same mirror:
 curl -L -o wlsaplus-enablemacos.zip 'https://gh-proxy.com/https://github.com/yezicheng2011/wlsaplus-enablemacos/archive/refs/heads/main.zip'
 unzip wlsaplus-enablemacos.zip
 cd wlsaplus-enablemacos-main/native
-WLSAPLUS_VERSION=2.2.0 bash scripts/build.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 

@@ -13,6 +13,10 @@ test('fixed interface text and interpolated sentences translate to Chinese', () 
   assert.equal(I.translate('Due in 3 days'), '3 天后截止');
   assert.equal(I.translate('Detected: French'), '检测到：法语');
   assert.equal(I.translate('2 classes'), '2 节课');
+  assert.equal(I.translate('Installing WLSAPlus 99.99.99.1…'), '正在安装 WLSAPlus 99.99.99.1…');
+  assert.equal(I.translate('Installing the verified update…'), '正在安装已验证的更新…');
+  assert.equal(I.translate('Fair use limit reached — speed temporarily reduced, will restore automatically'), '已达到合理使用上限，速度暂时降低，之后会自动恢复。');
+  assert.match(I.translate('Unlimited, with fair use'), /不限流量/);
   assert.equal(I.translate('Last synchronized 2026年11月12日 at 9:09. Class reminders are off.'), '上次同步：2026年11月12日 9:09。上课提醒已关闭。');
 });
 

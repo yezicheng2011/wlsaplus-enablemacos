@@ -9,8 +9,8 @@ The UI keeps the Home, Schedule, Progress, Forum, Tools and Settings entry point
 **End users should install by building from source** (see the root README and `release-kit/wlsaplusmac版本说明书.md`). On a Mac with the Xcode Command Line Tools installed:
 
 ```sh
-# Recommended: build 2.0.0 directly (no need to run test.sh just to install the app)
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+# Recommended: build 99.99.99.0 directly (no need to run test.sh just to install the app)
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -18,7 +18,7 @@ Full developer check:
 
 ```sh
 bash scripts/test.sh
-WLSAPLUS_VERSION=2.0.0 bash scripts/build.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
@@ -50,12 +50,12 @@ Real-node spot checks used a standalone test implementation to verify that 4 exi
 
 The original bundle ID `cn.org.wlsash.wlsaplus`, product identifier `wlsaplus-macos`, original Ed25519 public key, code-signing certificate fingerprint, update site, mirror candidates, manifest format=1 and launch-confirmation parameters are all preserved. The original updater checks the app identifier, version, processor and signature and does not require Electron resources, so it accepts a new native package that is correctly signed under those conditions.
 
-The new implementation includes stable/test channels, version and rollback blocklist checks, resumable system downloads, size/SHA-256 verification, ZIP safety checks, code-signature verification, disconnecting the VPN before quitting, replacement/backup, and a 90-second launch-confirmation rollback. New versions are still downloaded and installed with a restart via the update button in Settings.
+The new implementation includes stable/test channels, version and rollback blocklist checks, resumable system downloads, size/SHA-256 verification, ZIP safety checks, code-signature verification, disconnecting the VPN before quitting, replacement/backup, and a 90-second launch-confirmation rollback. After those checks pass, the app installs the package and relaunches on its own. Settings shows download and install progress; it does not wait for a restart click. If Applications is not writable, macOS may still ask for an administrator password. Version numbers may be three segments (2.1.1, 2.2.0) or four (99.99.99.0 and later VPN maintenance releases). The official download is `WLSAPlus-<version>-macOS-universal.pkg` (installs into `/Applications`). Update manifests still point at the zip packages.
 
 Release preparation uses the existing CI secrets (no replacement keys are generated):
 
 ```sh
-WLSAPLUS_VERSION=2.0.0-beta.1 bash scripts/release.sh
+WLSAPLUS_VERSION=99.99.99.0 bash scripts/release.sh
 ```
 
 You must first import the original fixed code-signing certificate and set `WLSAPLUS_UPDATE_ED25519_KEY`. Output file names and the manifest format remain compatible with older versions. `release.sh` only prepares artifacts locally; the release workflow at the repository root replaces the old Electron artifact pipeline — stable releases are created as drafts, and test builds update the existing beta channel. When publishing an accepted stable draft you must tick "Set as the latest release" (CLI: `gh release edit v<version> --draft=false --latest`) so that the stable update button in both old and new versions can find it. The following must be verified on a real Mac: upgrading from 1.1.2 → the new version, the next native-to-native upgrade, cancelling authorization, a non-writable Applications folder, resumed downloads and forced rollback.

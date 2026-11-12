@@ -123,8 +123,9 @@ import Darwin
         guard let executable = Bundle.main.executableURL else { throw AppError("The native app executable could not be located.") }
         let parent = try VPNProcessIdentity.read(getpid())
         let token = try ProtocolCrypto.random(32).map { String(format: "%02x", $0) }.joined()
+        let ledger = AppIdentity.support.appendingPathComponent("fair-use.json").path
         let config = VPNHelperConfiguration(version: 1, token: token, parent: parent,
-                                             createdAt: Date().timeIntervalSince1970, node: node)
+                                             createdAt: Date().timeIntervalSince1970, node: node, fairUsePath: ledger)
         try privateWrite(JSONEncoder().encode(config), to: sessionURL)
         configuration = config
         publish(["state": "connecting", "connected": false, "nodeId": node.id, "nodeName": node.name,
@@ -365,12 +366,24 @@ import Darwin
     private func publish(_ next: [String: Any]) {
         var value = next
         value["canDisconnect"] = configuration != nil || next["cleanupRequired"] as? Bool == true
+        if value["fairUseThrottled"] == nil {
+            let url = AppIdentity.support.appendingPathComponent("fair-use.json")
+            if let data = try? Data(contentsOf: url), let ledger = try? FairUseLedger.load(data) {
+                let throttled = ledger.isThrottled(now: Date().timeIntervalSince1970)
+                value["fairUseThrottled"] = throttled
+                value["fairUseMessage"] = throttled ? FairUseLedger.statusLimited : FairUseLedger.statusUnlimited
+            }
+        }
         status = value; onChange?(value)
     }
     private func publicStatus(_ helper: [String: Any], node: ProxyNode) -> [String: Any] {
         var value: [String: Any] = ["state": "connected", "connected": true, "nodeId": node.id, "nodeName": node.name,
                                   "connectedAt": helper["connectedAt"] ?? ISO8601DateFormatter().string(from: Date())]
         for key in ["interface", "latency"] { if let item = helper[key] { value[key] = item } }
+        if let fair = helper["fairUse"] as? [String: Any] {
+            value["fairUseThrottled"] = fair["throttled"] as? Bool ?? false
+            if let message = fair["message"] as? String { value["fairUseMessage"] = message }
+        }
         return value
     }
     private func control(_ method: String, _ path: String, config: VPNHelperConfiguration) async throws -> [String: Any] {
@@ -424,6 +437,12 @@ import Darwin
                         self.publish(["state": "error", "connected": false, "cleanupRequired": value["networkActive"] as? Bool ?? true,
                                       "message": value["message"] as? String ?? "The native VPN connection stopped."])
                         return
+                    }
+                    var next = self.status
+                    if let fair = value["fairUse"] as? [String: Any] {
+                        next["fairUseThrottled"] = fair["throttled"] as? Bool ?? false
+                        if let message = fair["message"] as? String { next["fairUseMessage"] = message }
+                        self.publish(next)
                     }
                 } catch {
                     self.publish(["state": "error", "connected": false, "cleanupRequired": true,

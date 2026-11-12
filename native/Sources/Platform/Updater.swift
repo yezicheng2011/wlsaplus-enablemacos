@@ -201,7 +201,17 @@ final class PackageDownload: NSObject, URLSessionDownloadDelegate {
             let candidate = unpacked.appendingPathComponent("WLSAPlus.app", isDirectory: true)
             try Self.verifyApp(candidate, version: selected.version, architecture: architecture)
             staged = candidate
-            set("ready", "Update ready — restart to install WLSAPlus \(selected.version).", percent: 100)
+            set("installing", "Installing WLSAPlus \(selected.version)…", percent: 100)
+            do {
+                try await VerifiedUpdateHandoff.apply(.installAndRestart) { restart in
+                    try await self.install(restart: restart)
+                }
+            } catch {
+                // The helper was not left running. Drop the staged package so a later check can try again.
+                staged = nil
+                manifest = nil
+                throw error
+            }
         } catch {
             if error is CancellationError || epoch != channelGeneration { set("idle", "Update channel changed. Check for updates again.") }
             else { set("error", error.localizedDescription) }

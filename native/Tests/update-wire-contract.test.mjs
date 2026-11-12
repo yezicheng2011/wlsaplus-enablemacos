@@ -10,6 +10,7 @@ import {
   PINNED_TRUST,
   compareSemver,
   downloadAndVerifyArtifact,
+  parseSemver,
   pickArchArtifact,
   selectEligibleRelease,
   verifySignedManifestEnvelope,
@@ -64,6 +65,11 @@ test('release eligibility enforces version upgrade, beta opt-in, rollback blockl
 
   assert.equal(compareSemver('2.1.0-beta.1', '2.0.0'), 1);
   assert.equal(compareSemver('2.0.0', '2.0.0-beta.9'), 1);
+  assert.equal(compareSemver('99.99.99.1', '99.99.99.0'), 1);
+  assert.equal(compareSemver('99.99.99.0', '2.2.0'), 1);
+  assert.equal(compareSemver('2.2.0', '2.1.1'), 1);
+  assert.equal(compareSemver('2.2.0', '2.2.0.0'), 0);
+  assert.equal(compareSemver('99.99.99.0-beta.1', '99.99.99.0'), -1);
 
   const chosenStable = selectEligibleRelease([stable200, beta210], {
     currentVersion: '1.1.2',
@@ -177,4 +183,61 @@ test('bundle verifier enforces codesign requirement, Info.plist identity, and pr
   });
   assert.deepEqual(verified.slices, ['x86_64', 'arm64']);
   assert.equal(calls.filter(([tool]) => tool === 'codesign').length, 2);
+});
+
+test('four-part 99.99.99.0 manifest stays format 1 and is a stable upgrade from 2.2.0', () => {
+  const keyPair = crypto.generateKeyPairSync('ed25519');
+  const publicKeyPem = keyPair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const sampleHash = 'b'.repeat(64);
+  const current = verifySignedManifestEnvelope(makeSignedFixture(keyPair, {
+    product: PINNED_TRUST.product,
+    version: '99.99.99.0',
+    tag: 'v99.99.99.0',
+    channel: 'stable',
+    minimumSystemVersion: '13.0',
+    files: {
+      arm64: { name: 'WLSAPlus-99.99.99.0-mac-arm64.zip', size: 2048, sha256: sampleHash },
+      x64: { name: 'WLSAPlus-99.99.99.0-mac-x64.zip', size: 2048, sha256: sampleHash },
+    },
+  }), { publicKeyPem });
+  const maintenance = verifySignedManifestEnvelope(makeSignedFixture(keyPair, {
+    product: PINNED_TRUST.product,
+    version: '99.99.99.1',
+    tag: 'v99.99.99.1',
+    channel: 'stable',
+    minimumSystemVersion: '13.0',
+    files: {
+      universal: { name: 'WLSAPlus-99.99.99.1-macOS-universal.zip', size: 4096, sha256: sampleHash },
+    },
+  }), { publicKeyPem });
+
+  assert.equal(current.version, '99.99.99.0');
+  assert.equal(current.channel, 'stable');
+  assert.deepEqual(current.semver.prerelease, []);
+  assert.equal(parseSemver('v99.99.99.0').version, '99.99.99.0');
+  assert.throws(() => parseSemver('99.99.99.0.1'));
+  assert.throws(() => parseSemver('99.99.99.01'));
+  assert.equal(selectEligibleRelease([current], {
+    currentVersion: '2.2.0',
+    allowBeta: false,
+    macosVersion: '14.6.1',
+  })?.version, '99.99.99.0');
+  assert.equal(selectEligibleRelease([current], {
+    currentVersion: '2.1.1',
+    allowBeta: false,
+    macosVersion: '13.0',
+  })?.version, '99.99.99.0');
+  assert.equal(selectEligibleRelease([current], {
+    currentVersion: '99.99.99.0',
+    macosVersion: '14.0',
+  }), null);
+  assert.equal(selectEligibleRelease([maintenance], {
+    currentVersion: '99.99.99.0',
+    macosVersion: '14.0',
+  })?.version, '99.99.99.1');
+  assert.equal(selectEligibleRelease([maintenance], {
+    currentVersion: '99.99.99.0',
+    blockedVersions: ['99.99.99.1'],
+    macosVersion: '14.0',
+  }), null);
 });

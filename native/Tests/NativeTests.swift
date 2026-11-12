@@ -18,7 +18,24 @@ import Foundation
         }
         let hugeA = try SemanticVersion("999999999999999999999999.0.0"), hugeB = try SemanticVersion("1000000000000000000000000.0.0")
         try expect(hugeA < hugeB, "no integer overflow")
-        for s in ["1", "1.0", "1.0.0-01", "01.0.0", "1.0.0/../x", "1.0.0\n"] { try rejects("version \(s)") { _ = try SemanticVersion(s) } }
+        for s in ["1", "1.0", "1.0.0-01", "01.0.0", "1.0.0/../x", "1.0.0\n", "99.99.99.0.1", "99.99.99.01", "99.99.99.0-01"] { try rejects("version \(s)") { _ = try SemanticVersion(s) } }
+        let releaseOrder = ["2.1.1", "2.2.0", "99.99.99.0", "99.99.99.1"]
+        for pair in zip(releaseOrder, releaseOrder.dropFirst()) {
+            let older = try SemanticVersion(pair.0), newer = try SemanticVersion(pair.1)
+            try expect(older < newer, "release order \(pair)")
+        }
+        let three = try SemanticVersion("2.2.0"), four = try SemanticVersion("2.2.0.0"), fourthOne = try SemanticVersion("2.2.0.1")
+        try expect(three == four, "missing fourth segment pads as zero")
+        try expect(three < fourthOne, "fourth segment above zero pad")
+        let prefixed = try SemanticVersion("v99.99.99.0"), stable = try SemanticVersion("99.99.99.0")
+        let withBuild = try SemanticVersion("99.99.99.0+build")
+        try expect(prefixed == stable, "v prefix on four-part version")
+        try expect(withBuild == stable, "build metadata ignored")
+        try expect(stable.prerelease.isEmpty, "99.99.99.0 is a stable release")
+        let maintenanceBeta = try SemanticVersion("99.99.99.0-beta.1")
+        try expect(maintenanceBeta < stable, "four-part prerelease stays below its stable release")
+        let buildMetadata = try SemanticVersion("2.0.0+build99"), plain = try SemanticVersion("2.0.0")
+        try expect(buildMetadata == plain, "three-part build metadata still ignored")
         let subscription = try trySubscription()
         try expect(subscription.count == 3, "node import preserves SS, VMess, and Trojan")
         let trojan = subscription.first { ($0["type"] as? String)?.lowercased() == "trojan" }
@@ -59,6 +76,78 @@ import Foundation
                 else { try rejects("unsafe ZIP \(file.lastPathComponent)") { try ArchivePolicy.validate(file) } }
             }
         }
+        let maintenance: [String: Any] = ["product": AppIdentity.product, "version": "99.99.99.0", "tag": "v99.99.99.0", "channel": "stable", "files": ["arm64": ["name": "WLSAPlus-99.99.99.0-mac-arm64.zip", "size": 2048, "sha256": String(repeating: "b", count: 64)]]]
+        func maintenanceEnvelope(_ body: [String: Any]) throws -> Data {
+            try jsonData(["format": 1, "payload": String(decoding: jsonData(body), as: UTF8.self), "signature": Data(repeating: 1, count: 64).base64EncodedString()])
+        }
+        let packaged = try UpdateManifest.parse(try maintenanceEnvelope(maintenance)) { _, _ in true }
+        try expect(packaged.version == "99.99.99.0", "manifest keeps four-part version")
+        try expect(packaged.channel == "stable", "99.99.99.0 manifest stays format-1 stable")
+        let from220 = try packaged.eligible(current: "2.2.0", beta: false, failed: [], os: "14.6.1")
+        let from211 = try packaged.eligible(current: "2.1.1", beta: false, failed: [], os: "13.0")
+        let same = try packaged.eligible(current: "99.99.99.0", beta: false, failed: [], os: "14.0")
+        try expect(from220, "99.99.99.0 updates 2.2.0")
+        try expect(from211, "99.99.99.0 updates 2.1.1")
+        try expect(!same, "same four-part version is not an update")
+        var nextMaintenance = maintenance
+        nextMaintenance["version"] = "99.99.99.1"
+        nextMaintenance["tag"] = "v99.99.99.1"
+        let later = try UpdateManifest.parse(try maintenanceEnvelope(nextMaintenance)) { _, _ in true }
+        let maintenanceUpgrade = try later.eligible(current: "99.99.99.0", beta: false, failed: [], os: "14.0")
+        let blockedMaintenance = try later.eligible(current: "99.99.99.0", beta: false, failed: ["99.99.99.1"], os: "14.0")
+        try expect(maintenanceUpgrade, "99.99.99.1 updates 99.99.99.0")
+        try expect(!blockedMaintenance, "failed maintenance version is skipped")
+        try expect(VerifiedUpdateHandoff.installsAndRestarts(.installAndRestart), "verified update installs and restarts")
+        try expect(!VerifiedUpdateHandoff.installsAndRestarts(.refuse), "failed verification is not installed")
+        let handoffSource = "Sources/Core/UpdateManifest.swift"
+        if FileManager.default.fileExists(atPath: handoffSource) {
+            let handoff = try String(contentsOfFile: handoffSource, encoding: .utf8)
+            try expect(handoff.contains("if installsAndRestarts(decision)"), "install runs only after verification")
+            try expect(handoff.contains("try await install(true)"), "verified package restarts")
+        }
+        let updaterSource = "Sources/Platform/Updater.swift"
+        if FileManager.default.fileExists(atPath: updaterSource) {
+            let text = try String(contentsOfFile: updaterSource, encoding: .utf8)
+            try expect(!text.contains("restart to install"), "updater does not wait for a restart click")
+            try expect(text.contains("VerifiedUpdateHandoff.apply(.installAndRestart)"), "verified package auto-installs")
+            guard let verifyAt = text.range(of: "verifyApp(candidate"), let handoffAt = text.range(of: "VerifiedUpdateHandoff.apply(.installAndRestart)") else {
+                throw AppError("FAIL: updater verification handoff")
+            }
+            try expect(verifyAt.lowerBound < handoffAt.lowerBound, "install follows app verification")
+        }
+        let interfaceSource = "Resources/app.js"
+        if FileManager.default.fileExists(atPath: interfaceSource) {
+            let interface = try String(contentsOfFile: interfaceSource, encoding: .utf8)
+            try expect(!interface.contains("restart to install"), "settings does not ask for a restart click")
+            try expect(!interface.contains("Install update"), "settings does not require an install click")
+        }
+        var ledger = FairUseLedger()
+        let now: TimeInterval = 1_700_000_000
+        ledger.record(bytes: 1_000, now: now)
+        try expect(!ledger.isThrottled(now: now), "small transfer stays unlimited")
+        try expect(ledger.pace(requested: 2_000_000, now: now) == 2_000_000, "under the limit there is no speed cap")
+        ledger.record(bytes: FairUseLedger.dayBytes, now: now)
+        try expect(ledger.isThrottled(now: now), "more than 50 GB in 24 hours throttles")
+        try expect(ledger.pace(requested: 2_000_000, now: now) == Int(FairUseLedger.bytesPerSecond), "throttle is about 5 Mbps combined")
+        try expect(ledger.pace(requested: 2_000_000, now: now) == 0, "the shared bucket waits for the next second")
+        try expect(ledger.pace(requested: 2_000_000, now: now + 1) == Int(FairUseLedger.bytesPerSecond), "one second restores 5 Mbps")
+        var released = FairUseLedger()
+        released.record(bytes: FairUseLedger.dayBytes + 1, now: now - FairUseLedger.dayWindow - 120)
+        try expect(!released.isThrottled(now: now), "falling back under 50 GB restores full speed")
+        try expect(released.pace(requested: 3_000_000, now: now) == 3_000_000, "restored traffic is not capped")
+        var month = FairUseLedger()
+        month.record(bytes: FairUseLedger.monthBytes + 1, now: now - FairUseLedger.dayWindow - 120)
+        try expect(month.isThrottled(now: now), "more than 500 GB in 30 days throttles")
+        try expect(month.pace(requested: 10, now: now) <= Int(FairUseLedger.bytesPerSecond), "month throttle uses the same 5 Mbps cap")
+        try expect(!month.isThrottled(now: now + FairUseLedger.monthWindow), "falling back under 500 GB clears the throttle")
+        let loaded = try FairUseLedger.load(try ledger.encoded())
+        try expect(loaded.total(window: FairUseLedger.dayWindow, now: now) == ledger.total(window: FairUseLedger.dayWindow, now: now), "fair-use ledger reloads")
+        let home = "/Users/student"
+        let ledgerPath = FairUsePath.expected(home: home)
+        _ = try FairUsePath.validate(ledgerPath, home: home)
+        try rejects("fair-use path outside this Mac account") { _ = try FairUsePath.validate("/tmp/fair-use.json", home: home) }
+        try expect(FairUseLedger.statusLimited.contains("speed temporarily reduced"), "throttle status is not a disconnect")
+        try expect(!FairUseLedger.statusLimited.lowercased().contains("disconnect"), "fair use does not disconnect")
         try LegacyStoreTests.run()
         #if NETWORK_PLAN_TESTS
         try NetworkPlan.runReadOnlyVerificationTests()

@@ -163,18 +163,30 @@ struct SemanticVersion: Comparable, Equatable {
     let prerelease: [String]
     init(_ value: String) throws {
         let s = value.hasPrefix("v") ? String(value.dropFirst()) : value
-        let pattern = #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"#
+        // Three numeric segments (2.1.1, 2.2.0) or four (99.99.99.0, 99.99.99.1).
+        // An optional prerelease and build suffix stay valid on either length.
+        let pattern = #"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:\.((?:0|[1-9][0-9]*)))?(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"#
         let re = try NSRegularExpression(pattern: pattern)
         guard let match = re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)), match.range.length == s.utf16.count else { throw AppError("Invalid version: \(value)") }
         func part(_ index: Int) -> String { Range(match.range(at: index), in: s).map { String(s[$0]) } ?? "" }
-        numbers = (1...3).map(part)
-        prerelease = part(4).isEmpty ? [] : part(4).components(separatedBy: ".")
+        var parts = [part(1), part(2), part(3)]
+        let fourth = part(4)
+        if !fourth.isEmpty { parts.append(fourth) }
+        numbers = parts
+        prerelease = part(5).isEmpty ? [] : part(5).components(separatedBy: ".")
         guard !prerelease.contains(where: { Self.numeric($0) && $0.count > 1 && $0.hasPrefix("0") }) else { throw AppError("Invalid prerelease number.") }
     }
     private static func numeric(_ s: String) -> Bool { !s.isEmpty && s.utf8.allSatisfy { $0 >= 48 && $0 <= 57 } }
     private static func numberLess(_ a: String, _ b: String) -> Bool { a.count == b.count ? a < b : a.count < b.count }
+    static func == (a: Self, b: Self) -> Bool { !(a < b) && !(b < a) }
     static func < (a: Self, b: Self) -> Bool {
-        for (x, y) in zip(a.numbers, b.numbers) where x != y { return numberLess(x, y) }
+        // A missing fourth segment compares as zero, so 2.2.0 == 2.2.0.0 and 99.99.99.1 > 2.2.0.
+        let count = max(a.numbers.count, b.numbers.count)
+        for index in 0..<count {
+            let x = index < a.numbers.count ? a.numbers[index] : "0"
+            let y = index < b.numbers.count ? b.numbers[index] : "0"
+            if x != y { return numberLess(x, y) }
+        }
         if a.prerelease.isEmpty != b.prerelease.isEmpty { return !a.prerelease.isEmpty }
         for i in 0..<min(a.prerelease.count, b.prerelease.count) {
             let x = a.prerelease[i], y = b.prerelease[i]
