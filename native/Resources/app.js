@@ -11,6 +11,7 @@
   const TODO_ICONS = ['✓', '📚', '📝', '🎯', '💡', '🔔', '🏃', '⭐'];
   const LANGUAGES = [['en','English'],['zh-Hans','Chinese (Simplified)'],['zh-Hant','Chinese (Traditional)'],['es','Spanish'],['fr','French'],['de','German'],['ja','Japanese'],['ko','Korean'],['ru','Russian'],['ar','Arabic'],['pt','Portuguese'],['it','Italian']];
   const ICONS = {
+    spark: '<path d="M11 3.5 12.9 9l5.6 1.9-5.6 1.9L11 18.3l-1.9-5.5-5.6-1.9L9.1 9Z"/><path d="M18.5 15.5v4M16.5 17.5h4"/>',
     up: '<path d="m5 15 7-7 7 7"/>',
     down: '<path d="m5 9 7 7 7-7"/>',
     minus: '<path d="M5 12h14"/>',
@@ -105,7 +106,8 @@
     const date = parseDate(value);
     return date ? `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}` : '';
   }
-  function formatDate(value, options = {}) { const date = parseDate(value); return date ? new Intl.DateTimeFormat('en', {month:'short',day:'numeric',...options}).format(date) : 'Not provided'; }
+  function locale() { return root.WLSAI18n?.language === 'zh' ? 'zh-CN' : 'en'; }
+  function formatDate(value, options = {}) { const date = parseDate(value); return date ? new Intl.DateTimeFormat(locale(), {month:'short',day:'numeric',...options}).format(date) : 'Not provided'; }
   function formatTime(value) {
     if (typeof value === 'string' && /^\d{1,2}:\d{2}(?::\d{2})?$/.test(value)) {
       const [hour, minute] = value.split(':').map(Number);
@@ -113,7 +115,7 @@
       return `${hour % 12 || 12}:${String(minute).padStart(2,'0')} ${hour < 12 ? 'AM' : 'PM'}`;
     }
     const date = parseDate(value);
-    return date ? new Intl.DateTimeFormat('en', {hour:'numeric',minute:'2-digit'}).format(date) : 'Not provided';
+    return date ? new Intl.DateTimeFormat(locale(), {hour:'numeric',minute:'2-digit'}).format(date) : 'Not provided';
   }
   function format24(value) {
     const date=parseDate(value);
@@ -210,7 +212,8 @@
       accent:ACCENTS.some(([,color]) => color === value.accent) ? value.accent : ACCENTS[Math.max(0,ACCENT_NAMES.indexOf(value.accent))][1],
       reminders:value.reminders !== false, autostart:Boolean(value.autostart), tuningEnabled:Boolean(value.tuningEnabled), tunedTime:value.tunedTime || '',
       school:{baseURL:String(value.school?.baseURL || ''),username:String(value.school?.username || ''),connected:value.school?.connected===true}, snapshot:{...snapshot,courses:Array.isArray(snapshot.courses)?snapshot.courses:[],assignments:Array.isArray(snapshot.assignments)?snapshot.assignments:[],attendance:Array.isArray(snapshot.attendance)?snapshot.attendance:[],schedule:Array.isArray(snapshot.schedule)?snapshot.schedule:[]},
-      todos:Array.isArray(value.todos) ? value.todos : [], vpn:value.vpn || {}, update:value.update || {}, notice:value.notice || null
+      todos:Array.isArray(value.todos) ? value.todos : [], vpn:value.vpn || {}, update:value.update || {}, notice:value.notice || null,
+      assistant:value.assistant && typeof value.assistant === 'object' ? value.assistant : {}, language:['system','en','zh'].includes(value.language) ? value.language : 'system'
     };
   }
 
@@ -220,7 +223,7 @@
   if (typeof document === 'undefined') return;
 
   let app = normalizeState();
-  const ui = {page:'home',tool:'',scheduleMode:'day',date:new Date(),progressTab:'grades',query:'',courseFilter:'all',todoFilter:'all',quickTitle:'',roomQuery:'',tunedInput:'',nodes:[],selectedNode:'',subscriptionURL:'',suggestedSubscriptionURL:'',subscriptionLoaded:false,translation:{from:'auto',to:'en',input:'',output:'',detected:''},pending:new Set(),dismissedNotice:'',vpnCheck:'',vpnError:'',updateLog:'',loadError:'',mapResult:null,timelineHours:72,timelineStart:''};
+  const ui = {page:'home',tool:'',scheduleMode:'day',date:new Date(),progressTab:'grades',query:'',courseFilter:'all',todoFilter:'all',quickTitle:'',roomQuery:'',tunedInput:'',nodes:[],selectedNode:'',subscriptionURL:'',suggestedSubscriptionURL:'',subscriptionLoaded:false,translation:{from:'auto',to:'en',input:'',output:'',detected:''},chat:[],chatInput:'',assistantOpened:false,restartDismissed:false,pending:new Set(),dismissedNotice:'',vpnCheck:'',vpnError:'',updateLog:'',loadError:'',mapResult:null,timelineHours:72,timelineStart:''};
   let toastTimer;
   const $ = selector => document.querySelector(selector);
   const busy = key => ui.pending.has(key);
@@ -240,9 +243,12 @@
     document.documentElement.style.setProperty('--accent-rgb', rgb.join(','));
   }
   function setEnvironment(message) { const node = $('#environment-banner'); node.textContent = message; node.hidden = !message; }
+  function uiLanguage() { return app.language === 'system' ? (/^zh/i.test(root.navigator?.language || '') ? 'zh' : 'en') : app.language; }
+  function assistantReady() { return app.assistant.phase === 'ready' && Boolean(root.WLSAAssistant); }
   function renderChrome() {
     applyAppearance();
-    const nav = [['home','home','Home'],['schedule','calendar','Schedule'],['progress','progress','Progress'],['forum','forum','Forum'],['tools','tools','Tools'],['settings','settings','Settings']];
+    if (root.WLSAI18n && root.WLSAI18n.language !== uiLanguage()) root.WLSAI18n.setLanguage(uiLanguage());
+    const nav = [['home','home','Home'],['schedule','calendar','Schedule'],assistantReady()?['progress','spark','Assistant']:['progress','progress','Progress'],['forum','forum','Forum'],['tools','tools','Tools'],['settings','settings','Settings']];
     $('#navigation').innerHTML = nav.map(([page,symbol,label]) => `<a href="#${page}" class="nav-link"${ui.page === page?' aria-current="page"':''} title="${label}">${icon(symbol)}<span class="nav-label">${label}</span></a>`).join('');
     $('#breadcrumb').textContent = nav.find(item => item[0] === ui.page)?.[2] || 'Home';
     $('.local-indicator').innerHTML = isNativeAvailable() ? '<span></span> Saved on your Mac' : '<span></span> Browser preview';
@@ -255,7 +261,11 @@
     const notice = app.notice;
     const showNotice = notice && (notice.title || notice.content) && notice.id !== ui.dismissedNotice;
     $('#notice').hidden = !showNotice;
-    $('#notice').innerHTML = showNotice ? `<div class="notice">${icon(notice.type === 'warning'?'bell':'info','inline-icon')}<div class="notice-body"><div class="notice-title">${h(notice.title || 'Notice')}</div><p>${h(notice.content || '')}</p></div><button class="notice-dismiss" data-action="dismiss-notice" aria-label="Dismiss notice">${icon('close')}</button></div>` : '';
+    $('#notice').innerHTML = showNotice ? `<div class="notice">${icon(notice.type === 'warning'?'bell':'info','inline-icon')}<div class="notice-body"><div class="notice-title" data-raw>${h(notice.title || 'Notice')}</div><p data-raw>${h(notice.content || '')}</p></div><button class="notice-dismiss" data-action="dismiss-notice" aria-label="Dismiss notice">${icon('close')}</button></div>` : '';
+    if (app.assistant.phase === 'restart' && !ui.restartDismissed) {
+      $('#notice').hidden = false;
+      $('#notice').innerHTML = `<div class="notice">${icon('spark','inline-icon')}<div class="notice-body"><div class="notice-title">The assistant is ready</div><p>Reopen WLSAPlus to turn on the on-device assistant.</p></div>${btn('Reopen now','assistant-relaunch',{primary:true})}<button class="notice-dismiss" data-action="assistant-later" aria-label="Dismiss notice">${icon('close')}</button></div>`;
+    }
   }
   function render() {
     const active = document.activeElement;
@@ -306,14 +316,59 @@
       (unplaced.length?`<section class="card schedule-unplaced"><div class="card-header"><h2>Classes without a date</h2></div><p class="small muted">PowerSchool did not provide a usable day for these entries.</p>${classList(unplaced)}</section>`:'') +
       `<p class="inline-note">${app.snapshot.syncedAt?`Last synchronized ${h(formatDate(app.snapshot.syncedAt,{year:'numeric'}))} at ${h(formatTime(app.snapshot.syncedAt))}.`:'No synchronized timetable yet.'} ${app.reminders?'Class reminders are enabled; macOS will notify you about five minutes before class.':'Class reminders are off.'}</p>`;
   }
+  function progressTabs() {
+    const tabs = assistantReady() ? [['assistant','Assistant']] : [];
+    return `<div class="segmented" role="tablist" aria-label="Progress section">${tabs.concat([['grades','Grades'],['assignments','Assignments'],['attendance','Attendance']]).map(([key,label])=>`<button role="tab" aria-selected="${ui.progressTab===key}" data-action="progress-tab" data-value="${key}">${label}</button>`).join('')}</div>`;
+  }
+  function assistantView() {
+    const examples = root.WLSAAssistant.EXAMPLES[uiLanguage()] || root.WLSAAssistant.EXAMPLES.en;
+    const log = ui.chat.map(item => item.role === 'user'
+      ? `<div class="chat-row user"><div class="chat-bubble" data-raw>${h(item.text)}</div></div>`
+      : `<div class="chat-row"><div class="chat-bubble">${item.text?`<p class="chat-text" data-raw>${h(item.text)}</p>`:''}${item.pending?`<p class="chat-pending"><span class="spinner"></span>Thinking…</p>`:''}${item.facts?.length?`<dl class="chat-facts" data-raw>${item.facts.map(fact=>`<div><dt>${h(fact.label)}</dt><dd>${h(fact.value)}</dd></div>`).join('')}</dl>`:''}${item.note?`<p class="chat-note" data-raw>${h(item.note)}</p>`:''}</div></div>`).join('');
+    return heading('Assistant','Ask about your classes, grades, rooms and teachers.',btn('Sync PowerSchool','sync',{icon:'sync',disabled:busy('sync') || !accountExists()})) +
+      `<div class="section-toolbar">${progressTabs()}</div>` +
+      `<section class="card assistant-guide"><div class="card-header"><h2>How to use the assistant</h2></div><ol><li>Type a question in English or Chinese, or pick an example below.</li><li>Answers about your timetable, grades, rooms and teachers are read directly from your synced PowerSchool data, and the data used is shown under each answer.</li><li>The model runs on this Mac. Your questions and school data never leave it.</li><li>For the full tables, use the Grades, Assignments and Attendance tabs above.</li></ol><p class="eyebrow">Try asking</p><div class="chip-row" data-raw>${examples.map(example=>`<button type="button" class="chip" data-action="assistant-example" data-value="${h(example)}"${busy('assistant')?' disabled':''}>${h(example)}</button>`).join('')}</div></section>` +
+      `<section class="card chat-card"><div class="card-header"><h2>Conversation</h2>${ui.chat.length?btn('Clear conversation','assistant-clear',{subtle:true,disabled:busy('assistant')}):''}</div><div class="chat-log" id="chat-log" role="log" aria-live="polite">${log || empty('spark','Your conversation appears here','Ask something, or pick one of the examples above.')}</div><form id="assistant-form" class="chat-form"><input id="assistant-input" type="text" maxlength="300" autocomplete="off" aria-label="Ask the assistant" placeholder="Ask a question…" value="${h(ui.chatInput)}"><button type="submit" class="button primary"${busy('assistant')?' disabled':''}>${icon('spark')}Ask</button></form></section>`;
+  }
+  async function askAssistant(text) {
+    const question = String(text || '').trim().slice(0,300), helper = root.WLSAAssistant;
+    if (!question || busy('assistant') || !assistantReady()) return;
+    const result = helper.answer(question, app.snapshot, {now:referenceNow(), fallbackLanguage:uiLanguage()});
+    const general = result.status === 'unknown';
+    const reply = {role:'assistant', text:general ? '' : result.text, facts:result.facts, note:'', pending:true};
+    ui.chatInput = '';
+    ui.chat.push({role:'user', text:question}, reply);
+    if (ui.chat.length > 60) ui.chat.splice(0, ui.chat.length - 60);
+    ui.pending.add('assistant'); render(); scrollChat();
+    try {
+      if (general) {
+        const output = await native('assistant.ask', helper.chatPrompt(question, result.language));
+        reply.text = String(output?.text || '').trim() || result.text;
+        if (reply.text !== result.text) reply.note = helper.GENERAL_NOTE[result.language];
+      } else if (result.status === 'answered' && result.courses.length && !result.text.includes('\n')) {
+        // The verified answer is already on screen; the model may only reword it.
+        const output = await native('assistant.ask', helper.rephrasePrompt(question, result));
+        const accepted = helper.acceptRephrase(output?.text, result, app.snapshot);
+        if (accepted) reply.text = accepted;
+      }
+    } catch (error) {
+      if (general) { reply.text = result.text; reply.note = errorText(error); }
+    } finally {
+      reply.pending = false; ui.pending.delete('assistant'); render(); scrollChat();
+    }
+  }
+  function scrollChat() { const log = $('#chat-log'); if (log) log.scrollTop = log.scrollHeight; }
   function progressView() {
+    if (assistantReady() && !ui.assistantOpened) { ui.assistantOpened = true; ui.progressTab = 'assistant'; }
+    if (!assistantReady() && ui.progressTab === 'assistant') ui.progressTab = 'grades';
+    if (ui.progressTab === 'assistant') return assistantView();
     const query = ui.query.toLowerCase();
     const courses = app.snapshot.courses.filter(item => `${item.name} ${item.teacher}`.toLowerCase().includes(query));
     const assignments = app.snapshot.assignments.filter(item => `${item.title} ${item.course}`.toLowerCase().includes(query) && (ui.courseFilter==='all' || item.course===ui.courseFilter));
     const attendance = app.snapshot.attendance.filter(item => `${item.course} ${item.status} ${item.date}`.toLowerCase().includes(query));
     const courseNames = [...new Set(app.snapshot.assignments.map(item=>item.course).filter(Boolean))].sort();
     return heading('Progress','See the details behind your school day.',btn('Sync progress','sync',{icon:'sync',disabled:busy('sync') || !accountExists()})) +
-      `<div class="section-toolbar"><div class="segmented" role="tablist" aria-label="Progress section">${[['grades','Grades'],['assignments','Assignments'],['attendance','Attendance']].map(([key,label])=>`<button role="tab" aria-selected="${ui.progressTab===key}" data-action="progress-tab" data-value="${key}">${label}</button>`).join('')}</div><div class="course-filters">${ui.progressTab==='assignments'&&courseNames.length?`<select id="course-filter" aria-label="Filter by course"><option value="all">All courses</option>${courseNames.map(name=>`<option value="${h(name)}"${ui.courseFilter===name?' selected':''}>${h(name)}</option>`).join('')}</select>`:''}<div class="search-field">${icon('search')}<input id="progress-search" type="search" aria-label="Search progress" placeholder="Search ${ui.progressTab}…" value="${h(ui.query)}"></div></div></div>` +
+      `<div class="section-toolbar">${progressTabs()}<div class="course-filters">${ui.progressTab==='assignments'&&courseNames.length?`<select id="course-filter" aria-label="Filter by course"><option value="all">All courses</option>${courseNames.map(name=>`<option value="${h(name)}"${ui.courseFilter===name?' selected':''}>${h(name)}</option>`).join('')}</select>`:''}<div class="search-field">${icon('search')}<input id="progress-search" type="search" aria-label="Search progress" placeholder="Search ${ui.progressTab}…" value="${h(ui.query)}"></div></div></div>` +
       (ui.progressTab==='grades' ? (courses.length?`<div class="course-grid">${courses.map(course=>{const percent=percentage(course.percent);return `<button class="course-card" data-action="course" data-value="${h(course.id)}"><div class="course-top"><div><h3>${h(course.name || 'Untitled course')}</h3><p>${h(course.teacher || 'Teacher not provided')}</p></div>${icon('right','inline-icon')}</div><div class="grade">${h(course.grade || '—')}</div><div class="grade-meter"><span style="width:${percent==null?0:Math.max(0,Math.min(100,percent))}%"></span></div><div class="course-bottom"><span>${course.room?`${icon('pin','inline-icon')}${h(course.room)}`:'Room not provided'}</span><span class="course-score">${percent!=null?`${h(percent)}%`:'No percentage'}</span></div></button>`;}).join('')}</div>`: `<section class="card">${empty('progress',query?'No matching courses':'Your courses will appear here',query?'Try searching by course or teacher.':'Connect PowerSchool and sync to see your course grades.',query?'':btn(accountExists()?'Sync PowerSchool':'Connect PowerSchool',accountExists()?'sync':'account',{primary:true,disabled:busy('sync')}))}</section>`) :
       ui.progressTab==='assignments' ? `<section class="card table-card">${assignments.length?assignmentTable(assignments):empty('assignment',query?'No matching assignments':'No assignments to show','Assignments and their scores appear after a PowerSchool sync.')}</section>` :
       `<section class="card">${attendance.length?`<div class="attendance-summary">${Object.entries(attendance.reduce((counts,item)=>{const key=item.status || 'Unspecified';counts[key]=(counts[key]||0)+1;return counts;},{})).map(([status,count])=>badge(`${status}: ${count}`)).join('')}</div><div class="table-wrap"><table class="table"><thead><tr><th>Date</th><th>Course</th><th>Status</th></tr></thead><tbody>${attendance.map(item=>`<tr><td class="nowrap">${h(formatDate(item.date,{year:'numeric'}))}</td><td>${h(item.course || 'Not provided')}</td><td>${badge(item.status || 'Not provided')}</td></tr>`).join('')}</tbody></table></div>`:empty('attendance',query?'No matching attendance':'No attendance records','Attendance records from PowerSchool appear here.')}</section>`) +
@@ -360,10 +415,24 @@
     return `<section class="card narrow"><img class="map-illustration" src="campus.svg" alt="Decorative drawing of a campus, not a floor plan"><h2>Find your way around campus</h2><p class="small muted">Open the campus building directory or look up a room. The numbered schematic shows building facilities; it does not claim exact classroom positions or walking routes.</p>${ui.mapResult?`<div class="info-box" role="status"><h3>${ui.mapResult.building?`Building ${h(ui.mapResult.building)} · `:''}${h(ui.mapResult.name || 'Campus directory')}</h3><p class="no-margin">${h(ui.mapResult.details || ui.mapResult.message || '')}</p></div>`:''}<form id="room-form"><div class="field"><label for="room-name">Room or classroom</label><input id="room-name" maxlength="100" value="${h(ui.roomQuery)}" placeholder="Enter a room name or number" required autocomplete="off"></div><div class="button-row"><button type="submit" class="button primary"${busy('map')?' disabled':''}>${icon('search')}Find room</button>${btn('Open campus map','map-open',{icon:'map',disabled:busy('map')})}</div></form><p class="inline-note">Room convention: 5218 → Building 5. Use Building12 or 12-201 for Building 12; 1201 → Building 1.</p></section>`;
   }
   function switchControl(key,label,value) { return `<label class="switch"><input type="checkbox" data-setting="${key}" aria-label="${h(label)}"${value?' checked':''}${busy('settings')?' disabled':''}><span class="switch-track"></span></label>`; }
+  function assistantSettings() {
+    const state = app.assistant, phase = String(state.phase || ''), percent = Math.max(0, Math.min(100, Math.round(Number(state.percent) || 0)));
+    if (!phase) return '';
+    const copy = state.eligible === false || phase === 'unsupported'
+      ? (state.reason === 'memory' ? 'The assistant needs a Mac with 16 GB of memory or more.' : 'The assistant needs a Mac with Apple silicon.')
+      : ({waiting:'The assistant model (491 MB) downloads automatically in the background.', downloading:'Downloading the assistant model (491 MB)…', verifying:'Checking the downloaded model…',
+          paused:'Download paused. Resume whenever you like.', error:'The assistant model could not be downloaded. WLSAPlus will try again later.',
+          restart:'The assistant is ready. Reopen WLSAPlus to turn it on.', ready:'The assistant is on. Open the Assistant page to ask a question.'})[phase] || '';
+    const action = ({waiting:btn('Pause download','assistant-pause',{disabled:busy('assistant-download')}), downloading:btn('Pause download','assistant-pause',{disabled:busy('assistant-download')}),
+      paused:btn('Resume download','assistant-resume',{primary:true,disabled:busy('assistant-download')}), error:btn('Try again','assistant-resume',{disabled:busy('assistant-download')}),
+      restart:btn('Reopen now','assistant-relaunch',{primary:true}), ready:btn('Open assistant','assistant-open',{icon:'spark'})})[phase] || '';
+    const meter = ['downloading','paused','verifying'].includes(phase) && percent > 0 ? `<div class="grade-meter" role="progressbar" aria-label="Model download progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span style="width:${percent}%"></span></div><p class="small muted no-margin" data-raw>${percent}%</p>` : '';
+    return `<section class="card"><div class="card-header"><h2>On-device assistant</h2></div><div class="setting-row"><div class="setting-copy"><h3>On-device assistant</h3><p>${copy}</p>${meter}</div>${action}</div></section>`;
+  }
   function settingsView() {
     const update = app.update || {}, updateState = String(update.state || update.status || ''), available = update.available === true || ['available','downloaded','ready'].includes(updateState), downloading = ['downloading','installing','checking'].includes(updateState);
     const percent = percentage(update.percent ?? update.progress);
-    return heading('Settings','Make WLSAPlus feel like you.') + `<div class="settings-layout"><section class="card"><div class="card-header"><h2>PowerSchool</h2></div><div class="setting-row"><div class="account-summary"><div class="mini-icon">${icon('user')}</div><div><h3>${h(accountExists()?app.school.username:'Connect your school account')}</h3><p>${h(app.school.baseURL || 'Bring your schedule, grades and attendance into WLSAPlus.')}</p>${app.snapshot.syncedAt?`<p>Last sync ${h(formatDate(app.snapshot.syncedAt,{year:'numeric'}))}, ${h(formatTime(app.snapshot.syncedAt))}</p>`:''}</div></div><div class="button-row">${btn(accountExists()?'Manage account':'Connect PowerSchool','account',{primary:!accountExists(),icon:accountExists()?'settings':'plus'})}${accountExists()?btn('Sync now','sync',{icon:'sync',disabled:busy('sync')}):''}</div></div></section><section class="card"><div class="card-header"><h2>Appearance</h2></div><div class="setting-row"><div class="setting-copy"><h3>Theme</h3><p>Follow your Mac, or choose the look you prefer.</p></div><div class="segmented" role="group" aria-label="Theme">${[['system','System'],['light','Light'],['dark','Dark']].map(([key,label])=>`<button aria-pressed="${app.appearance===key}" data-action="appearance" data-value="${key}"${busy('settings')?' disabled':''}>${label}</button>`).join('')}</div></div><div class="setting-row"><div class="setting-copy"><h3>Accent color</h3><p>A little color throughout your workspace.</p></div><div class="color-options" role="group" aria-label="Accent color">${ACCENTS.map(([name,color])=>`<button class="color-option" style="--swatch:${color}" aria-label="${name}" title="${name}" aria-pressed="${app.accent===color}" data-action="accent" data-value="${color}"${busy('settings')?' disabled':''}>${app.accent===color?icon('check'):''}</button>`).join('')}</div></div></section><section class="card"><div class="card-header"><h2>Notifications & startup</h2></div><div class="setting-row"><div class="setting-copy"><h3>Class reminders</h3><p>Receive a macOS notification about five minutes before class. Notification permission may be requested.</p></div>${switchControl('reminders','Class reminders',app.reminders)}</div><div class="setting-row"><div class="setting-copy"><h3>Open at login</h3><p>Start WLSAPlus when you sign in to your Mac.</p></div>${switchControl('autostart','Open at login',app.autostart)}</div></section><section class="card"><div class="card-header"><h2>Time tuning</h2></div><div class="setting-row"><div class="setting-copy"><h3>Use a custom display time</h3><p>Preview your school day at another time. Class reminders always use the actual time.</p></div>${switchControl('tuningEnabled','Use a custom display time',app.tuningEnabled)}</div>${app.tuningEnabled?`<form id="tuning-form"><div class="field tuning-field"><label for="tuned-time">Display date and time</label><input id="tuned-time" type="datetime-local" value="${h(ui.tunedInput || toLocalDateTime(app.tunedTime || new Date()))}" required></div><div class="button-row align-end"><button type="submit" class="button"${busy('settings')?' disabled':''}>Save display time</button></div></form>`:''}</section><section class="card"><div class="card-header"><h2>About & updates</h2>${badge(app.version?`Version ${app.version}`:'Version unavailable')}</div><div class="setting-row"><div class="setting-copy"><h3>Update channel</h3><p>Stable releases are the default. Beta includes test releases and early changes.</p></div><div class="segmented" role="group" aria-label="Update channel">${[['stable','Stable'],['beta','Beta / test']].map(([key,label])=>`<button aria-pressed="${(app.channel || 'stable')===key}" data-action="update-channel" data-value="${key}"${busy('settings')?' disabled':''}>${label}</button>`).join('')}</div></div><div class="setting-row"><div class="setting-copy"><h3>WLSAPlus</h3><p>${h(update.message || (available?`Version ${update.version || 'update'} is available.`:'Check for the latest version of WLSAPlus.'))}</p>${percent!=null?`<progress class="update-progress" max="100" value="${Math.max(0,Math.min(100,percent))}" aria-label="Update download progress">${h(percent)}%</progress>`:''}${update.channel?`<p>Update channel: ${h(update.channel)}</p>`:''}</div><div class="button-row">${btn(busy('update-check')?'Checking…':'Check for updates','update-check',{icon:'sync',disabled:busy('update-check') || downloading})}${available?btn(['downloaded','ready'].includes(updateState)?'Install update':'Download update','update-install',{primary:true,icon:'download',disabled:busy('update-install') || downloading}):''}${btn('Update log','update-log',{subtle:true})}</div></div><div class="setting-row"><div class="setting-copy"><h3>Project & privacy</h3><p>School data and to-dos are stored on this Mac. Passwords are handled by the native credential service.</p></div>${btn('Project on GitHub','project-open',{icon:'external'})}</div><div class="setting-row"><div class="setting-copy"><h3>Clear local data</h3><p>Remove the saved account, cached school data and to-dos from this Mac.</p></div>${btn('Clear local data…','clear-data',{danger:true,icon:'trash'})}</div></section></div>`;
+    return heading('Settings','Make WLSAPlus feel like you.') + `<div class="settings-layout">${assistantSettings()}<section class="card"><div class="card-header"><h2>Language</h2></div><div class="setting-row"><div class="setting-copy"><h3>Language</h3><p>Choose the language of the interface.</p></div><div class="segmented" role="group" aria-label="Language">${[['system','System'],['en','English'],['zh','中文']].map(([key,label])=>`<button aria-pressed="${app.language===key}" data-action="language" data-value="${key}"${key==='system'?'':' data-raw'}${busy('language')?' disabled':''}>${label}</button>`).join('')}</div></div></section><section class="card"><div class="card-header"><h2>PowerSchool</h2></div><div class="setting-row"><div class="account-summary"><div class="mini-icon">${icon('user')}</div><div><h3>${h(accountExists()?app.school.username:'Connect your school account')}</h3><p>${h(app.school.baseURL || 'Bring your schedule, grades and attendance into WLSAPlus.')}</p>${app.snapshot.syncedAt?`<p>Last sync ${h(formatDate(app.snapshot.syncedAt,{year:'numeric'}))}, ${h(formatTime(app.snapshot.syncedAt))}</p>`:''}</div></div><div class="button-row">${btn(accountExists()?'Manage account':'Connect PowerSchool','account',{primary:!accountExists(),icon:accountExists()?'settings':'plus'})}${accountExists()?btn('Sync now','sync',{icon:'sync',disabled:busy('sync')}):''}</div></div></section><section class="card"><div class="card-header"><h2>Appearance</h2></div><div class="setting-row"><div class="setting-copy"><h3>Theme</h3><p>Follow your Mac, or choose the look you prefer.</p></div><div class="segmented" role="group" aria-label="Theme">${[['system','System'],['light','Light'],['dark','Dark']].map(([key,label])=>`<button aria-pressed="${app.appearance===key}" data-action="appearance" data-value="${key}"${busy('settings')?' disabled':''}>${label}</button>`).join('')}</div></div><div class="setting-row"><div class="setting-copy"><h3>Accent color</h3><p>A little color throughout your workspace.</p></div><div class="color-options" role="group" aria-label="Accent color">${ACCENTS.map(([name,color])=>`<button class="color-option" style="--swatch:${color}" aria-label="${name}" title="${name}" aria-pressed="${app.accent===color}" data-action="accent" data-value="${color}"${busy('settings')?' disabled':''}>${app.accent===color?icon('check'):''}</button>`).join('')}</div></div></section><section class="card"><div class="card-header"><h2>Notifications & startup</h2></div><div class="setting-row"><div class="setting-copy"><h3>Class reminders</h3><p>Receive a macOS notification about five minutes before class. Notification permission may be requested.</p></div>${switchControl('reminders','Class reminders',app.reminders)}</div><div class="setting-row"><div class="setting-copy"><h3>Open at login</h3><p>Start WLSAPlus when you sign in to your Mac.</p></div>${switchControl('autostart','Open at login',app.autostart)}</div></section><section class="card"><div class="card-header"><h2>Time tuning</h2></div><div class="setting-row"><div class="setting-copy"><h3>Use a custom display time</h3><p>Preview your school day at another time. Class reminders always use the actual time.</p></div>${switchControl('tuningEnabled','Use a custom display time',app.tuningEnabled)}</div>${app.tuningEnabled?`<form id="tuning-form"><div class="field tuning-field"><label for="tuned-time">Display date and time</label><input id="tuned-time" type="datetime-local" value="${h(ui.tunedInput || toLocalDateTime(app.tunedTime || new Date()))}" required></div><div class="button-row align-end"><button type="submit" class="button"${busy('settings')?' disabled':''}>Save display time</button></div></form>`:''}</section><section class="card"><div class="card-header"><h2>About & updates</h2>${badge(app.version?`Version ${app.version}`:'Version unavailable')}</div><div class="setting-row"><div class="setting-copy"><h3>Update channel</h3><p>Stable releases are the default. Beta includes test releases and early changes.</p></div><div class="segmented" role="group" aria-label="Update channel">${[['stable','Stable'],['beta','Beta / test']].map(([key,label])=>`<button aria-pressed="${(app.channel || 'stable')===key}" data-action="update-channel" data-value="${key}"${busy('settings')?' disabled':''}>${label}</button>`).join('')}</div></div><div class="setting-row"><div class="setting-copy"><h3>WLSAPlus</h3><p>${h(update.message || (available?`Version ${update.version || 'update'} is available.`:'Check for the latest version of WLSAPlus.'))}</p>${percent!=null?`<progress class="update-progress" max="100" value="${Math.max(0,Math.min(100,percent))}" aria-label="Update download progress">${h(percent)}%</progress>`:''}${update.channel?`<p>Update channel: ${h(update.channel)}</p>`:''}</div><div class="button-row">${btn(busy('update-check')?'Checking…':'Check for updates','update-check',{icon:'sync',disabled:busy('update-check') || downloading})}${available?btn(['downloaded','ready'].includes(updateState)?'Install update':'Download update','update-install',{primary:true,icon:'download',disabled:busy('update-install') || downloading}):''}${btn('Update log','update-log',{subtle:true})}</div></div><div class="setting-row"><div class="setting-copy"><h3>Project & privacy</h3><p>School data and to-dos are stored on this Mac. Passwords are handled by the native credential service.</p></div>${btn('Project on GitHub','project-open',{icon:'external'})}</div><div class="setting-row"><div class="setting-copy"><h3>Clear local data</h3><p>Remove the saved account, cached school data and to-dos from this Mac.</p></div>${btn('Clear local data…','clear-data',{danger:true,icon:'trash'})}</div></section></div>`;
   }
 
   function toLocalDateTime(value) {
@@ -558,6 +627,14 @@
       case 'clear-data': openDialog('Clear local data?','This removes the saved data from this Mac.',`<p class="small muted">The saved PowerSchool account, cached school records and to-dos will be removed. You can reconnect your account afterwards.</p><div class="dialog-actions">${btn('Cancel','dialog-close')}${btn('Clear local data','confirm-clear-data',{danger:true,icon:'trash'})}</div>`);break;
       case 'confirm-clear-data': await run('clear-data',async ()=>{await native('app.clear');await reloadState();ui.nodes=[];ui.selectedNode='';ui.subscriptionURL='';ui.subscriptionLoaded=false;ui.translation.input='';ui.translation.output='';ui.quickTitle='';ui.mapResult=null;closeDialog();toast('Local data cleared.');},error=>setDialogError(errorText(error)));break;
       case 'appearance': await saveSettings({appearance:value}); break;
+      case 'language': await run('language', async () => { await native('settings.language',{language:value}); await reloadState(); }); break;
+      case 'assistant-pause': await run('assistant-download', async () => { app = normalizeState({...app, assistant:await native('assistant.pause')}); }); break;
+      case 'assistant-resume': await run('assistant-download', async () => { app = normalizeState({...app, assistant:await native('assistant.resume')}); }); break;
+      case 'assistant-relaunch': await run('assistant-relaunch', async () => { await native('assistant.relaunch'); }); break;
+      case 'assistant-later': ui.restartDismissed = true; render(); break;
+      case 'assistant-open': ui.progressTab = 'assistant'; navigate('progress'); break;
+      case 'assistant-example': await askAssistant(value); break;
+      case 'assistant-clear': ui.chat = []; render(); break;
       case 'accent': await saveSettings({accent:value}); break;
       case 'school-logout':
         await run('logout',async ()=>{await native('school.logout');await reloadState();closeDialog();toast('Signed out of PowerSchool.');},error=>setDialogError(errorText(error))); break;
@@ -603,6 +680,7 @@
   document.addEventListener('input',event=>{
     const input=event.target;
     if(input.id==='todo-title')ui.quickTitle=input.value;
+    if(input.id==='assistant-input')ui.chatInput=input.value;
     if(input.id==='room-name')ui.roomQuery=input.value;
     if(input.id==='tuned-time')ui.tunedInput=input.value;
     if(input.id==='progress-search'){ui.query=input.value;render();}
@@ -625,6 +703,7 @@
     const form=event.target;
     event.preventDefault();
     if(!form.checkValidity()){form.reportValidity();return;}
+    if(form.id==='assistant-form'){await askAssistant($('#assistant-input')?.value);return;}
     if(form.id==='school-login-form'){
       let baseURL;
       try{baseURL=validateSchoolURL($('#school-url').value);}catch(error){setDialogError(errorText(error));return;}
@@ -695,6 +774,7 @@
       case 'settings': app=normalizeState({...app,...value});break;
       case 'todos': app=normalizeState({...app,todos:Array.isArray(value)?value:value?.items || []});break;
       case 'notice': app.notice=value;break;
+      case 'assistant': app=normalizeState({...app,assistant:value || {}});break;
       case 'notification': if(value?.message || typeof value==='string')toast(value.message || value);return;
       case 'forum': if(value?.message)toast(value.message);return;
       default:return;

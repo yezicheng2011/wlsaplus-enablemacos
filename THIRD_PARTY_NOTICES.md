@@ -15,6 +15,10 @@ All runtime frameworks and system utilities used by the shipped macOS app are pr
 | CryptoKit / CommonCrypto / Security | AEAD/stream cryptography, Ed25519 manifest verification, and Keychain credential storage |
 | UserNotifications / ServiceManagement | Class reminders and system integration |
 
+## On-device assistant model (downloaded, not distributed)
+
+On eligible Macs the app downloads [Qwen2.5-0.5B-Instruct](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF) (GGUF, `q4_k_m`) by Alibaba Cloud, licensed under Apache-2.0, from the model's own repositories. The model file is not part of this repository or of `WLSAPlus.app`. The runtime that executes it (`native/Sources/LLM`) is original WLSAPlus code.
+
 ## Development and verification tools (not distributed)
 
 Build and test scripts invoke standard host toolchains during development and CI only; none of these tools are bundled into `WLSAPlus.app`:

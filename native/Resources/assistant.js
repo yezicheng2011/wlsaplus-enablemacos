@@ -311,7 +311,12 @@
     zh: ['下一节课是什么？', '明天有什么课？', '我的数学成绩是多少？', '物理课在哪间教室？', '英语是哪位老师教的？', '哪门课成绩最低？'],
   };
 
-  const api = {answer, language, findCourses, resolveDate, rephrasePrompt, acceptRephrase, chatPrompt, EXAMPLES};
+  const GENERAL_NOTE = {
+    en: 'General answer from the on-device model. It cannot see your school data and may be wrong.',
+    zh: '这是本机模型的一般性回答。它看不到你的学校数据，内容可能有误。',
+  };
+
+  const api = {answer, language, findCourses, resolveDate, rephrasePrompt, acceptRephrase, chatPrompt, EXAMPLES, GENERAL_NOTE};
   root.WLSAAssistant = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
