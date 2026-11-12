@@ -79,3 +79,13 @@ See `PROVENANCE.md` for the provenance of new code and assets. An independent re
 ## License
 
 This native stack (including the Packet / VPN protocol implementation) is licensed under the **Apache License 2.0**; see `LICENSE` at the repository root. The implementation is original Swift/C and contains no source code or binaries from mihomo / clash / sing-box / gVisor or other third-party cores.
+
+## On-device model runtime (not yet used by the app)
+
+`Sources/LLM/wlm.c` is a small CPU runtime for Qwen2-style GGUF language models: file validation, F32/F16/Q5_0/Q8_0/Q4_K/Q6_K tensors, the byte-pair tokenizer, the transformer forward pass with a key/value cache, and greedy ChatML generation. It has no dependencies beyond libc (plus Accelerate and Grand Central Dispatch on macOS). The app does not call it yet; nothing is downloaded and no model ships with the app.
+
+`scripts/test.sh` checks it against a synthetic model whose expected output comes from an independent Python forward pass (`Tests/wlm_fixture.py`), and against truncated and corrupted files. `Tests/wlm_tool.c` runs a real model file for manual checks:
+
+```sh
+.build/wlm-tool model.gguf chat "You are a helpful assistant." "你好" 64
+```
