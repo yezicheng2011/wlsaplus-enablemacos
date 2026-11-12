@@ -140,12 +140,10 @@ import Foundation
         try expect(month.isThrottled(now: now), "more than 500 GB in 30 days throttles")
         try expect(month.pace(requested: 10, now: now) <= Int(FairUseLedger.bytesPerSecond), "month throttle uses the same 5 Mbps cap")
         try expect(!month.isThrottled(now: now + FairUseLedger.monthWindow), "falling back under 500 GB clears the throttle")
-        let loaded = try FairUseLedger.load(try ledger.encoded())
-        try expect(loaded.total(window: FairUseLedger.dayWindow, now: now) == ledger.total(window: FairUseLedger.dayWindow, now: now), "fair-use ledger reloads")
-        let home = "/Users/student"
-        let ledgerPath = FairUsePath.expected(home: home)
-        _ = try FairUsePath.validate(ledgerPath, home: home)
-        try rejects("fair-use path outside this Mac account") { _ = try FairUsePath.validate("/tmp/fair-use.json", home: home) }
+        var loaded = try FairUseLedger.load(try ledger.encoded())
+        let loadedDay = loaded.total(window: FairUseLedger.dayWindow, now: now)
+        let liveDay = ledger.total(window: FairUseLedger.dayWindow, now: now)
+        try expect(loadedDay == liveDay, "fair-use ledger reloads")
         try expect(FairUseLedger.statusLimited.contains("speed temporarily reduced"), "throttle status is not a disconnect")
         try expect(!FairUseLedger.statusLimited.lowercased().contains("disconnect"), "fair use does not disconnect")
         let burst = Int(FairUseLedger.bytesPerSecond) * 2
@@ -179,6 +177,56 @@ import Foundation
         let second = drainDownload(at: now + 1)
         try expect(firstSecond + second == burst, "the rest is delivered as the bucket refills")
         try expect(buffered == 0 && !paused, "reads resume after the queue falls under the low watermark")
+        var udpLedger = FairUseLedger()
+        udpLedger.record(bytes: FairUseLedger.dayBytes + 1, now: now)
+        _ = udpLedger.pace(requested: Int(FairUseLedger.bytesPerSecond) - 40, now: now)
+        var udpQueue = UploadScheduler()
+        udpQueue.enqueue(id: 1, data: Data(repeating: 7, count: 100), udp: true)
+        try expect(udpQueue.flush(ledger: &udpLedger, now: now).isEmpty, "a UDP datagram waits instead of being split")
+        let udpSent = udpQueue.flush(ledger: &udpLedger, now: now + 1)
+        try expect(udpSent.count == 1 && udpSent[0].bytes.count == 100, "the whole UDP datagram is sent once the budget covers it")
+        var tcpLedger = FairUseLedger()
+        tcpLedger.record(bytes: FairUseLedger.dayBytes + 1, now: now)
+        var tcpQueue = UploadScheduler()
+        let tcpLength = Int(FairUseLedger.bytesPerSecond) + 80
+        tcpQueue.enqueue(id: 7, data: Data(count: tcpLength), udp: false)
+        try expect(!tcpQueue.requestFin(id: 7), "TCP FIN waits until queued payload is sent")
+        let tcpFirst = tcpQueue.flush(ledger: &tcpLedger, now: now)
+        try expect(tcpFirst.allSatisfy { !$0.fin }, "FIN is not attached to a partial TCP write")
+        try expect(tcpFirst.reduce(0) { $0 + $1.bytes.count } == Int(FairUseLedger.bytesPerSecond), "TCP still paces partial writes")
+        let tcpRest = tcpQueue.flush(ledger: &tcpLedger, now: now + 1)
+        try expect(tcpRest.last?.fin == true && tcpRest.last?.bytes.count == 80, "FIN follows the last TCP byte")
+        var reference = FairUseLedger()
+        let origin = now
+        for step in 0..<3000 { reference.record(bytes: 1000, now: origin + Double(step) * 60) }
+        let end = origin + 2999 * 60
+        let dayCut = Int(((end - FairUseLedger.dayWindow) / 60).rounded(.down))
+        var expectedDay: Int64 = 0
+        for step in 0..<3000 {
+            let minute = Int(((origin + Double(step) * 60) / 60).rounded(.down))
+            if minute >= dayCut { expectedDay += 1000 }
+        }
+        let countedDay = reference.total(window: FairUseLedger.dayWindow, now: end)
+        try expect(countedDay == expectedDay, "rolling totals match a full scan without walking every old bucket")
+        let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("wlsaplus-fair-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try FairUseDirectory(parent: directory, subdirectory: "secure", name: "fair-use.json", requireRoot: false)
+        try store.write(Data("one".utf8))
+        let firstRead = try store.read()
+        try expect(firstRead == Data("one".utf8), "ledger round trip uses the directory descriptor")
+        let outside = directory.appendingPathComponent("outside")
+        try Data("secret".utf8).write(to: outside)
+        let swapped = directory.appendingPathComponent("secure").appendingPathComponent("fair-use.json")
+        try FileManager.default.removeItem(at: swapped)
+        _ = symlink(outside.path, swapped.path)
+        try store.write(Data("new".utf8))
+        let outsideBytes = try Data(contentsOf: outside)
+        let replaced = try store.read()
+        try expect(outsideBytes == Data("secret".utf8), "replacing the ledger does not follow a symlink")
+        try expect(replaced == Data("new".utf8), "the new ledger is the replaced directory entry")
+        _ = symlink("/tmp", directory.appendingPathComponent("linked").path)
+        try rejects("symlink fair-use directory") { _ = try FairUseDirectory(parent: directory, subdirectory: "linked", name: "fair-use.json", requireRoot: false) }
         try LegacyStoreTests.run()
         #if NETWORK_PLAN_TESTS
         try NetworkPlan.runReadOnlyVerificationTests()

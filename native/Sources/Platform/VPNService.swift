@@ -123,9 +123,8 @@ import Darwin
         guard let executable = Bundle.main.executableURL else { throw AppError("The native app executable could not be located.") }
         let parent = try VPNProcessIdentity.read(getpid())
         let token = try ProtocolCrypto.random(32).map { String(format: "%02x", $0) }.joined()
-        let ledger = AppIdentity.support.appendingPathComponent("fair-use.json").path
         let config = VPNHelperConfiguration(version: 1, token: token, parent: parent,
-                                             createdAt: Date().timeIntervalSince1970, node: node, fairUsePath: ledger)
+                                             createdAt: Date().timeIntervalSince1970, node: node)
         try privateWrite(JSONEncoder().encode(config), to: sessionURL)
         configuration = config
         publish(["state": "connecting", "connected": false, "nodeId": node.id, "nodeName": node.name,
@@ -366,14 +365,6 @@ import Darwin
     private func publish(_ next: [String: Any]) {
         var value = next
         value["canDisconnect"] = configuration != nil || next["cleanupRequired"] as? Bool == true
-        if value["fairUseThrottled"] == nil {
-            let url = AppIdentity.support.appendingPathComponent("fair-use.json")
-            if let data = try? Data(contentsOf: url), let ledger = try? FairUseLedger.load(data) {
-                let throttled = ledger.isThrottled(now: Date().timeIntervalSince1970)
-                value["fairUseThrottled"] = throttled
-                value["fairUseMessage"] = throttled ? FairUseLedger.statusLimited : FairUseLedger.statusUnlimited
-            }
-        }
         status = value; onChange?(value)
     }
     private func publicStatus(_ helper: [String: Any], node: ProxyNode) -> [String: Any] {

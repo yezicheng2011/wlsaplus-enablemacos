@@ -35,8 +35,6 @@ struct VPNHelperConfiguration: Codable {
     let parent: VPNProcessIdentity
     let createdAt: TimeInterval
     let node: ProxyNode
-    /// This Mac's fair-use ledger. The helper only accepts the path for the launching user.
-    let fairUsePath: String
 
     static func readPrivate(_ url: URL, privileged: Bool) throws -> VPNHelperConfiguration {
         let descriptor = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
@@ -325,23 +323,19 @@ private final class VPNRuntime {
     private var healthRunning = false
     private var originalDefault = ""
     private var fairUse = FairUseLedger()
-    private var fairUseURL: URL?
+    private var fairUseStore: FairUseDirectory?
     private var fairUseDirty = false
-    private var uploads: [(id: UInt64, data: Data, offset: Int)] = []
-    private var uploadHeld = 0
+    private var uploads = UploadScheduler()
     private var tunReadSuspended = false
 
     init(configuration: VPNHelperConfiguration) throws {
         self.configuration = configuration; node = configuration.node
         queue.setSpecific(key: ProxyConnection.queueKey, value: 1)
-        if let home = Self.homeDirectory(configuration.parent.uid) {
-            let url = try FairUsePath.validate(configuration.fairUsePath, home: home)
-            fairUseURL = url
-            if FileManager.default.fileExists(atPath: url.path), let data = try? Data(contentsOf: url) {
-                fairUse = try FairUseLedger.load(data)
-            }
-        } else {
-            throw AppError("The fair-use ledger could not be located for this Mac.")
+        // Ledger lives in root-owned storage. Never follow a user-supplied path or chown it.
+        if let store = try? FairUseDirectory(parent: URL(fileURLWithPath: "/private/var/db/wlsaplus-native"),
+                                             subdirectory: ".root-network", name: "fair-use.json", requireRoot: geteuid() == 0) {
+            fairUseStore = store
+            if let saved = try? store.read(), let saved, let loaded = try? FairUseLedger.load(saved) { fairUse = loaded }
         }
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: 19098)
@@ -433,7 +427,7 @@ private final class VPNRuntime {
                 runtime.record("to-proxy-bytes", amount: data.count)
                 if !target.udp { runtime.record("to-proxy-tcp-bytes", amount: data.count) }
                 if data.isEmpty { target.connection.send(data) }
-                else { runtime.acceptUpload(flow, data: data) }
+                else { runtime.acceptUpload(flow, data: data, udp: target.udp) }
                 #if NATIVE_INTEGRATION_TESTS
                 if target.udp { runtime.smokeDNS?.observeQuery(flow: flow, port: target.destinationPort, data: data) }
                 #endif
@@ -450,7 +444,7 @@ private final class VPNRuntime {
         }, eof: { context, flow in
             guard let context else { return }
             let runtime = Unmanaged<VPNRuntime>.fromOpaque(context).takeUnretainedValue()
-            runtime.queue.async { runtime.flows[flow]?.connection.finishWriting() }
+            runtime.queue.async { runtime.noteUploadEOF(flow) }
         })
         engine = wlp_new(callbacks, Unmanaged.passUnretained(self).toOpaque())
         guard let engine else { throw AppError("The native packet engine could not be created.") }
@@ -603,11 +597,16 @@ private final class VPNRuntime {
         while let first = flow.pending.first {
             let capacity = Int(wlp_remote_capacity(engine, id))
             let remainder = first.count - flow.offset
+            let paced: Int
             if flow.udp {
                 guard remainder <= capacity else { abort(id); return }
-            } else if capacity == 0 { break }
-            let paced = pace(flow.udp ? remainder : min(remainder, capacity, 32_768))
-            if paced == 0 { break }
+                paced = pace(remainder, atomic: true)
+                if paced != remainder { break }
+            } else {
+                if capacity == 0 { break }
+                paced = pace(min(remainder, capacity, 32_768))
+                if paced == 0 { break }
+            }
             let count = paced
             let data = Data(first.dropFirst(flow.offset).prefix(count))
             let accepted = data.withUnsafeBytes { wlp_remote_data(engine, id, $0.bindMemory(to: UInt8.self).baseAddress, count) }
@@ -634,9 +633,8 @@ private final class VPNRuntime {
         guard let flow = flows.removeValue(forKey: id) else { return }
         flow.connection.onReady = nil; flow.connection.onData = nil; flow.connection.onError = nil; flow.connection.onClose = nil
         flow.connection.close()
-        uploads.removeAll { $0.id == id }
-        uploadHeld = uploads.reduce(0) { $0 + ($1.data.count - $1.offset) }
-        setTunReadPaused(uploadHeld > 1_000_000)
+        uploads.drop(id: id)
+        setTunReadPaused(uploads.heldBytes > 1_000_000)
     }
 
     private func readPackets() {
@@ -754,36 +752,28 @@ private final class VPNRuntime {
         fairUseDirty = true
         if fairUse.isThrottled(now: now) != before { persistFairUse(force: true) }
     }
-    private func pace(_ requested: Int) -> Int {
-        fairUse.pace(requested: requested, now: Date().timeIntervalSince1970)
+    private func pace(_ requested: Int, atomic: Bool = false) -> Int {
+        fairUse.pace(requested: requested, now: Date().timeIntervalSince1970, atomic: atomic)
     }
-    private func acceptUpload(_ id: UInt64, data: Data) {
+    private func acceptUpload(_ id: UInt64, data: Data, udp: Bool) {
         guard !data.isEmpty, flows[id] != nil else { return }
         noteTunneled(data.count)
-        uploads.append((id: id, data: data, offset: 0))
-        uploadHeld += data.count
-        setTunReadPaused(uploadHeld > 1_000_000)
+        uploads.enqueue(id: id, data: data, udp: udp)
+        setTunReadPaused(uploads.heldBytes > 1_000_000)
         flushUploads()
     }
+    private func noteUploadEOF(_ id: UInt64) {
+        guard flows[id] != nil else { return }
+        if uploads.requestFin(id: id) { flows[id]?.connection.finishWriting() }
+    }
     private func flushUploads() {
-        var index = 0
-        while index < uploads.count {
-            var item = uploads[index]
-            guard flows[item.id] != nil else {
-                uploadHeld -= item.data.count - item.offset
-                uploads.remove(at: index)
-                continue
-            }
-            let remain = item.data.count - item.offset
-            let allowed = pace(remain)
-            if allowed == 0 { break }
-            flows[item.id]?.connection.send(Data(item.data.subdata(in: item.offset..<(item.offset + allowed))))
-            item.offset += allowed
-            uploadHeld -= allowed
-            if item.offset >= item.data.count { uploads.remove(at: index) }
-            else { uploads[index] = item; break }
+        let slices = uploads.flush(ledger: &fairUse, now: Date().timeIntervalSince1970)
+        for slice in slices {
+            guard flows[slice.id] != nil else { continue }
+            flows[slice.id]?.connection.send(slice.bytes)
+            if slice.fin { flows[slice.id]?.connection.finishWriting() }
         }
-        setTunReadPaused(uploadHeld > 1_000_000)
+        setTunReadPaused(uploads.heldBytes > 1_000_000)
     }
     private func setTunReadPaused(_ paused: Bool) {
         guard paused != tunReadSuspended, let readSource else { return }
@@ -791,21 +781,11 @@ private final class VPNRuntime {
         tunReadSuspended = paused
     }
     private func persistFairUse(force: Bool) {
-        guard let url = fairUseURL, fairUseDirty || force else { return }
-        guard force || fairUseDirty else { return }
+        guard fairUseDirty || force, let store = fairUseStore else { return }
         do {
-            try privateWrite(try fairUse.encoded(), to: url)
-            let uid = configuration.parent.uid
-            var gid = uid
-            if let entry = getpwuid(uid) { gid = entry.pointee.pw_gid }
-            _ = url.path.withCString { chown($0, uid, gid) }
+            try store.write(try fairUse.encoded())
             fairUseDirty = false
         } catch { /* A ledger write never disconnects the tunnel. */ }
-    }
-    private static func homeDirectory(_ uid: UInt32) -> String? {
-        guard let entry = getpwuid(uid), let home = entry.pointee.pw_dir else { return nil }
-        let path = String(cString: home)
-        return path.isEmpty ? nil : path
     }
     private func record(_ name: String, amount: Int = 1) {
         #if NATIVE_INTEGRATION_TESTS

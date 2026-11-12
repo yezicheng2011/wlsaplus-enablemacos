@@ -45,8 +45,9 @@ final class ProxyConnection {
     func finishWriting() { queue.async { self.finishWritingOnQueue() } }
     static let queueKey = DispatchSpecificKey<UInt8>()
     func setReadEnabled(_ enabled: Bool) {
-        let apply: () -> Void = { [weak self] in
+        let apply = { [weak self] () -> Void in
             self?.transport?.setReadEnabled(enabled)
+            return
         }
         // Already on the proxy queue: apply before the in-flight read re-arms itself.
         if DispatchQueue.getSpecific(key: Self.queueKey) == 1 { apply() }

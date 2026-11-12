@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Local fair-use accounting for one WLSAPlus installation.
 /// Usage is unlimited for normal personal use. Crossing either rolling window
@@ -15,38 +20,48 @@ struct FairUseLedger: Equatable {
     static let statusUnlimited = "Unlimited for normal personal use."
 
     private var buckets: [Int: Int64] = [:]
+    private var dayTotal: Int64 = 0
+    private var monthTotal: Int64 = 0
+    /// Oldest minute still stored, and the oldest minute included in each rolling total.
+    private var monthFloor = 0
+    private var dayFloor = 0
+    private var aligned = false
     private var tokens = Double(bytesPerSecond)
     private var pacedAt: TimeInterval = 0
     private var limiting = false
 
     mutating func record(bytes: Int64, now: TimeInterval) {
         guard bytes > 0, now.isFinite else { return }
-        let minute = Int((now / 60).rounded(.down))
+        align(to: now)
+        let minute = Self.minute(now)
+        if minute < monthFloor { return }
         let next = (buckets[minute] ?? 0).addingReportingOverflow(bytes)
-        buckets[minute] = next.overflow ? Int64.max : next.partialValue
-        prune(now: now)
+        let stored = next.overflow ? Int64.max : next.partialValue
+        buckets[minute] = stored
+        monthTotal = Self.add(monthTotal, bytes)
+        if minute >= dayFloor { dayTotal = Self.add(dayTotal, bytes) }
     }
 
-    func total(window: TimeInterval, now: TimeInterval) -> Int64 {
+    mutating func total(window: TimeInterval, now: TimeInterval) -> Int64 {
         guard window > 0, now.isFinite else { return 0 }
-        let start = now - window
+        align(to: now)
+        if window == Self.dayWindow { return dayTotal }
+        if window == Self.monthWindow { return monthTotal }
+        let cut = Self.cutoff(now: now, window: window)
         var sum: Int64 = 0
-        for (minute, bytes) in buckets where bytes > 0 {
-            // Keep a minute until it has fully left the window (at most 60 seconds conservative).
-            guard TimeInterval(minute + 1) * 60 > start else { continue }
-            let next = sum.addingReportingOverflow(bytes)
-            sum = next.overflow ? Int64.max : next.partialValue
-        }
+        for (minute, bytes) in buckets where minute >= cut && bytes > 0 { sum = Self.add(sum, bytes) }
         return sum
     }
 
-    func isThrottled(now: TimeInterval) -> Bool {
-        total(window: Self.dayWindow, now: now) > Self.dayBytes || total(window: Self.monthWindow, now: now) > Self.monthBytes
+    mutating func isThrottled(now: TimeInterval) -> Bool {
+        align(to: now)
+        return dayTotal > Self.dayBytes || monthTotal > Self.monthBytes
     }
 
     /// Bytes that may move now. Over the limit this is a shared token bucket for
     /// upload and download together. Under the limit the full request is allowed.
-    mutating func pace(requested: Int, now: TimeInterval) -> Int {
+    /// `atomic` waits until the whole request fits, so a UDP datagram is not split.
+    mutating func pace(requested: Int, now: TimeInterval, atomic: Bool = false) -> Int {
         guard requested > 0, now.isFinite else { return 0 }
         let limited = isThrottled(now: now)
         if !limited {
@@ -62,10 +77,69 @@ struct FairUseLedger: Equatable {
         }
         let elapsed = max(0, now - pacedAt)
         pacedAt = now
-        tokens = min(Double(Self.bytesPerSecond), tokens + elapsed * Double(Self.bytesPerSecond))
+        let cap = Double(Self.bytesPerSecond)
+        tokens = min(cap, tokens + elapsed * cap)
+        if atomic {
+            if requested > Int(cap) {
+                guard tokens >= cap else { return 0 }
+                tokens = 0
+                return requested
+            }
+            guard Int(tokens) >= requested else { return 0 }
+            tokens -= Double(requested)
+            return requested
+        }
         let allowed = min(requested, Int(tokens))
         tokens -= Double(allowed)
         return allowed
+    }
+
+    private static func minute(_ now: TimeInterval) -> Int { Int((now / 60).rounded(.down)) }
+    private static func cutoff(now: TimeInterval, window: TimeInterval) -> Int { Int(((now - window) / 60).rounded(.down)) }
+    private static func add(_ lhs: Int64, _ rhs: Int64) -> Int64 {
+        let next = lhs.addingReportingOverflow(rhs)
+        return next.overflow ? Int64.max : next.partialValue
+    }
+    private static func subtract(_ lhs: Int64, _ rhs: Int64) -> Int64 { lhs > rhs ? lhs - rhs : 0 }
+
+    /// Drop minutes that have left the 30-day window, and stop counting minutes
+    /// that have left the 24-hour window. Only the expired edge is visited.
+    private mutating func align(to now: TimeInterval) {
+        let dayCut = Self.cutoff(now: now, window: Self.dayWindow)
+        let monthCut = Self.cutoff(now: now, window: Self.monthWindow)
+        if !aligned {
+            dayTotal = 0
+            monthTotal = 0
+            var keep: [Int: Int64] = [:]
+            keep.reserveCapacity(buckets.count)
+            for (minute, bytes) in buckets where bytes > 0 && minute >= monthCut {
+                keep[minute] = bytes
+                monthTotal = Self.add(monthTotal, bytes)
+                if minute >= dayCut { dayTotal = Self.add(dayTotal, bytes) }
+            }
+            buckets = keep
+            monthFloor = monthCut
+            dayFloor = dayCut
+            aligned = true
+            return
+        }
+        if monthCut - monthFloor > 180 {
+            aligned = false
+            align(to: now)
+            return
+        }
+        while monthFloor < monthCut {
+            if let bytes = buckets.removeValue(forKey: monthFloor) {
+                monthTotal = Self.subtract(monthTotal, bytes)
+                if monthFloor >= dayFloor { dayTotal = Self.subtract(dayTotal, bytes) }
+            }
+            monthFloor += 1
+        }
+        if dayFloor < monthFloor { dayFloor = monthFloor }
+        while dayFloor < dayCut {
+            if let bytes = buckets[dayFloor] { dayTotal = Self.subtract(dayTotal, bytes) }
+            dayFloor += 1
+        }
     }
 
     func encoded() throws -> Data {
@@ -90,10 +164,58 @@ struct FairUseLedger: Equatable {
         return ledger
     }
 
-    private mutating func prune(now: TimeInterval) {
-        let oldest = Int(((now - Self.monthWindow) / 60).rounded(.down)) - 2
-        buckets = buckets.filter { $0.key >= oldest && $0.value > 0 }
+}
+
+/// Upload queue shared by the helper. UDP leaves only as a whole datagram.
+/// A TCP FIN is forwarded only after that flow's queued bytes have been sent.
+struct UploadScheduler {
+    struct Item: Equatable {
+        var id: UInt64
+        var data: Data
+        var offset: Int
+        var udp: Bool
+        var fin: Bool
     }
+    struct Slice: Equatable {
+        var id: UInt64
+        var bytes: Data
+        var fin: Bool
+    }
+    private(set) var items: [Item] = []
+
+    mutating func enqueue(id: UInt64, data: Data, udp: Bool) {
+        guard !data.isEmpty else { return }
+        items.append(Item(id: id, data: data, offset: 0, udp: udp, fin: false))
+    }
+
+    /// False while this flow still has queued payload. The caller must not send FIN yet.
+    mutating func requestFin(id: UInt64) -> Bool {
+        guard let index = items.lastIndex(where: { $0.id == id && $0.offset < $0.data.count }) else { return true }
+        items[index].fin = true
+        return false
+    }
+
+    mutating func flush(ledger: inout FairUseLedger, now: TimeInterval) -> [Slice] {
+        var sent: [Slice] = []
+        while !items.isEmpty {
+            let index = 0
+            var item = items[index]
+            let remain = item.data.count - item.offset
+            let allowed = ledger.pace(requested: remain, now: now, atomic: item.udp)
+            if allowed == 0 { break }
+            if item.udp, allowed != remain { break }
+            let bytes = item.data.subdata(in: item.offset..<(item.offset + allowed))
+            item.offset += allowed
+            let done = item.offset >= item.data.count
+            sent.append(Slice(id: item.id, bytes: bytes, fin: done && item.fin))
+            if done { items.remove(at: index) }
+            else { items[index] = item; break }
+        }
+        return sent
+    }
+
+    mutating func drop(id: UInt64) { items.removeAll { $0.id == id } }
+    var heldBytes: Int { items.reduce(0) { $0 + ($1.data.count - $1.offset) } }
 }
 
 /// What to do with bytes already read from a proxy while the tunnel is draining.
@@ -121,16 +243,96 @@ enum DownloadAccept: Equatable {
     static func shouldResume(buffered: Int) -> Bool { buffered < lowWater }
 }
 
-enum FairUsePath {
-    static func expected(home: String) -> String {
-        URL(fileURLWithPath: home).appendingPathComponent("Library/Application Support/WLSAPlus/fair-use.json").standardizedFileURL.path
+/// Root-owned ledger directory. Every component is opened with O_NOFOLLOW and
+/// bytes are written through a directory file descriptor, never a user path + chown.
+final class FairUseDirectory {
+    private let directory: Int32
+    private let name: String
+    init(parent: URL, subdirectory: String, name: String, requireRoot: Bool) throws {
+        guard parent.isFileURL, parent.path.hasPrefix("/"),
+              Self.component(subdirectory), Self.component(name), name != subdirectory else {
+            throw AppError("Invalid fair-use ledger location.")
+        }
+        self.name = name
+        var current = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        guard current >= 0 else { throw AppError("Cannot open the fair-use directory.") }
+        do {
+            for component in parent.pathComponents where component != "/" {
+                guard Self.component(component) else { throw AppError("Invalid fair-use ledger location.") }
+                var next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                if next < 0 && errno == ENOENT {
+                    guard mkdirat(current, component, 0o700) == 0 else { throw AppError("Cannot create fair-use storage.") }
+                    next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                }
+                guard next >= 0 else { throw AppError("The fair-use path contains an inaccessible directory or symbolic link.") }
+                close(current); current = next
+            }
+            if mkdirat(current, subdirectory, 0o700) != 0 && errno != EEXIST { throw AppError("Cannot create fair-use storage.") }
+            guard fsync(current) == 0 else { throw AppError("Cannot sync fair-use storage.") }
+            let secured = openat(current, subdirectory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            guard secured >= 0 else { throw AppError("Cannot open fair-use storage.") }
+            close(current); current = secured
+            var metadata = stat()
+            guard fstat(current, &metadata) == 0, metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
+                  metadata.st_mode & 0o777 == 0o700, !requireRoot || metadata.st_uid == 0 else {
+                throw AppError("Fair-use storage is not a private directory.")
+            }
+            directory = current
+        } catch { close(current); throw error }
     }
-    static func validate(_ path: String, home: String) throws -> URL {
-        guard !path.isEmpty, !path.contains("\0"), !home.isEmpty, !home.contains("\0"),
-              !path.contains(".."), !home.contains("..") else { throw AppError("Invalid fair-use ledger path.") }
-        let given = URL(fileURLWithPath: path).standardizedFileURL
-        let expected = URL(fileURLWithPath: expected(home: home))
-        guard given.path == expected.path else { throw AppError("Invalid fair-use ledger path.") }
-        return given
+    deinit { close(directory) }
+    func read() throws -> Data? {
+        let fd = openat(directory, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        if fd < 0 && errno == ENOENT { return nil }
+        guard fd >= 0 else { throw AppError("Cannot open the fair-use ledger.") }
+        defer { close(fd) }
+        var metadata = stat()
+        guard fstat(fd, &metadata) == 0, metadata.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG),
+              metadata.st_nlink == 1, metadata.st_size >= 0, metadata.st_size <= 2_000_000 else {
+            throw AppError("Unsafe fair-use ledger.")
+        }
+        var bytes = [UInt8](repeating: 0, count: Int(metadata.st_size))
+        var offset = 0
+        while offset < bytes.count {
+            let count = bytes.withUnsafeMutableBytes { raw in Self.systemRead(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset) }
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { throw AppError("Cannot read the fair-use ledger.") }
+            offset += count
+        }
+        return Data(bytes)
+    }
+    func write(_ data: Data) throws {
+        let temporary = ".\(name).\(UUID().uuidString).tmp"
+        guard Self.component(temporary) else { throw AppError("Cannot create a fair-use checkpoint.") }
+        let fd = openat(directory, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
+        guard fd >= 0 else { throw AppError("Cannot create a fair-use checkpoint.") }
+        defer { close(fd); _ = unlinkat(directory, temporary, 0) }
+        var offset = 0
+        while offset < data.count {
+            let count = data.withUnsafeBytes { bytes in Self.systemWrite(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset) }
+            if count < 0 && errno == EINTR { continue }
+            guard count > 0 else { throw AppError("Cannot write a fair-use checkpoint.") }
+            offset += count
+        }
+        guard fsync(fd) == 0, renameat(directory, temporary, directory, name) == 0, fsync(directory) == 0 else {
+            throw AppError("Cannot commit the fair-use ledger.")
+        }
+    }
+    private static func component(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".." && !value.contains("\0") && !value.contains("/") && value.utf8.count < 128
+    }
+    private static func systemRead(_ fd: Int32, _ pointer: UnsafeMutableRawPointer, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        Darwin.read(fd, pointer, count)
+        #else
+        Glibc.read(fd, pointer, count)
+        #endif
+    }
+    private static func systemWrite(_ fd: Int32, _ pointer: UnsafeRawPointer, _ count: Int) -> Int {
+        #if canImport(Darwin)
+        Darwin.write(fd, pointer, count)
+        #else
+        Glibc.write(fd, pointer, count)
+        #endif
     }
 }
