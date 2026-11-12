@@ -42,6 +42,19 @@ jobs:
           xcrun assetutil --info "$resources/Assets.car" > "$RUNNER_TEMP/icon-assets.json"
           grep -q '"AppIcon"' "$RUNNER_TEMP/icon-assets.json"
           grep -Eo '"(Appearance|Name|AssetType)" *: *"[^"]*"' "$RUNNER_TEMP/icon-assets.json" | sort | uniq -c || true
+      - name: Assistant model process
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: |
+          set -euo pipefail
+          python3 Tests/wlm_fixture.py "$RUNNER_TEMP/wlm-fixture"
+          printf '%s\n' '{"system":"hi","user":"he","maxTokens":4}' '{"bad":true}' \
+            | out/WLSAPlus.app/Contents/MacOS/WLSAPlus --llm-worker "$RUNNER_TEMP/wlm-fixture/tiny.gguf" > "$RUNNER_TEMP/worker.txt"
+          cat "$RUNNER_TEMP/worker.txt"
+          [[ "$(sed -n 1p "$RUNNER_TEMP/worker.txt")" == '{"ready":true}' ]]
+          sed -n 2p "$RUNNER_TEMP/worker.txt" | grep -q '"text"'
+          sed -n 3p "$RUNNER_TEMP/worker.txt" | grep -q '"error"'
+          echo 'not a model' > "$RUNNER_TEMP/bad.gguf"
+          out/WLSAPlus.app/Contents/MacOS/WLSAPlus --llm-worker "$RUNNER_TEMP/bad.gguf" < /dev/null | grep -q '"error"'
       - name: Startup health check
         working-directory: ${{ steps.location.outputs.dir }}
         run: |

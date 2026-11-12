@@ -79,3 +79,23 @@ See `PROVENANCE.md` for the provenance of new code and assets. An independent re
 ## License
 
 This native stack (including the Packet / VPN protocol implementation) is licensed under the **Apache License 2.0**; see `LICENSE` at the repository root. The implementation is original Swift/C and contains no source code or binaries from mihomo / clash / sing-box / gVisor or other third-party cores.
+
+## On-device assistant
+
+On Apple silicon Macs with 16 GB of memory or more, the Assistant page replaces the Progress page. It answers questions in Chinese or English about class times, grades, rooms, teachers, assignments and attendance. There is no way to switch back to the tables on these Macs, so the assistant can also list all grades, assignments and attendance records. Intel Macs and Macs with less memory keep the original Progress page and download nothing.
+
+- **Answers come from data, not from the model.** `Resources/assistant.js` finds the records a question is about in the synced PowerSchool data and writes the answer itself, in the language of the question. The model is only asked to reword that answer, and its wording is used only if every course, value and number survives (`acceptRephrase`). Questions unrelated to school data get a general model reply, labelled as such.
+- **Model.** Qwen2.5-1.5B-Instruct, `q4_k_m` GGUF (1.1 GB, Apache-2.0). It is not in this repository or in the app bundle. On first launch the app downloads it in the background from the model's own repositories (ModelScope, then hf-mirror.com, then huggingface.co), with resume, and checks a pinned SHA-256 before use. Settings shows progress and can pause the download. Until the model is installed the page still answers from the data, without rewording. The model turns on the next time WLSAPlus is opened.
+- **Runtime.** `Sources/LLM/wlm.c` is an original CPU runtime for Qwen2-style GGUF models (F32/F16/Q5_0/Q8_0/Q4_K/Q6_K tensors held in half precision, byte-pair tokenizer, key/value cache, greedy ChatML generation) with no dependencies beyond libc, Accelerate and Grand Central Dispatch. The model runs in a separate `WLSAPlus --llm-worker` process. Once the model is installed, that process starts with the app and keeps the model in memory (about 3 GB) for as long as WLSAPlus runs, and WLSAPlus registers itself once to open at login; turning off Settings → Open at login afterwards is respected. Questions and school data stay on the Mac.
+
+`scripts/test.sh` checks the runtime against a synthetic model whose expected output comes from an independent Python forward pass (`Tests/wlm_fixture.py`) and against truncated and corrupted files; `Tests/assistant.test.mjs` covers the answer logic. `Tests/wlm_tool.c` runs a real model file for manual checks:
+
+```sh
+.build/wlm-tool model.gguf chat "You are a helpful assistant." "你好" 64
+```
+
+Speed and memory use with the real model have not been measured on a Mac; the loaded model is expected to use about 3 GB.
+
+## Interface language
+
+Settings → Language switches the interface between English and Chinese, or follows the system. `Resources/i18n.js` translates interface text as it is rendered; course names, to-dos and other user data are never translated. Error messages produced by the native layer are still English.

@@ -18,8 +18,12 @@ Protocol and platform references:
 - [PKWARE ZIP format specification](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT)
 - [Apple Network framework](https://developer.apple.com/documentation/network)
 - [Apple CryptoKit](https://developer.apple.com/documentation/cryptokit)
+- [GGUF model file format](https://github.com/ggml-org/ggml/blob/master/docs/gguf.md)
+- [Qwen2.5 model card and technical report](https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct)
 - [LevelDB file-format descriptions](https://github.com/google/leveldb/blob/main/doc/table_format.md)
 - [Chromium local-storage format description](https://www.cclsolutionsgroup.com/post/chromium-session-storage-and-local-storage)
+
+The on-device model runtime (`Sources/LLM`) is original C written from the public GGUF layout, the published quantization block formats and the Qwen2 architecture; it incorporates no inference-library source. During development its tokenizer and outputs were compared with llama.cpp running the same model file, which is not distributed or linked. No model file is stored in this repository.
 
 Test tools are used only during development and are not distributed with the app: C/Swift compilers, Node's built-in test/crypto modules, the Python standard library, Chromium, and the system cryptography APIs used by the standalone protocol tests. Real subscription and node test inputs are kept in private temporary files in the workspace and are not included in this directory or in release artifacts.
 
