@@ -245,27 +245,67 @@ enum DownloadAccept: Equatable {
 
 /// Root-owned ledger directory. Every component is opened with O_NOFOLLOW and
 /// bytes are written through a directory file descriptor, never a user path + chown.
+/// macOS publishes `/var` and `/tmp` as symlinks to `private/var` and `private/tmp`.
+/// Foundation then strips a leading `/private` from a resolved file URL, so the
+/// temporary directory CI walks still begins with `/var`. O_NOFOLLOW rejects that
+/// symlink. When the walk root's entry is exactly that relative system alias, the
+/// walk continues at the already-existing `private/<name>` directory and does not
+/// follow the link. A different target, a symlink below the walk root, or a swap
+/// after the directory descriptor is open is still rejected.
 final class FairUseDirectory {
     private let directory: Int32
     private let name: String
-    init(parent: URL, subdirectory: String, name: String, requireRoot: Bool) throws {
+    /// `anchor` is the walk root. Production leaves it nil and starts at `/`.
+    /// Tests pass a private directory that reproduces the macOS `/var` alias.
+    init(parent: URL, subdirectory: String, name: String, requireRoot: Bool, anchor: URL? = nil) throws {
         guard parent.isFileURL, parent.path.hasPrefix("/"),
               Self.component(subdirectory), Self.component(name), name != subdirectory else {
             throw AppError("Invalid fair-use ledger location.")
         }
+        if let anchor {
+            guard anchor.isFileURL, anchor.path.hasPrefix("/") else { throw AppError("Invalid fair-use ledger location.") }
+        }
         self.name = name
-        var current = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+        let parentComponents = parent.pathComponents.filter { $0 != "/" }
+        let anchorComponents = anchor?.pathComponents.filter { $0 != "/" } ?? []
+        guard parentComponents.starts(with: anchorComponents) else { throw AppError("Invalid fair-use ledger location.") }
+        var components = Array(parentComponents.dropFirst(anchorComponents.count))
+        var allowCreate = [Bool](repeating: true, count: components.count)
+        let start = anchor?.path ?? "/"
+        let startFlags = anchor == nil ? (O_RDONLY | O_DIRECTORY | O_CLOEXEC) : (O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        var current = open(start, startFlags)
         guard current >= 0 else { throw AppError("Cannot open the fair-use directory.") }
+        var rootInfo = stat()
+        guard fstat(current, &rootInfo) == 0 else {
+            close(current)
+            throw AppError("Cannot open the fair-use directory.")
+        }
         do {
-            for component in parent.pathComponents where component != "/" {
+            let flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+            var index = 0
+            while index < components.count {
+                let component = components[index]
                 guard Self.component(component) else { throw AppError("Invalid fair-use ledger location.") }
-                var next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-                if next < 0 && errno == ENOENT {
-                    guard mkdirat(current, component, 0o700) == 0 else { throw AppError("Cannot create fair-use storage.") }
-                    next = openat(current, component, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+                var next = openat(current, component, flags)
+                if next < 0 {
+                    let openError = errno
+                    if openError == ENOENT && allowCreate[index] {
+                        guard mkdirat(current, component, 0o700) == 0 else { throw AppError("Cannot create fair-use storage.") }
+                        next = openat(current, component, flags)
+                    } else if openError == ELOOP || openError == ENOTDIR,
+                              let alias = Self.systemRootAlias(directory: current, root: rootInfo, component: component),
+                              Self.aliasIsRealDirectory(directory: current, components: alias) {
+                        // Linux returns ENOTDIR for O_DIRECTORY|O_NOFOLLOW on a symlink.
+                        // Darwin's open(2) returns ELOOP for O_NOFOLLOW. Either may be the
+                        // system alias; any other target still fails below.
+                        components.replaceSubrange(index..<(index + 1), with: alias)
+                        allowCreate.replaceSubrange(index..<(index + 1), with: [Bool](repeating: false, count: alias.count))
+                        continue
+                    }
                 }
                 guard next >= 0 else { throw AppError("The fair-use path contains an inaccessible directory or symbolic link.") }
                 close(current); current = next
+                index += 1
             }
             if mkdirat(current, subdirectory, 0o700) != 0 && errno != EEXIST { throw AppError("Cannot create fair-use storage.") }
             guard fsync(current) == 0 else { throw AppError("Cannot sync fair-use storage.") }
@@ -317,6 +357,51 @@ final class FairUseDirectory {
         guard fsync(fd) == 0, renameat(directory, temporary, directory, name) == 0, fsync(directory) == 0 else {
             throw AppError("Cannot commit the fair-use ledger.")
         }
+    }
+    /// The walk root may contain macOS's `/var` or `/tmp` symlink. Only the exact
+    /// relative text `private/var` or `private/tmp` is accepted, and only while
+    /// the directory descriptor is still that root. The returned names are opened
+    /// afterwards with O_NOFOLLOW; the symlink is not followed.
+    private static func systemRootAlias(directory: Int32, root: stat, component: String) -> [String]? {
+        var here = stat()
+        guard fstat(directory, &here) == 0, here.st_ino == root.st_ino, here.st_dev == root.st_dev else { return nil }
+        switch component {
+        case "var" where linkText(directory: directory, component: component) == "private/var":
+            return ["private", "var"]
+        case "tmp" where linkText(directory: directory, component: component) == "private/tmp":
+            return ["private", "tmp"]
+        default:
+            return nil
+        }
+    }
+    private static func linkText(directory: Int32, component: String) -> String? {
+        let capacity = 64
+        var buffer = [CChar](repeating: 0, count: capacity)
+        let length = component.withCString { name in
+            buffer.withUnsafeMutableBufferPointer { raw -> Int in
+                guard let base = raw.baseAddress else { return -1 }
+                return readlinkat(directory, name, base, raw.count)
+            }
+        }
+        guard length > 0, length < capacity else { return nil }
+        let bytes = buffer.prefix(length).map { UInt8(bitPattern: $0) }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+    /// True only when every alias component already exists and is a real directory.
+    /// Missing components are not created, so a matching link text cannot mkdir `/private`.
+    private static func aliasIsRealDirectory(directory: Int32, components: [String]) -> Bool {
+        guard !components.isEmpty else { return false }
+        var cursor = directory
+        var opened: [Int32] = []
+        defer { for fd in opened { close(fd) } }
+        let flags = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC
+        for name in components {
+            let fd = openat(cursor, name, flags)
+            if fd < 0 { return false }
+            opened.append(fd)
+            cursor = fd
+        }
+        return true
     }
     private static func component(_ value: String) -> Bool {
         !value.isEmpty && value != "." && value != ".." && !value.contains("\0") && !value.contains("/") && value.utf8.count < 128
