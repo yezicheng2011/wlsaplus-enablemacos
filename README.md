@@ -5,8 +5,6 @@
 > **Final feature release: 99.99.99.0**
 >
 > This is the final feature release of the project. There will be no further software or feature updates. Only the VPN will continue to be maintained. Those VPN maintenance versions will be numbered **99.99.99.1**, **99.99.99.2**, and so on.
->
-> 这是本项目的最终功能版本 **99.99.99.0**：之后不再更新软件功能，只继续维护 VPN，维护版本为 99.99.99.1、99.99.99.2，依此类推。
 
 > **VPN is unlimited for normal personal use.** Fair use is counted only on this Mac, not as a server quota. If one installation transfers more than **50 GB in a rolling 24 hours** or **500 GB in a rolling 30 days**, the tunnel slows to about **5 Mbps** for upload and download combined until the window drops back under the limit. The VPN stays connected; fair use never disconnects it. Normal classwork, browsing, and video are expected. The limit is there so a node is not used as a download box.
 
