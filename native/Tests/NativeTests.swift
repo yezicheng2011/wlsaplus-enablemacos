@@ -227,6 +227,7 @@ import Foundation
         try expect(replaced == Data("new".utf8), "the new ledger is the replaced directory entry")
         _ = symlink("/tmp", directory.appendingPathComponent("linked").path)
         try rejects("symlink fair-use directory") { _ = try FairUseDirectory(parent: directory, subdirectory: "linked", name: "fair-use.json", requireRoot: false) }
+        try fairUseRootAliasTests(under: directory)
         try LegacyStoreTests.run()
         #if NETWORK_PLAN_TESTS
         try NetworkPlan.runReadOnlyVerificationTests()
@@ -245,6 +246,90 @@ import Foundation
         }
         try rejects("subscription too long") { _ = try validateClashSubscriptionURL("https://example.test/" + String(repeating: "a", count: 2100)) }
         print("Native core: \(assertions) assertions passed")
+    }
+    /// Reproduces the macOS CI layout under a private root: `var` -> `private/var`
+    /// and `tmp` -> `private/tmp`. Linux `/tmp` has neither symlink, so the crash
+    /// only showed up once a macos-26 runner executed this binary.
+    static func fairUseRootAliasTests(under directory: URL) throws {
+        func makeRoot(_ name: String) throws -> URL {
+            let root = directory.appendingPathComponent(name, isDirectory: true)
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            return root
+        }
+        func link(_ target: String, at path: String) throws {
+            if symlink(target, path) != 0 { throw AppError("FAIL: could not create fair-use alias fixture") }
+        }
+        let anchor = try makeRoot("macos-root")
+        let realLeaf = anchor.path + "/private/var/folders/T/ledger"
+        try FileManager.default.createDirectory(at: URL(fileURLWithPath: realLeaf, isDirectory: true), withIntermediateDirectories: true)
+        try link("private/var", at: anchor.path + "/var")
+        let viaAlias = URL(fileURLWithPath: anchor.path + "/var/folders/T/ledger", isDirectory: true)
+        try expect(viaAlias.path.hasPrefix(anchor.path + "/var/"), "alias fixture opens through the var symlink prefix")
+        let aliasStore: FairUseDirectory
+        do {
+            aliasStore = try FairUseDirectory(parent: viaAlias, subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: anchor)
+        } catch {
+            throw AppError("FAIL: system root alias ledger: \(error.localizedDescription)")
+        }
+        try aliasStore.write(Data("before".utf8))
+        var linkInfo = stat()
+        try expect(lstat(anchor.path + "/var", &linkInfo) == 0 && linkInfo.st_mode & mode_t(S_IFMT) == mode_t(S_IFLNK), "the var alias stays a symlink")
+        if unlink(anchor.path + "/var") != 0 { throw AppError("FAIL: could not swap the var alias") }
+        let decoy = URL(fileURLWithPath: anchor.path + "/decoy", isDirectory: true)
+        try FileManager.default.createDirectory(at: decoy, withIntermediateDirectories: true)
+        try link("decoy", at: anchor.path + "/var")
+        try aliasStore.write(Data("after".utf8))
+        let realFile = URL(fileURLWithPath: realLeaf + "/secure/fair-use.json")
+        let realBytes = try Data(contentsOf: realFile)
+        try expect(realBytes == Data("after".utf8), "a swapped root alias does not redirect the open ledger")
+        try expect(!FileManager.default.fileExists(atPath: decoy.path + "/folders/T/ledger/secure/fair-use.json"), "a swapped root alias receives no ledger bytes")
+        let outside = URL(fileURLWithPath: anchor.path + "/outside")
+        try Data("secret".utf8).write(to: outside)
+        try FileManager.default.removeItem(at: realFile)
+        if symlink(outside.path, realFile.path) != 0 { throw AppError("FAIL: could not swap the alias ledger file") }
+        try aliasStore.write(Data("fresh".utf8))
+        let outsideBytes = try Data(contentsOf: outside)
+        let fresh = try aliasStore.read()
+        try expect(outsideBytes == Data("secret".utf8), "the alias ledger does not follow a swapped file symlink")
+        try expect(fresh == Data("fresh".utf8), "the alias ledger replaces the directory entry")
+
+        let temporary = try makeRoot("macos-tmp")
+        try FileManager.default.createDirectory(at: URL(fileURLWithPath: temporary.path + "/private/tmp/ledger", isDirectory: true), withIntermediateDirectories: true)
+        try link("private/tmp", at: temporary.path + "/tmp")
+        let viaTmp = URL(fileURLWithPath: temporary.path + "/tmp/ledger", isDirectory: true)
+        let tmpStore = try FairUseDirectory(parent: viaTmp, subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: temporary)
+        try tmpStore.write(Data("tmp".utf8))
+        let tmpBytes = try Data(contentsOf: URL(fileURLWithPath: temporary.path + "/private/tmp/ledger/secure/fair-use.json"))
+        try expect(tmpBytes == Data("tmp".utf8), "tmp root alias writes private/tmp")
+
+        for target in ["elsewhere", "/private/var", "private/tmp", "private/var/extra", "../private/var", "./private/var", "private//var"] {
+            let root = try makeRoot("bad-" + UUID().uuidString)
+            try link(target, at: root.path + "/var")
+            let parent = URL(fileURLWithPath: root.path + "/var/child", isDirectory: true)
+            try rejects("var symlink \(target)") {
+                _ = try FairUseDirectory(parent: parent, subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: root)
+            }
+            try expect(!FileManager.default.fileExists(atPath: root.path + "/private"), "a rejected var alias does not create private")
+        }
+        let missing = try makeRoot("missing-private")
+        try link("private/var", at: missing.path + "/var")
+        try rejects("var alias without private") {
+            _ = try FairUseDirectory(parent: URL(fileURLWithPath: missing.path + "/var/child", isDirectory: true), subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: missing)
+        }
+        try expect(!FileManager.default.fileExists(atPath: missing.path + "/private"), "a missing private directory is not created")
+        let sneaky = try makeRoot("sneaky-private")
+        try FileManager.default.createDirectory(at: URL(fileURLWithPath: sneaky.path + "/real/var/leaf", isDirectory: true), withIntermediateDirectories: true)
+        try link("real", at: sneaky.path + "/private")
+        try link("private/var", at: sneaky.path + "/var")
+        try rejects("private component is a symlink") {
+            _ = try FairUseDirectory(parent: URL(fileURLWithPath: sneaky.path + "/var/leaf", isDirectory: true), subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: sneaky)
+        }
+        let nested = try makeRoot("nested-alias")
+        try FileManager.default.createDirectory(at: URL(fileURLWithPath: nested.path + "/mid/private/var/leaf", isDirectory: true), withIntermediateDirectories: true)
+        try link("private/var", at: nested.path + "/mid/var")
+        try rejects("var alias below the walk root") {
+            _ = try FairUseDirectory(parent: URL(fileURLWithPath: nested.path + "/mid/var/leaf", isDirectory: true), subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: nested)
+        }
     }
     static func trySubscription() throws -> [[String: Any]] {
         try SubscriptionImporter.nodes("proxies:\n  - {name: 'SS, one', server: proxy.example.test, port: 443, type: ss, cipher: aes-256-gcm, password: 'a:b', udp: true}\n  - {name: VMess, server: proxy.example.test, port: 80, type: vmess, uuid: 11111111-1111-1111-1111-111111111111, alterId: 1, udp: true}\n  - {name: Trojan, server: proxy.example.test, port: 443, type: trojan, password: secret, sni: proxy.example.test, skip-cert-verify: true, udp: true}\nrules:\n  - MATCH,Trojan\n")
