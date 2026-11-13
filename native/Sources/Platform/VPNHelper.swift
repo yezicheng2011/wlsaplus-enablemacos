@@ -335,7 +335,8 @@ private final class VPNRuntime {
         if let store = try? FairUseDirectory(parent: URL(fileURLWithPath: "/private/var/db/wlsaplus-native"),
                                              subdirectory: ".root-network", name: "fair-use.json", requireRoot: geteuid() == 0) {
             fairUseStore = store
-            if let saved = try? store.read(), let saved, let loaded = try? FairUseLedger.load(saved) { fairUse = loaded }
+            // read() returns Data?. try? already flattens that to one optional.
+            if let saved = try? store.read(), let loaded = try? FairUseLedger.load(saved) { fairUse = loaded }
         }
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: 19098)
