@@ -211,11 +211,6 @@ import Foundation
         let directory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("wlsaplus-fair-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
-        #if os(macOS)
-        // Foundation strips /private after resolving symlinks, so this path still
-        // begins with the /var symlink. Opening it must not raise at the top level.
-        try expect(directory.path.hasPrefix("/var/"), "macOS temporary ledger path keeps the /var symlink prefix")
-        #endif
         let store = try FairUseDirectory(parent: directory, subdirectory: "secure", name: "fair-use.json", requireRoot: false)
         try store.write(Data("one".utf8))
         let firstRead = try store.read()
@@ -269,6 +264,7 @@ import Foundation
         try FileManager.default.createDirectory(at: URL(fileURLWithPath: realLeaf, isDirectory: true), withIntermediateDirectories: true)
         try link("private/var", at: anchor.path + "/var")
         let viaAlias = URL(fileURLWithPath: anchor.path + "/var/folders/T/ledger", isDirectory: true)
+        try expect(viaAlias.path.hasPrefix(anchor.path + "/var/"), "alias fixture opens through the var symlink prefix")
         let aliasStore: FairUseDirectory
         do {
             aliasStore = try FairUseDirectory(parent: viaAlias, subdirectory: "secure", name: "fair-use.json", requireRoot: false, anchor: anchor)
