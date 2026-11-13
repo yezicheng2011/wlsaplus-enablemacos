@@ -6,7 +6,7 @@ The UI keeps the Home, Schedule, Progress, Forum, Tools and Settings entry point
 
 ## Build and check
 
-**End users should install by building from source** (see the root README and `release-kit/wlsaplusmac版本说明书.md`). On a Mac with the Xcode Command Line Tools installed:
+**End users should install by building from source** (see the root README and the user manual, `release-kit/wlsaplusmac版本说明书.md`). On a Mac with the Xcode Command Line Tools installed:
 
 ```sh
 # Recommended: build 99.99.99.0 directly (no need to run test.sh just to install the app)
@@ -22,7 +22,7 @@ WLSAPLUS_VERSION=99.99.99.0 bash scripts/build.sh
 open out/WLSAPlus.app
 ```
 
-You can also double-click `release-kit/编译wlsaplus.command` in the repository. The resulting app contains both arm64 and x86_64. It is ad-hoc signed by default (others will usually see "developer cannot be verified"; right-click → Open works); official builds for the update channel must use the existing fixed certificate and update key.
+You can also double-click `release-kit/编译wlsaplus.command` (one-click build script) in the repository. The resulting app contains both arm64 and x86_64. It is ad-hoc signed by default (others will usually see "developer cannot be verified"; right-click → Open works); official builds for the update channel must use the existing fixed certificate and update key.
 
 ### App icon
 
@@ -93,6 +93,8 @@ On Apple silicon Macs with 16 GB of memory or more, the Assistant page replaces 
 ```sh
 .build/wlm-tool model.gguf chat "You are a helpful assistant." "你好" 64
 ```
+
+`你好` is the sample prompt and means “hello”.
 
 Speed and memory use with the real model have not been measured on a Mac; the loaded model is expected to use about 3 GB.
 

@@ -4,9 +4,7 @@
 
 > **Final feature release: 99.99.99.0**
 >
-> This is the final feature release of the project. There will be no further software or feature updates. Only the VPN will continue to be maintained. Those VPN maintenance versions will be numbered **99.99.99.1**, **99.99.99.2**, and so on.
->
-> 这是本项目的最终功能版本 **99.99.99.0**：之后不再更新软件功能，只继续维护 VPN，维护版本为 99.99.99.1、99.99.99.2，依此类推。
+> This is the final feature release of the project, **99.99.99.0**. There will be no further software or feature updates. Only the VPN will continue to be maintained. Those VPN maintenance versions will be numbered **99.99.99.1**, **99.99.99.2**, and so on.
 
 > **VPN is unlimited for normal personal use.** Fair use is counted only on this Mac, not as a server quota. If one installation transfers more than **50 GB in a rolling 24 hours** or **500 GB in a rolling 30 days**, the tunnel slows to about **5 Mbps** for upload and download combined until the window drops back under the limit. The VPN stays connected; fair use never disconnects it. Normal classwork, browsing, and video are expected. The limit is there so a node is not used as a download box.
 
@@ -121,7 +119,7 @@ xattr -cr /Applications/WLSAPlus.app
 open /Applications/WLSAPlus.app
 ```
 
-Even easier: after cloning, double-click [`release-kit/编译wlsaplus.command`](release-kit/编译wlsaplus.command) in the repository (it checks the command line tools → builds → opens the app). See the [manual](release-kit/wlsaplusmac版本说明书.md) for full step-by-step instructions.
+Even easier: after cloning, double-click [`release-kit/编译wlsaplus.command`](release-kit/编译wlsaplus.command) (one-click build script) in the repository (it checks the command line tools → builds → opens the app). See the [manual](release-kit/wlsaplusmac版本说明书.md) for full step-by-step instructions.
 
 ### "Developer cannot be verified / not safe" on first launch (Gatekeeper)
 
@@ -186,4 +184,4 @@ The entire repository is licensed under the **Apache License 2.0**; see [`LICENS
 
 For the origin and rights boundaries of the native codebase, see [`native/PROVENANCE.md`](native/PROVENANCE.md). Historical 1.x Electron/Angular files and the former third-party VPN core binary have been retired and removed from this repository.
 
-© daniel.ye叶子诚
+© daniel.ye (Ye Zicheng)
