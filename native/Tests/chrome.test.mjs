@@ -58,7 +58,11 @@ test('splash, footer, and dialog show the exact attribution and the AppIcon', ()
 test('release app is signed with the pinned identity, the pkg is not, and updates stay on zip', () => {
   const build = read('scripts/build.sh');
   const release = read('scripts/release.sh');
-  assert.match(build, /\/usr\/bin\/pkgbuild --component "\$app" --install-location \/Applications/);
+  // Non-relocatable bundle: otherwise Installer upgrades another copy (e.g. out/WLSAPlus.app) instead of /Applications.
+  assert.match(build, /\/usr\/bin\/pkgbuild --analyze --root "\$pkg_root" "\$pkg_plist"/);
+  assert.match(build, /PlistBuddy -c 'Set :0:BundleIsRelocatable false' "\$pkg_plist"/);
+  assert.match(build, /\/usr\/bin\/pkgbuild --root "\$pkg_root" --component-plist "\$pkg_plist" --install-location \/Applications/);
+  assert.equal(build.includes('pkgbuild --component "$app"'), false);
   assert.match(build, /\/usr\/bin\/productbuild --sign "\$pkg_identity"/);
   assert.match(build, /\/usr\/bin\/productbuild --package "\$pkg_component" "\$pkg_out"/);
   assert.match(build, /out\/WLSAPlus-\$\{version\}-macOS-universal\.pkg/);

@@ -119,7 +119,17 @@ COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParen
 pkg_stage="$(mktemp -d "${TMPDIR:-/tmp}/wlsaplus-pkg.XXXXXX")"
 pkg_component="$pkg_stage/component.pkg"
 pkg_out="out/WLSAPlus-${version}-macOS-universal.pkg"
-/usr/bin/pkgbuild --component "$app" --install-location /Applications \
+# The bundle must be NON-relocatable. By default Installer treats an app bundle as relocatable: it looks
+# for any other copy with the same bundle ID (a source build in out/, one in Downloads, ...) and upgrades
+# that copy in place, reporting success while nothing lands in /Applications.
+pkg_root="$pkg_stage/root"
+pkg_plist="$pkg_stage/component.plist"
+mkdir -p "$pkg_root"
+COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn "$app" "$pkg_root/WLSAPlus.app"
+/usr/bin/codesign --verify --deep --strict "$pkg_root/WLSAPlus.app"
+/usr/bin/pkgbuild --analyze --root "$pkg_root" "$pkg_plist"
+/usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$pkg_plist"
+/usr/bin/pkgbuild --root "$pkg_root" --component-plist "$pkg_plist" --install-location /Applications \
   --identifier cn.org.wlsash.wlsaplus --version "$version" --ownership recommended \
   "$pkg_component"
 pkg_identity="${WLSAPLUS_PKG_SIGN_IDENTITY:-}"
