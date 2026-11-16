@@ -110,21 +110,25 @@ echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64 || { echo "exp
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$app" out/WLSAPlus-native-review.zip
 "$app/Contents/MacOS/WLSAPlus" --validate-archive out/WLSAPlus-native-review.zip
 # Official installer. Built from the sealed .app; Contents are not edited after codesign.
-# Ad-hoc "-" is not a package identity. An unset identity writes an unsigned pkg for local development.
-# A release run exports WLSAPLUS_SIGN_IDENTITY and productbuild signs with that leaf.
+# The .app inside is signed with WLSAPLUS_SIGN_IDENTITY (the pinned self-signed certificate that the
+# updater checks). The .pkg itself must NOT be signed with that certificate: macOS Installer only
+# trusts installer signatures that chain to Apple, so a pkg signed with a self-signed certificate
+# fails on other Macs with "The package ... is untrusted". An unsigned pkg installs normally after
+# the usual Gatekeeper confirmation (Open Anyway). Set WLSAPLUS_PKG_SIGN_IDENTITY only to an
+# Apple-issued "Developer ID Installer" identity.
 pkg_stage="$(mktemp -d "${TMPDIR:-/tmp}/wlsaplus-pkg.XXXXXX")"
 pkg_component="$pkg_stage/component.pkg"
 pkg_out="out/WLSAPlus-${version}-macOS-universal.pkg"
 /usr/bin/pkgbuild --component "$app" --install-location /Applications \
   --identifier cn.org.wlsash.wlsaplus --version "$version" --ownership recommended \
   "$pkg_component"
-pkg_identity="${WLSAPLUS_SIGN_IDENTITY:-}"
+pkg_identity="${WLSAPLUS_PKG_SIGN_IDENTITY:-}"
 if [[ -n "$pkg_identity" && "$pkg_identity" != "-" ]]; then
   /usr/bin/productbuild --sign "$pkg_identity" --package "$pkg_component" "$pkg_out"
   /usr/sbin/pkgutil --check-signature "$pkg_out"
 else
-  echo 'WLSAPLUS_SIGN_IDENTITY is unset; writing an unsigned .pkg for local development.'
-  cp "$pkg_component" "$pkg_out"
+  echo 'WLSAPLUS_PKG_SIGN_IDENTITY is unset; writing an unsigned .pkg (the app inside is still signed).'
+  /usr/bin/productbuild --package "$pkg_component" "$pkg_out"
 fi
 rm -rf "$pkg_stage"
 /usr/bin/codesign --verify --deep --strict "$app"

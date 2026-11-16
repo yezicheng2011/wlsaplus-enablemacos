@@ -83,6 +83,16 @@ jobs:
           # Clash HTTPS subscription for live smoke only (same secret as release suggestion).
           WLSAPLUS_DEFAULT_SUBSCRIPTION_URL: ${{ secrets.WLSAPLUS_DEFAULT_SUBSCRIPTION_URL }}
         run: bash scripts/vpn-smoke.sh
+      - name: Installer accepts the pkg without a trust error
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        working-directory: ${{ steps.location.outputs.dir }}
+        run: |
+          set -euo pipefail
+          pkg="$(ls out/WLSAPlus-*-macOS-universal.pkg)"
+          # No -allowUntrusted: a pkg signed with an untrusted certificate fails here with "untrusted".
+          sudo installer -pkg "$pkg" -target /
+          test -d /Applications/WLSAPlus.app
+          /usr/bin/codesign --verify --deep --strict /Applications/WLSAPlus.app
       - uses: actions/upload-artifact@v4
         if: always()
         with:

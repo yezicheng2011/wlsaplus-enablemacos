@@ -121,7 +121,7 @@ jobs:
           fi
           python3 - <<'PY'
           import os,pathlib
-          pathlib.Path('release-notes.txt').write_text('WLSAPlus '+os.environ['VERSION']+' for macOS 13+, Intel and Apple silicon.\n\nThe official download is WLSAPlus-'+os.environ['VERSION']+'-macOS-universal.pkg. It installs WLSAPlus.app into /Applications. The package is signed with the project certificate; Gatekeeper may say the developer cannot be verified. Open it from the Finder context menu.\n\nAlso includes per-architecture update zips, a universal zip, a disk image, and signed update-manifest.json. In-app updates still use the zip packages.\n')
+          pathlib.Path('release-notes.txt').write_text('WLSAPlus '+os.environ['VERSION']+' for macOS 13+, Intel and Apple silicon.\n\nThe official download is WLSAPlus-'+os.environ['VERSION']+'-macOS-universal.pkg. It installs WLSAPlus.app into /Applications. The package itself is not signed or notarized, so macOS asks you to confirm it once: on macOS 15 or later open System Settings > Privacy & Security and click Open Anyway; on macOS 13 or 14 right-click the package and choose Open. WLSAPlus.app inside is signed with the project certificate.\n\nAlso includes per-architecture update zips, a universal zip, a disk image, and signed update-manifest.json. In-app updates still use the zip packages.\n')
           PY
           if [[ "$BETA" == true ]]; then mode=(--prerelease --latest=false); else mode=(--draft); fi
           gh release create "$TAG" artifacts/* --target "$GITHUB_SHA" --title "WLSAPlus $VERSION" --notes-file release-notes.txt "${mode[@]}"
