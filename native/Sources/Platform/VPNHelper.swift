@@ -378,9 +378,13 @@ private final class VPNRuntime {
         stage = "resolve"
         Task {
             do {
-                let addresses = try Self.resolve(configuration.node.server, port: configuration.node.port)
+                let resolved = try Self.resolve(configuration.node.server, port: configuration.node.port)
+                // Fake-IP answers from Clash-style TUN DNS can never reach the real server.
+                let addresses = resolved.filter { !ConnectDiagnostics.isFakeIP($0) }
+                guard resolved.isEmpty || !addresses.isEmpty else { throw AppError(ConnectDiagnostics.fakeIPMessage) }
                 queue.async { if !self.stopping, !self.stopped { self.stage = "proxy-probe" } }
                 var successful: (ProxyNode, Double)?
+                var failures = [Error]()
                 for address in addresses.prefix(4) {
                     var attempt = configuration.node
                     attempt.server = address
@@ -390,9 +394,9 @@ private final class VPNRuntime {
                         attempt.wsHost = "\(host):\(configuration.node.port)"
                     }
                     do { successful = (attempt, try await VPNProxyProbe.test(node: attempt, timeout: 10)); break }
-                    catch { continue }
+                    catch { failures.append(error); continue }
                 }
-                guard let successful else { throw AppError("No resolved VPN endpoint passed the authenticated HTTP proxy probe.") }
+                guard let successful else { throw AppError(ConnectDiagnostics.probeFailure(failures)) }
                 queue.async {
                     guard !self.stopping, !self.stopped else { return }
                     do {
@@ -479,7 +483,10 @@ private final class VPNRuntime {
                         self.connectedAt = ISO8601DateFormatter().string(from: Date())
                     } catch { self.failAndRecover(error, reason: "active-plan") }
                 }
-            } catch { queue.async { self.failAndRecover(AppError("Traffic through the native tunnel could not be verified: \(error.localizedDescription)"), reason: "routed-fetch") } }
+            } catch {
+                let detail = error.localizedDescription
+                queue.async { self.failAndRecover(AppError(ConnectDiagnostics.tunnelVerification(detail, nodeAllowsUDP: self.node.udp == true)), reason: "routed-fetch") }
+            }
         }
     }
 
