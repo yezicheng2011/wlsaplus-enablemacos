@@ -110,21 +110,35 @@ echo "$archs" | grep -qw arm64 && echo "$archs" | grep -qw x86_64 || { echo "exp
 COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn -c -k --keepParent "$app" out/WLSAPlus-native-review.zip
 "$app/Contents/MacOS/WLSAPlus" --validate-archive out/WLSAPlus-native-review.zip
 # Official installer. Built from the sealed .app; Contents are not edited after codesign.
-# Ad-hoc "-" is not a package identity. An unset identity writes an unsigned pkg for local development.
-# A release run exports WLSAPLUS_SIGN_IDENTITY and productbuild signs with that leaf.
+# The .app inside is signed with WLSAPLUS_SIGN_IDENTITY (the pinned self-signed certificate that the
+# updater checks). The .pkg itself must NOT be signed with that certificate: macOS Installer only
+# trusts installer signatures that chain to Apple, so a pkg signed with a self-signed certificate
+# fails on other Macs with "The package ... is untrusted". An unsigned pkg installs normally after
+# the usual Gatekeeper confirmation (Open Anyway). Set WLSAPLUS_PKG_SIGN_IDENTITY only to an
+# Apple-issued "Developer ID Installer" identity.
 pkg_stage="$(mktemp -d "${TMPDIR:-/tmp}/wlsaplus-pkg.XXXXXX")"
 pkg_component="$pkg_stage/component.pkg"
 pkg_out="out/WLSAPlus-${version}-macOS-universal.pkg"
-/usr/bin/pkgbuild --component "$app" --install-location /Applications \
+# The bundle must be NON-relocatable. By default Installer treats an app bundle as relocatable: it looks
+# for any other copy with the same bundle ID (a source build in out/, one in Downloads, ...) and upgrades
+# that copy in place, reporting success while nothing lands in /Applications.
+pkg_root="$pkg_stage/root"
+pkg_plist="$pkg_stage/component.plist"
+mkdir -p "$pkg_root"
+COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn "$app" "$pkg_root/WLSAPlus.app"
+/usr/bin/codesign --verify --deep --strict "$pkg_root/WLSAPlus.app"
+/usr/bin/pkgbuild --analyze --root "$pkg_root" "$pkg_plist"
+/usr/libexec/PlistBuddy -c 'Set :0:BundleIsRelocatable false' "$pkg_plist"
+/usr/bin/pkgbuild --root "$pkg_root" --component-plist "$pkg_plist" --install-location /Applications \
   --identifier cn.org.wlsash.wlsaplus --version "$version" --ownership recommended \
   "$pkg_component"
-pkg_identity="${WLSAPLUS_SIGN_IDENTITY:-}"
+pkg_identity="${WLSAPLUS_PKG_SIGN_IDENTITY:-}"
 if [[ -n "$pkg_identity" && "$pkg_identity" != "-" ]]; then
   /usr/bin/productbuild --sign "$pkg_identity" --package "$pkg_component" "$pkg_out"
   /usr/sbin/pkgutil --check-signature "$pkg_out"
 else
-  echo 'WLSAPLUS_SIGN_IDENTITY is unset; writing an unsigned .pkg for local development.'
-  cp "$pkg_component" "$pkg_out"
+  echo 'WLSAPLUS_PKG_SIGN_IDENTITY is unset; writing an unsigned .pkg (the app inside is still signed).'
+  /usr/bin/productbuild --package "$pkg_component" "$pkg_out"
 fi
 rm -rf "$pkg_stage"
 /usr/bin/codesign --verify --deep --strict "$app"

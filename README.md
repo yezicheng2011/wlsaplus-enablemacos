@@ -62,11 +62,11 @@ WLSAPlus brings your PowerSchool schedule, grades, attendance, class reminders, 
 
 ## Official download
 
-The official installer for **99.99.99.0** is `WLSAPlus-99.99.99.0-macOS-universal.pkg`. It installs `WLSAPlus.app` into `/Applications` on Intel and Apple silicon. Open the package from the Finder (right-click → Open). It is signed with this project's certificate, so Gatekeeper may say the developer cannot be verified; that is expected and is not a "damaged" package. In-app updates still download a zip, not the pkg. A disk image is also published. Classmates can keep building from source with the commands below.
+The official installer for **99.99.99.0** is `WLSAPlus-99.99.99.0-macOS-universal.pkg`. It installs `WLSAPlus.app` into `/Applications` on Intel and Apple silicon. The package itself is **not signed or notarized** (no Apple Developer account), so macOS asks you to confirm it once: on macOS 15 or later, double-click it, then open **System Settings → Privacy & Security** and click **Open Anyway**; on macOS 13 or 14, right-click the package → Open. `WLSAPlus.app` inside is signed with this project's certificate, which in-app updates rely on. The package is deliberately not signed with that self-signed certificate, because macOS Installer rejects such a package with "The package … is untrusted". If an older copy of the pkg already shows that error, install the disk image instead, or run `sudo installer -allowUntrusted -pkg WLSAPlus-99.99.99.0-macOS-universal.pkg -target /`. In-app updates still download a zip, not the pkg. A disk image is also published. Classmates can keep building from source with the commands below.
 
 ## Build from source
 
-**Building from source is still the path that needs no download.** No Apple Developer account is needed, and no Node / npm / Homebrew for a normal build. `scripts/build.sh` also writes `out/WLSAPlus-99.99.99.0-macOS-universal.pkg`. That local package is unsigned unless `WLSAPLUS_SIGN_IDENTITY` is set. A release run signs it with the pinned identity `764D4389AAFA0C50311E39C17DDFA1981ABEF86C`.
+**Building from source is still the path that needs no download.** No Apple Developer account is needed, and no Node / npm / Homebrew for a normal build. `scripts/build.sh` also writes `out/WLSAPlus-99.99.99.0-macOS-universal.pkg`. That package is unsigned unless `WLSAPLUS_PKG_SIGN_IDENTITY` is set to an Apple-issued "Developer ID Installer" identity. A release run signs only the app inside it, with the pinned identity `764D4389AAFA0C50311E39C17DDFA1981ABEF86C`.
 
 ### Requirements
 
