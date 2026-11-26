@@ -45,9 +45,14 @@ COPYFILE_DISABLE=1 /usr/bin/ditto --norsrc --noextattr --noqtn "$app" .build/dmg
 /usr/bin/codesign --verify --deep --strict .build/dmg/WLSAPlus.app
 ln -sfn /Applications .build/dmg/Applications
 /usr/bin/hdiutil create -volname WLSAPlus -srcfolder .build/dmg -ov -format UDZO "release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.dmg"
-# Official download. build.sh already signed this pkg from the sealed universal app.
-cp "out/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.pkg" "release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.pkg"
-/usr/sbin/pkgutil --check-signature "release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.pkg"
+# Official download. build.sh built this pkg from the sealed universal app. It is deliberately not
+# signed with the self-signed app certificate: Installer rejects that as "untrusted" on other Macs.
+pkg="release-assets/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.pkg"
+cp "out/WLSAPlus-$WLSAPLUS_VERSION-macOS-universal.pkg" "$pkg"
+pkg_check="$(mktemp -d "${TMPDIR:-/tmp}/wlsaplus-pkgcheck.XXXXXX")"
+/usr/sbin/pkgutil --expand "$pkg" "$pkg_check/expanded"
+[[ -f "$pkg_check/expanded/Distribution" ]] || { echo 'The release pkg is not a product archive.' >&2; exit 1; }
+rm -rf "$pkg_check"
 /usr/bin/codesign --verify --deep --strict "$app"
 "$app/Contents/MacOS/WLSAPlus" --make-manifest --version "$WLSAPLUS_VERSION" --tag "v$WLSAPLUS_VERSION" --out release-assets/update-manifest.json \
   --file "arm64=release-assets/WLSAPlus-$WLSAPLUS_VERSION-mac-arm64.zip" \

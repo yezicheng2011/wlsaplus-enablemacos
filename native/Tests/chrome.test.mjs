@@ -55,15 +55,25 @@ test('splash, footer, and dialog show the exact attribution and the AppIcon', ()
   assert.ok(png.equals(icon), 'in-app logo is the 1024px AppIcon bitmap');
 });
 
-test('release pkg is signed with the pinned identity and updates stay on zip', () => {
+test('release app is signed with the pinned identity, the pkg is not, and updates stay on zip', () => {
   const build = read('scripts/build.sh');
   const release = read('scripts/release.sh');
-  assert.match(build, /\/usr\/bin\/pkgbuild --component "\$app" --install-location \/Applications/);
+  // Non-relocatable bundle: otherwise Installer upgrades another copy (e.g. out/WLSAPlus.app) instead of /Applications.
+  assert.match(build, /\/usr\/bin\/pkgbuild --analyze --root "\$pkg_root" "\$pkg_plist"/);
+  assert.match(build, /PlistBuddy -c 'Set :0:BundleIsRelocatable false' "\$pkg_plist"/);
+  assert.match(build, /\/usr\/bin\/pkgbuild --root "\$pkg_root" --component-plist "\$pkg_plist" --install-location \/Applications/);
+  assert.equal(build.includes('pkgbuild --component "$app"'), false);
   assert.match(build, /\/usr\/bin\/productbuild --sign "\$pkg_identity"/);
+  assert.match(build, /\/usr\/bin\/productbuild --package "\$pkg_component" "\$pkg_out"/);
   assert.match(build, /out\/WLSAPlus-\$\{version\}-macOS-universal\.pkg/);
-  assert.match(build, /WLSAPLUS_SIGN_IDENTITY is unset/);
+  assert.match(build, /WLSAPLUS_PKG_SIGN_IDENTITY is unset/);
   assert.equal(build.includes('productbuild --sign "-"'), false);
   assert.equal(build.includes("productbuild --sign '-'"), false);
+  // The self-signed app certificate must never sign the pkg: Installer reports "untrusted" for it.
+  assert.match(build, /pkg_identity="\$\{WLSAPLUS_PKG_SIGN_IDENTITY:-\}"/);
+  assert.equal(/pkg_identity="\$\{WLSAPLUS_SIGN_IDENTITY/.test(build), false);
+  assert.match(build, /identity="\$\{WLSAPLUS_SIGN_IDENTITY:--\}"/);
+  assert.equal(release.includes('WLSAPLUS_PKG_SIGN_IDENTITY'), false);
   assert.match(release, /WLSAPLUS_SIGN_IDENTITY='764D4389AAFA0C50311E39C17DDFA1981ABEF86C'/);
   assert.match(release, /cannot be ad-hoc signed/);
   assert.match(release, /WLSAPlus-\$WLSAPLUS_VERSION-macOS-universal\.pkg/);

@@ -44,6 +44,17 @@ import Foundation
         try expect(trojan?["skipCertVerify"] as? Bool == true, "skip-cert-verify mapped for Clash Trojan")
         let nested = try SubscriptionImporter.nodes("proxies:\n  - name: a\n    type: vmess\n    server: example.test\n    port: 443\n    uuid: 11111111-1111-1111-1111-111111111111\n    ws-opts:\n      path: /websocket\n      headers:\n        Host: proxy.example.test\nrules:\n  - MATCH,a\n")
         try expect(nested.first?["wsHost"] as? String == "proxy.example.test", "block nested Host")
+        try expect(ConnectDiagnostics.isFakeIP("198.18.0.5"), "Clash fake-IP answer is recognized")
+        try expect(ConnectDiagnostics.isFakeIP("198.19.255.1"), "upper half of 198.18.0.0/15 is recognized")
+        try expect(!ConnectDiagnostics.isFakeIP("198.20.0.1") && !ConnectDiagnostics.isFakeIP("198.17.0.1"), "neighbours of the fake-IP range are real")
+        try expect(!ConnectDiagnostics.isFakeIP("203.0.113.9") && !ConnectDiagnostics.isFakeIP("2001:db8::1") && !ConnectDiagnostics.isFakeIP("198.18.0"), "other text is not a fake IP")
+        let probeReasons = ConnectDiagnostics.probeFailure([AppError("The proxy connection timed out"), AppError("The proxy connection timed out"), AppError("The proxy response failed authentication")])
+        try expect(probeReasons.hasPrefix(ConnectDiagnostics.probeBase), "probe failure keeps its summary")
+        try expect(probeReasons.contains("failed authentication"), "probe failure names the reason")
+        try expect(probeReasons.components(separatedBy: "timed out").count == 2, "a repeated probe reason is listed once")
+        try expect(ConnectDiagnostics.probeFailure([]) == ConnectDiagnostics.probeBase, "no collected reason keeps the plain summary")
+        try expect(ConnectDiagnostics.tunnelVerification("offline", nodeAllowsUDP: true) == "Traffic through the native tunnel could not be verified: offline", "verification message without a hint")
+        try expect(ConnectDiagnostics.tunnelVerification("offline", nodeAllowsUDP: false).contains("udp: true"), "node without UDP gets the DNS hint")
         for s in ["proxies:\n  - {name: x, server: x, port: 0, type: ss}", "proxies:\n  - {name: x, name: y, port: 1, server: x, type: ss}", "proxies:\n  - &x {name: x}", "proxies:\n  - {name: x, server: x, port: 1, type: ss, plugin: external}"] {
             try rejects("invalid subscription") { _ = try SubscriptionImporter.nodes(s) }
         }
