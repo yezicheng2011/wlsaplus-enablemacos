@@ -14,6 +14,11 @@ struct SubscriptionImporter {
             throw AppError("Subscription must contain a proxies node list.")
         }
         var result: [[String: Any]] = [], block: [(Int, String)] = []
+        // YAML lets a block sequence sit at the same column as its parent key
+        // ("proxies:" then "- name: ..." at column 0). PyYAML, mihomo and many
+        // subscription generators write lists that way, so a column-0 "- " item
+        // continues the list when the list itself started at column 0.
+        var listIndent: Int?
         func finish() throws {
             if block.isEmpty { return }
             var index = 0
@@ -24,9 +29,11 @@ struct SubscriptionImporter {
             let stripped = raw.trimmingCharacters(in: .whitespaces)
             if stripped.isEmpty || stripped.hasPrefix("#") { continue }
             let indent = raw.prefix(while: { $0 == " " }).count
-            if indent == 0 { break }
+            let isItem = stripped.hasPrefix("- ")
+            if listIndent == nil { listIndent = indent }
+            if indent == 0 && !(isItem && listIndent == 0) { break }
             guard !raw.contains("\t") else { throw AppError("Tabs are not supported in subscription indentation.") }
-            if stripped.hasPrefix("- ") {
+            if isItem {
                 try finish()
                 let item = String(stripped.dropFirst(2))
                 if item.hasPrefix("{") {

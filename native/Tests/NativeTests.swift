@@ -44,6 +44,10 @@ import Foundation
         try expect(trojan?["skipCertVerify"] as? Bool == true, "skip-cert-verify mapped for Clash Trojan")
         let nested = try SubscriptionImporter.nodes("proxies:\n  - name: a\n    type: vmess\n    server: example.test\n    port: 443\n    uuid: 11111111-1111-1111-1111-111111111111\n    ws-opts:\n      path: /websocket\n      headers:\n        Host: proxy.example.test\nrules:\n  - MATCH,a\n")
         try expect(nested.first?["wsHost"] as? String == "proxy.example.test", "block nested Host")
+        // PyYAML/mihomo style: the list items sit at the same column as "proxies:".
+        let indentless = try SubscriptionImporter.nodes("mixed-port: 7890\nproxies:\n- name: a\n  type: trojan\n  server: example.test\n  port: 443\n  password: secret\n  network: ws\n  ws-opts:\n    path: /ws\n    headers:\n      Host: proxy.example.test\n  smux:\n    enabled: true\n- name: b\n  type: vless\n  server: example.test\n  port: 443\n  uuid: 11111111-1111-1111-1111-111111111111\n  flow: xtls-rprx-vision\n  reality-opts:\n    public-key: abc\n- {name: c, type: ss, server: example.test, port: 8388, cipher: aes-256-gcm, password: p}\nproxy-groups:\n- name: auto\n  type: select\n  proxies:\n  - a\nrules:\n- MATCH,auto\n")
+        try expect(indentless.map { $0["name"] as? String ?? "" } == ["a", "b", "c"], "column-0 proxies list is imported and ends at the next top-level key")
+        try expect(indentless.first?["wsHost"] as? String == "proxy.example.test" && indentless.first?["wsPath"] as? String == "/ws", "column-0 item keeps nested ws-opts")
         try expect(ConnectDiagnostics.isFakeIP("198.18.0.5"), "Clash fake-IP answer is recognized")
         try expect(ConnectDiagnostics.isFakeIP("198.19.255.1"), "upper half of 198.18.0.0/15 is recognized")
         try expect(!ConnectDiagnostics.isFakeIP("198.20.0.1") && !ConnectDiagnostics.isFakeIP("198.17.0.1"), "neighbours of the fake-IP range are real")
